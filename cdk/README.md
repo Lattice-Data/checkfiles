@@ -22,9 +22,9 @@ If you are not sure this is what you should be running, you should not be runnin
 
 ## Installation
 
-1. Install AWS CDK (version 2.189.0):
+1. Install AWS CDK (version 2.1007.0):
    ```bash
-   npm install -g aws-cdk@2.189.0
+   npm install -g aws-cdk@2.1007.0
    ```
 
 2. Create and activate Python virtual environment:

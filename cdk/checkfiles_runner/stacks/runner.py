@@ -401,17 +401,6 @@ class RunCheckfilesStepFunction(Stack):
             state_machine
         )
 
-        Rule(
-            self,
-            'RunCheckfilesStateMachineCronRule',
-            schedule=Schedule.cron(
-                hour='4',
-                minute='20',
-            ),
-            targets=[
-                state_machine_target
-            ]
-        )
 
     def make_slack_notification_task(self, task_id: str) -> EventBridgePutEvents:
         task = EventBridgePutEvents(
