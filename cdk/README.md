@@ -52,7 +52,7 @@ The CDK stack includes:
 To deploy the stack:
 
 ```bash
-cdk deploy RunCheckfilesStepFunctionSandbox --profile lattice-prod
+cdk deploy RunCheckfilesStepFunctionProduction --profile lattice-prod
 ```
 
 ### Deployment Options
@@ -98,7 +98,7 @@ Common issues and solutions:
 To remove the stack:
 
 ```bash
-cdk destroy RunCheckfilesStepFunctionSandbox --profile lattice-prod
+cdk destroy RunCheckfilesStepFunctionProduction --profile lattice-prod
 ```
 
 ## Support
