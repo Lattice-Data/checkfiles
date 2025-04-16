@@ -14,9 +14,6 @@ logging.basicConfig(
 )
 
 
-PENDING_FILES_SEARCH = '/search/?type=SequenceAlignmentFile&lab.title=Benjamin+Humphreys%2C+WashU'
-
-
 def get_secret_arn():
     return os.environ['PORTAL_SECRETS_ARN']
 
@@ -67,7 +64,7 @@ def get_number_of_pending_files(secret: Dict[str, str], backend_uri: str) -> int
     headers = {'accept': 'application/json'}
     auth = get_auth(secret)
     response = requests.get(
-        backend_uri + PENDING_FILES_SEARCH,
+        backend_uri,
         headers=headers,
         auth=auth,
     )
@@ -84,7 +81,8 @@ def files_are_pending(pending_files):
 
 
 def check_pending_files(event, context):
-    backend_uri = get_backend_uri()
+    query = event.get("query")
+    backend_uri = get_backend_uri() + query
     secret_arn = get_secret_arn()
     secret = get_secret(secret_arn)
     logging.info(f'looking for pending files in backend: {backend_uri}')

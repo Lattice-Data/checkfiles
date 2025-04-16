@@ -136,6 +136,9 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'CheckPendingFiles',
             lambda_function=check_pending_files_lambda,
+            payload=TaskInput.from_object({
+                "query.$": "$.query"
+            }),
             payload_response_only=True,
             result_selector={
                 'files_pending.$': '$.files_pending',
