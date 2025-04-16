@@ -81,7 +81,7 @@ class RunCheckfilesStepFunction(Stack):
                     'data': {
                         'slack': {
                             'text': JsonPath.format(
-                                ':rocket: *EC2 Instance checkfiles {} Started* | Beginning processing for {} pending files.',
+                                ':rocket: *EC2 Instance checkfiles {} started* | Preparing for {} pending files.',
                                 JsonPath.string_at('$.instance_name_suffix'),
                                 JsonPath.string_at('$.number_of_files_pending')
                             )
@@ -107,7 +107,8 @@ class RunCheckfilesStepFunction(Stack):
                     'data': {
                         'slack': {
                             'text': JsonPath.format(
-                                ':white_check_mark: *CheckFilesStarted* | Found {} files in upload_status: pending',
+                                ':white_check_mark: *Checkfiles {} in progress* | Found {} files in upload_status: pending',
+                                JsonPath.string_at('$.instance_name_suffix'),
                                 JsonPath.string_at('$.number_of_files_pending')
                             )
                         }
@@ -132,7 +133,8 @@ class RunCheckfilesStepFunction(Stack):
                     'data': {
                         'slack': {
                             'text': JsonPath.format(
-                                ':white_check_mark: *CheckFilesFinished* | command_status: {} | See log group checkfiles-log for details',
+                                ':white_check_mark: *Checkfiles {} finished*  | command_status: {} | See log group checkfiles-log for details',
+                                JsonPath.string_at('$.instance_name_suffix'),
                                 JsonPath.string_at(
                                     '$.checkfiles_command_status')
                             )
