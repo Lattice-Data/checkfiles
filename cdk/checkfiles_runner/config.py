@@ -7,5 +7,5 @@ config = {
     'instance_profile_arn_production': 'arn:aws:iam::585222078325:instance-profile/checkfiles-instance',
     'instance_security_group_production': 'sg-0da14ac5025210cf9',
     'backend_uri_production': 'https://www.lattice-data.org',
-    'checkfiles_tag_production': 'v22',
+    'checkfiles_tag_production': 'cdk-step-function',
 }
