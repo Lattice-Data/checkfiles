@@ -51,9 +51,10 @@ def get_instance_type_from_number_of_files_pending(number_of_files_pending: int)
 
 def create_checkfiles_instance(event, context):
     base_instance_name = os.environ.get("INSTANCE_NAME", "default-instance")
-    suffix = event.get("instance_name_suffix", "")
-    instance_name = f"{base_instance_name}-{suffix}" if suffix else base_instance_name
-    number_of_files_pending = event['number_of_files_pending']
+    instance_name_suffix = event.get("instance_name_suffix", "")
+    number_of_files_pending = event.get('number_of_files_pending')
+    iterator = event.get('iterator', {})
+    instance_name = f"{base_instance_name}-{instance_name_suffix}" if instance_name_suffix else base_instance_name
     ami_id = get_ami_id()
     instance_type = get_instance_type_from_number_of_files_pending(
         number_of_files_pending)
@@ -115,5 +116,7 @@ def create_checkfiles_instance(event, context):
 
     return {'instance_id': instance.id,
             'instance_type': instance.instance_type,
-            'iterator': iterator
+            'iterator': iterator,
+            'instance_name_suffix': instance_name_suffix,
+            'number_of_files_pending': number_of_files_pending
             }

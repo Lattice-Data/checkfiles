@@ -139,6 +139,7 @@ class RunCheckfilesStepFunction(Stack):
                     }
                 },
                 'instance_id_list.$': '$.instance_id_list',
+                'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
             },
         )
@@ -164,12 +165,14 @@ class RunCheckfilesStepFunction(Stack):
             'CheckPendingFiles',
             lambda_function=check_pending_files_lambda,
             payload=TaskInput.from_object({
-                "query.$": "$.query"
+                "query.$": "$.query",
+                "instance_name_suffix.$": "$.instance_name_suffix",
             }),
             payload_response_only=True,
             result_selector={
                 'files_pending.$': '$.files_pending',
-                'number_of_files_pending.$': '$.number_of_files_pending'
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
             }
         )
 
@@ -250,12 +253,16 @@ class RunCheckfilesStepFunction(Stack):
             lambda_function=create_checkfiles_instance_lambda,
             payload=TaskInput.from_object({
                 "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
+                "iterator.$": "$.iterator"
             }),
             payload_response_only=True,
             result_selector={
                 'instance_id.$': '$.instance_id',
                 'instance_type.$': '$.instance_type',
-                'iterator.$': '$.iterator'
+                'iterator.$': '$.iterator',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'number_of_files_pending.$': '$.number_of_files_pending'
             }
         )
 
