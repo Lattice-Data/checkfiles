@@ -61,7 +61,7 @@ def create_checkfiles_instance(event, context):
     # clone checkfiles code and build the virtual environment
     user_data = f'''#!/bin/bash
     cd /home/ubuntu
-    git clone https://github.com/IGVF-DACC/checkfiles.git --branch {tag} --single-branch
+    git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
     cd checkfiles
     python3 -m venv venv
     source venv/bin/activate
