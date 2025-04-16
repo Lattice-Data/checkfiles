@@ -220,6 +220,9 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'CreateCheckfilesInstance',
             lambda_function=create_checkfiles_instance_lambda,
+            payload=TaskInput.from_object({
+                "instance_name_suffix.$": "$.instance_name_suffix",
+            }),
             payload_response_only=True,
             result_selector={
                 'instance_id.$': '$.instance_id',
