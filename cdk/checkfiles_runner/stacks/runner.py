@@ -68,6 +68,30 @@ class RunCheckfilesStepFunction(Stack):
             secret_complete_arn=self.props.portal_secrets_arn
         )
 
+        make_checkfiles_started_message = Pass(
+            self,
+            'MakeCheckfilesStartedMessage',
+            parameters={
+                'detailType': 'CheckfilesStarted',
+                'source': 'RunCheckfilesStepFunction',
+                'detail': {
+                    'metadata': {
+                        'includes_slack_notification': False
+                    },
+                    'data': {
+                        'slack': {
+                            'text': JsonPath.format(
+                                ':rocket: *Checkfiles Started* | Beginning processing for {} pending files.',
+                                JsonPath.string_at('$.number_of_files_pending')
+                            )
+                        }
+                    }
+                },
+                'files_pending.$': '$.files_pending',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+            },
+        )
+
         make_pending_files_checked_message = Pass(
             self,
             'MakePendingFilesCheckedMessage',
@@ -348,6 +372,8 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
+        send_checkfiles_started_notification = self.make_slack_notification_task(
+            'SendCheckfilesStartedSlackNotification')
         send_pending_files_slack_notification = self.make_slack_notification_task(
             'SendPendingFilesCheckedSlackNotification')
         send_checkfiles_finished_slack_notification = self.make_slack_notification_task(
@@ -363,7 +389,11 @@ class RunCheckfilesStepFunction(Stack):
                 Condition.boolean_equals(
                     '$.files_pending', False), no_files_to_process
             ).otherwise(
-                initialize_counter.next(
+                make_checkfiles_started_message.next(
+                    send_checkfiles_started_notification
+                ).next(                                     
+                    initialize_counter
+                ).next(
                     create_checkfiles_instance
                 ).next(
                     wait_instance_ssm_registration
