@@ -89,6 +89,7 @@ class RunCheckfilesStepFunction(Stack):
                 },
                 'files_pending.$': '$.files_pending',
                 'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
             },
         )
 
@@ -113,6 +114,7 @@ class RunCheckfilesStepFunction(Stack):
                 },
                 'files_pending.$': '$.files_pending',
                 'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
             },
         )
 
@@ -136,7 +138,8 @@ class RunCheckfilesStepFunction(Stack):
                         }
                     }
                 },
-                'instance_id_list.$': '$.instance_id_list'
+                'instance_id_list.$': '$.instance_id_list',
+                'instance_name_suffix.$': '$.instance_name_suffix',
             },
         )
 
