@@ -15,6 +15,7 @@ def get_checkfiles_command_status(event, context):
     instance_id = event['instance_id']
     command_id = event['command_id']
     iterator = event['iterator']
+    instance_name_suffix = event.get('instance_name_suffix')
 
     result = ssm.get_command_invocation(
         CommandId=command_id,
