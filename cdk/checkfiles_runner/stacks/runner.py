@@ -177,6 +177,7 @@ class RunCheckfilesStepFunction(Stack):
             parameters={
                 'iterator': {'index': 0, 'step': 1, 'count': 23},
                 'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
             }
         )
 
