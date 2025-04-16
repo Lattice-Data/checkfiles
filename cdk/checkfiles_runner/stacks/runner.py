@@ -76,12 +76,13 @@ class RunCheckfilesStepFunction(Stack):
                 'source': 'RunCheckfilesStepFunction',
                 'detail': {
                     'metadata': {
-                        'includes_slack_notification': False
+                        'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
                             'text': JsonPath.format(
-                                ':rocket: *Checkfiles Started* | Beginning processing for {} pending files.',
+                                ':rocket: *EC2 Instance checkfiles {} Started* | Beginning processing for {} pending files.',
+                                JsonPath.string_at('$.instance_name_suffix'),
                                 JsonPath.string_at('$.number_of_files_pending')
                             )
                         }
@@ -101,7 +102,7 @@ class RunCheckfilesStepFunction(Stack):
                 'source': 'RunCheckfilesStepFunction',
                 'detail': {
                     'metadata': {
-                        'includes_slack_notification': False
+                        'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
@@ -126,7 +127,7 @@ class RunCheckfilesStepFunction(Stack):
                 'source': 'RunCheckfilesStepFunction',
                 'detail': {
                     'metadata': {
-                        'includes_slack_notification': False
+                        'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
