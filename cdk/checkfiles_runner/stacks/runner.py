@@ -401,11 +401,14 @@ class RunCheckfilesStepFunction(Stack):
             'GetCheckfilesCommandStatus',
             lambda_function=get_checkfiles_command_status_lambda,
             payload=TaskInput.from_object({
+                "command_id.$": "$.command_id",
+                "instance_id.$": "$.instance_id",
                 "instance_name_suffix.$": "$.instance_name_suffix",
                 "number_of_files_pending.$": "$.number_of_files_pending",
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
-                "update.$": "$.update"
+                "update.$": "$.update",
+                "iterator.$": "$.iterator" 
             }),
             payload_response_only=True,
             result_selector={
@@ -418,7 +421,8 @@ class RunCheckfilesStepFunction(Stack):
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                'update.$': '$.update'
+                'update.$': '$.update',
+                'instance_name_suffix.$': '$.instance_name_suffix'
             }
         )
 
