@@ -222,6 +222,7 @@ class RunCheckfilesStepFunction(Stack):
             payload=TaskInput.from_object({
                 "iterator.$": "$.iterator",
                 "instance_id.$": "$.instance_id",
+                "command_id.$": "$.command_id",
                 "instance_name_suffix.$": "$.instance_name_suffix",
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
@@ -231,6 +232,8 @@ class RunCheckfilesStepFunction(Stack):
             payload_response_only=True,
             result_selector={
                 'iterator.$': '$.iterator',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
