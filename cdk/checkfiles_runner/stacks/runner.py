@@ -403,6 +403,31 @@ class RunCheckfilesStepFunction(Stack):
             }
         )
 
+        make_progress_message = Pass(
+            self,
+            'MakeProgressMessage',
+            parameters={
+                'detailType.$': '$.progress_notification.detailType',
+                'source.$': '$.progress_notification.source',
+                'detail.$': '$.progress_notification.detail',
+                'checkfiles_command_status.$': '$.checkfiles_command_status',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'in_progress.$': '$.in_progress',
+                'iterator.$': '$.iterator',
+                'line_count.$': '$.line_count',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
+        )
+
+        send_progress_notification = self.make_slack_notification_task(
+            'SendProgressSlackNotification'
+        )
+
         no_files_to_process = Succeed(
             self,
             'No files to process.'
@@ -461,6 +486,10 @@ class RunCheckfilesStepFunction(Stack):
                     wait_for_sixty_minutes
                 ).next(
                     get_checkfiles_command_status
+                ).next(
+                    make_progress_message
+                ).next(
+                    send_progress_notification
                 ).next(
                     Choice(self, 'Should continue?')
                     .when(
