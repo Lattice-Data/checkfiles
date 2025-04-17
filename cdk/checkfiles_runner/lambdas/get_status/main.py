@@ -13,6 +13,10 @@ def get_checkfiles_command_status(event, context):
     instance_id = event['instance_id']
     instance_name_suffix = event.get('instance_name_suffix', '')
     number_of_files_pending = event.get('number_of_files_pending', 0)
+    iterator = event.get('iterator', {})
+    backend_uri = event.get('backend_uri')
+    query = event.get('query')
+    update = event.get('update')
 
     ssm = boto3.client('ssm')
     
@@ -65,6 +69,7 @@ def get_checkfiles_command_status(event, context):
         return {
             'checkfiles_command_status': status,
             'instance_id': instance_id,
+            'instance_type': event.get('instance_type')
             'command_id': command_id,
             'instance_id_list': [instance_id],
             'in_progress': status in ['Pending', 'InProgress'],
