@@ -3,6 +3,27 @@ import argparse
 import gzip
 import os
 
+EPILOG = '''
+Run sanity checks on files.
+
+Examples:
+
+    python %(prog)s --mode production --accessions accessions.txt
+    python %(prog)s --mode production --accesssions LATDF101HHH,LATDF102HHH,LATDF100HHH
+    python %(prog)s --mode production --query "report/?type=RawSequenceFile&derived_from=/sequencing-runs/2a12eb7b-ed78-466a-9552-7512bdd7f45f/"
+    python %(prog)s --s3-file s3://submissions-czi012eye/chen_2020/19D014_NeuNT_2_outs/raw_feature_bc_matrix.h5 --file-format hdf5
+
+This relies on local variables to be defined based on the --mode you provide
+to direct the updates to a server and to provide permissions
+For example, if specifying --mode production, to make the changes on a local instance,
+the following variables need to be defined...
+PRODUCTION_KEY, PRODUCTION_SECRET, PRODUCTION_SERVER
+
+For more details:
+
+        python %(prog)s --help
+'''
+
 def generate_report():
     # First create the regular TSV file
     with open('/home/ubuntu/checkfiles/report.tsv', 'w') as f:
@@ -18,7 +39,7 @@ def generate_report():
             f_out.write(f_in.read())
     
     # Remove the original uncompressed file
-    os.remove('/home/ubuntu/checkfiles/report.tsv')
+    #os.remove('/home/ubuntu/checkfiles/report.tsv')
 
 def main():
     args = getArgs()
