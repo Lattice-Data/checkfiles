@@ -345,6 +345,7 @@ class RunCheckfilesStepFunction(Stack):
             lambda_function=run_checkfiles_command_lambda,
             payload=TaskInput.from_object({
                 "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
                 "update.$": "$.update"
@@ -354,6 +355,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_id.$': '$.instance_id',
                 'command_id.$': '$.command_id',
                 'iterator.$': '$.iterator',
+                "number_of_files_pending.$": "$.number_of_files_pending",
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update'
@@ -385,6 +387,7 @@ class RunCheckfilesStepFunction(Stack):
             lambda_function=get_checkfiles_command_status_lambda,
             payload=TaskInput.from_object({
                 "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
                 "update.$": "$.update"
@@ -397,6 +400,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_id_list.$': '$.instance_id_list',
                 'in_progress.$': '$.in_progress',
                 'iterator.$': '$.iterator',
+                'number_of_files_pending.$': '$.number_of_files_pending',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update'
@@ -417,6 +421,7 @@ class RunCheckfilesStepFunction(Stack):
                 'in_progress.$': '$.in_progress',
                 'iterator.$': '$.iterator',
                 'line_count.$': '$.line_count',
+                'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',

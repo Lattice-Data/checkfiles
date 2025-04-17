@@ -12,7 +12,8 @@ def get_checkfiles_command_status(event, context):
     command_id = event['command_id']
     instance_id = event['instance_id']
     instance_name_suffix = event.get('instance_name_suffix', '')
-    
+    number_of_files_pending = event.get('number_of_files_pending', 0)
+
     ssm = boto3.client('ssm')
     
     try:
@@ -55,7 +56,7 @@ def get_checkfiles_command_status(event, context):
                 },
                 'data': {
                     'slack': {
-                        'text': f':hourglass_flowing_sand: *Checkfiles {instance_name_suffix} Progress* | Status: {status} | Processed {line_count} files.'
+                        'text': f':hourglass_flowing_sand: *Checkfiles {instance_name_suffix} Progress* | Status: {status} | Processed {line_count} out of {number_of_files_pending} files.'
                     }
                 }
             }
@@ -69,6 +70,7 @@ def get_checkfiles_command_status(event, context):
             'in_progress': status in ['Pending', 'InProgress'],
             'iterator': event.get('iterator', {}),
             'line_count': line_count,
+            'number_of_files_pending': number_of_files_pending,
             'progress_notification': slack_message,
             'instance_name_suffix': instance_name_suffix,
             'backend_uri': event.get('backend_uri'),
