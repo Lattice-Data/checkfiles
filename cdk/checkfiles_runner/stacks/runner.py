@@ -504,6 +504,16 @@ class RunCheckfilesStepFunction(Stack):
         slack_channel_secret.grant_read(upload_report_lambda)
         self.portal_secrets.grant_read(upload_report_lambda)
 
+        upload_report_lambda.add_to_role_policy(
+            PolicyStatement(
+                actions=[
+                    'ssm:SendCommand',
+                    'ssm:GetCommandInvocation'
+                ],
+                resources=['*'],
+            )
+        )
+
         upload_report = LambdaInvoke(  # This is the LambdaInvoke task
             self,
             'UploadReport',

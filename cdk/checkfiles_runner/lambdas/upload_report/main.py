@@ -34,7 +34,7 @@ def upload_report_to_slack(event, context):
         with tempfile.NamedTemporaryFile(suffix='.tsv.gz') as temp_file:
             # Use SSM to copy the gzipped file content
             copy_command = ssm.send_command(
-                InstanceId=instance_id,
+                InstanceIds=[instance_id],
                 DocumentName='AWS-RunShellScript',
                 Parameters={
                     'commands': [
