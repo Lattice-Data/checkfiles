@@ -22,7 +22,7 @@ def get_checkfiles_command_status(event, context):
     
     try:
         count_response = ssm.send_command(
-            InstanceId=instance_id,
+            InstanceIds=[instance_id],
             DocumentName='AWS-RunShellScript',
             Parameters={
                 'commands': [
