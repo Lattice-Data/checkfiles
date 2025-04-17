@@ -46,7 +46,6 @@ class RunCheckfilesStepFunctionProps:
     instance_security_group_id: str
     checkfiles_tag: str
     portal_secrets_arn: str
-    backend_uri: str
 
 
 class RunCheckfilesStepFunction(Stack):
@@ -93,6 +92,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
+                'update.$': '$.update',
             },
         )
 
@@ -121,6 +121,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
+                'update.$': '$.update',
             },
         )
 
@@ -136,14 +137,9 @@ class RunCheckfilesStepFunction(Stack):
                     },
                     'data': {
                         'slack': {
-                            'text': JsonPath.string_at("$.instance_name_suffix") != None ? 
-                            JsonPath.format(
+                            'text': JsonPath.format(
                                 ':white_check_mark: *Checkfiles {} finished* | command_status: {} | See log group checkfiles-log for details',
                                 JsonPath.string_at('$.instance_name_suffix'),
-                                JsonPath.string_at('$.checkfiles_command_status')
-                            ) : 
-                            JsonPath.format(
-                                ':white_check_mark: *CheckFilesFinished* | command_status: {} | See log group checkfiles-log for details',
                                 JsonPath.string_at('$.checkfiles_command_status')
                             )
                         }
@@ -154,6 +150,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
+                'update.$': '$.update',
             },
         )
 
@@ -180,6 +177,7 @@ class RunCheckfilesStepFunction(Stack):
                 "query.$": "$.query",
                 "instance_name_suffix.$": "$.instance_name_suffix",
                 "backend_uri.$": "$.backend_uri",
+                "update.$": "$.update",
             }),
             payload_response_only=True,
             result_selector={
@@ -188,6 +186,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
+                "update.$": "$.update",
             }
         )
 
@@ -201,6 +200,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
+                'update.$': '$.update',
             }
         )
 
@@ -218,6 +218,11 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'IncrementCounter',
             lambda_function=increment_counter_lambda,
+            payload=TaskInput.from_object({
+                "iterator.$": "$.iterator",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query"
+            }),
             payload_response_only=True,
             result_path='$.iterator'
         )
@@ -271,7 +276,10 @@ class RunCheckfilesStepFunction(Stack):
             payload=TaskInput.from_object({
                 "instance_name_suffix.$": "$.instance_name_suffix",
                 "number_of_files_pending.$": "$.number_of_files_pending",
-                "iterator.$": "$.iterator"
+                "iterator.$": "$.iterator",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update"
             }),
             payload_response_only=True,
             result_selector={
@@ -279,7 +287,10 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_type.$': '$.instance_type',
                 'iterator.$': '$.iterator',
                 'instance_name_suffix.$': '$.instance_name_suffix',
-                'number_of_files_pending.$': '$.number_of_files_pending'
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
             }
         )
 
@@ -336,6 +347,7 @@ class RunCheckfilesStepFunction(Stack):
                 "instance_name_suffix.$": "$.instance_name_suffix",
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
+                "update.$": "$.update"
             }),
             payload_response_only=True,
             result_selector={
@@ -344,6 +356,7 @@ class RunCheckfilesStepFunction(Stack):
                 'iterator.$': '$.iterator',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
+                'update.$': '$.update'
             }
         )
 
@@ -372,6 +385,9 @@ class RunCheckfilesStepFunction(Stack):
             lambda_function=get_checkfiles_command_status_lambda,
             payload=TaskInput.from_object({
                 "instance_name_suffix.$": "$.instance_name_suffix",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update"
             }),
             payload_response_only=True,
             result_selector={
@@ -380,7 +396,10 @@ class RunCheckfilesStepFunction(Stack):
                 'command_id.$': '$.command_id',
                 'instance_id_list.$': '$.instance_id_list',
                 'in_progress.$': '$.in_progress',
-                'iterator.$': '$.iterator'
+                'iterator.$': '$.iterator',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
             }
         )
 
