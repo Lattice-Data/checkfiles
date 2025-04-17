@@ -20,29 +20,46 @@ def generate_report():
     # Remove the original uncompressed file
     os.remove('/home/ubuntu/checkfiles/report.tsv')
 
-def main(args):
+def main():
+    args = getArgs()
     print("CHECKFILES STARTED")
     print("Generating report...")
     generate_report()
     time.sleep(10)  # Reduced sleep time for testing
     print("CHECKFILES FINISHED")
 
-# Start script
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Checkfiles argumentparser')
-    parser.add_argument('--uuid', type=str,
-                        help='UUID of the fileobject to be checked.')
-    parser.add_argument(
-        '--server', type=str, help='igvf instance to check. https://api.sandbox.igvf.org for example')
-    parser.add_argument('--portal-key-id', type=str, help='Portal key id')
-    parser.add_argument('--portal-secret-key', type=str,
-                        help='Portal secret key')
-    parser.add_argument('--patch', action='store_true',
-                        help='Patch the checked objects.')
-    parser.add_argument('--number-of-files', type=str,
-                        help='Use this option to limit the number of pending files to check. If unset, all the pending files will be checked.')
-    parser.add_argument('--ignore-active-credentials', action='store_true',
-                        help='If this flag is set, then we omit checking if the file has unexpired upload credentials. There be dragons here, someone might change the underlying file after checking.')
 
+
+def getArgs():
+    parser = argparse.ArgumentParser(
+        description=__doc__, epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument('--mode', '-m',
+                        help='The machine to run on.')
+    parser.add_argument('--update',
+                        default=False,
+                        action='store_true',
+                        help='Let the script proceed with the changes.  Default is False'),
+    parser.add_argument('--query', '-q',
+                        help="override the file search query, e.g. 'accession=ENCFF000ABC'")
+    parser.add_argument('--accessions', '-a',
+                        help='one or more file accessions to check, comma separated or a file containing a list of file accessions to check')
+    parser.add_argument('--include-validated',
+                        default=False,
+                        action='store_true',
+                        help='Check all files even if they are validated=True in the Lattice database')
+    parser.add_argument('--s3-file',
+                        help="path to a file at s3 to check, comma separated or a file containing a list of file accessions to check")
+    parser.add_argument('--ext-file',
+                        help="path to a file elsewhere to check")
+    parser.add_argument('--file-format',
+                        help='the specified file format if an s3-file or local-file is being checked')
     args = parser.parse_args()
-    main(args)
+    return args
+
+
+if __name__ == '__main__':
+    
+    main()
