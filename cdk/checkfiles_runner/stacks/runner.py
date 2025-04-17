@@ -484,7 +484,8 @@ class RunCheckfilesStepFunction(Stack):
             handler='upload_report_to_slack',
             timeout=Duration.seconds(300),
             environment={
-                'PORTAL_SECRETS_ARN': self.props.slack_token_arn,
+                'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
+                'SLACK_TOKEN_ARN': self.props.slack_token_arn,
                 'SLACK_CHANNEL_ID_ARN': self.props.slack_channel_id_arn
             }
         )
