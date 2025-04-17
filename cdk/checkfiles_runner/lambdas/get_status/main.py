@@ -23,7 +23,7 @@ def get_checkfiles_command_status(event, context):
             Parameters={
                 'commands': [
                     # Adjust this path to match your actual log file location
-                    'wc -l /mnt/outputs/checkfiles/report*.tsv || echo "0"'
+                    'wc -l /home/ubuntu/checkfiles/report.tsv || echo "0"'
                 ]
             }
         )

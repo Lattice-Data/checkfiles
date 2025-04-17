@@ -1,10 +1,31 @@
 import time
 import argparse
+import gzip
+import os
+
+def generate_report():
+    # First create the regular TSV file
+    with open('/home/ubuntu/checkfiles/report.tsv', 'w') as f:
+        for i in range(1, 30):
+            f.write(f"{i}\n")
+            f.flush() 
+            print(f"Added number {i} to report, waiting 2 minutes...")
+            time.sleep(120) 
+    
+    # Now gzip it
+    with open('/home/ubuntu/checkfiles/report.tsv', 'rb') as f_in:
+        with gzip.open('/home/ubuntu/checkfiles/report.tsv.gz', 'wb') as f_out:
+            f_out.write(f_in.read())
+    
+    # Remove the original uncompressed file
+    os.remove('/home/ubuntu/checkfiles/report.tsv')
 
 def main(args):
-    print ("CHECKFILES STARTED")
-    time.sleep(600)
-    print ("CHECKFILES FINISHED")
+    print("CHECKFILES STARTED")
+    print("Generating report...")
+    generate_report()
+    time.sleep(10)  # Reduced sleep time for testing
+    print("CHECKFILES FINISHED")
 
 # Start script
 if __name__ == '__main__':
