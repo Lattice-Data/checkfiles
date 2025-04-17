@@ -1,5 +1,4 @@
 def increment_counter(event, context):
-    print(event)
     instance_id = event['instance_id']
     iterator = event['iterator']
     index = iterator['index']
