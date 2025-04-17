@@ -6,7 +6,7 @@ import os
 def generate_report():
     # First create the regular TSV file
     with open('/home/ubuntu/checkfiles/report.tsv', 'w') as f:
-        for i in range(1, 30):
+        for i in range(1, 5):
             f.write(f"{i}\n")
             f.flush() 
             print(f"Added number {i} to report, waiting 2 minutes...")

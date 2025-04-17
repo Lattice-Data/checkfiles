@@ -221,11 +221,19 @@ class RunCheckfilesStepFunction(Stack):
             lambda_function=increment_counter_lambda,
             payload=TaskInput.from_object({
                 "iterator.$": "$.iterator",
+                "instance_name_suffix.$": "$.instance_name_suffix",
                 "backend_uri.$": "$.backend_uri",
-                "query.$": "$.query"
+                "query.$": "$.query",
+                "update.$": "$.update"
             }),
             payload_response_only=True,
-            result_path='$.iterator'
+            result_selector={
+                'iterator.$': '$.iterator',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
         )
 
         create_checkfiles_instance_lambda = PythonFunction(
@@ -530,6 +538,14 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
+        wait_for_one_minute = Wait(
+            self,
+            'WaitOneMinute',
+            time=WaitTime.duration(
+                Duration.minutes(1)
+            )
+        )
+
         send_checkfiles_started_notification = self.make_slack_notification_task(
             'SendCheckfilesStartedSlackNotification')
         send_pending_files_slack_notification = self.make_slack_notification_task(
@@ -562,7 +578,7 @@ class RunCheckfilesStepFunction(Stack):
                 ).next(
                     increment_counter
                 ).next(
-                    wait_for_sixty_minutes
+                    wait_for_one_minute
                 ).next(
                     get_checkfiles_command_status
                 ).next(
