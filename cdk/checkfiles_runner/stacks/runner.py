@@ -434,9 +434,24 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'MakeProgressMessage',
             parameters={
-                'detailType.$': '$.progress_notification.detailType',
-                'source.$': '$.progress_notification.source',
-                'detail.$': '$.progress_notification.detail',
+                'detailType': 'CheckfilesProgress',
+                'source': 'RunCheckfilesStepFunction',
+                'detail': {
+                    'metadata': {
+                        'includes_slack_notification': True
+                    },
+                    'data': {
+                        'slack': {
+                            'text': JsonPath.format(
+                                ':hourglass_flowing_sand: *Checkfiles {} Progress* | Status: {} | Processed {} out of {} files.',
+                                JsonPath.string_at('$.instance_name_suffix'),
+                                JsonPath.string_at('$.checkfiles_command_status'),
+                                JsonPath.string_at('$.line_count'),
+                                JsonPath.string_at('$.number_of_files_pending')
+                            )
+                        }
+                    }
+                },
                 'checkfiles_command_status.$': '$.checkfiles_command_status',
                 'instance_id.$': '$.instance_id',
                 'command_id.$': '$.command_id',
@@ -556,7 +571,7 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'WaitOneMinute',
             time=WaitTime.duration(
-                Duration.minutes(1)
+                Duration.seconds(1)
             )
         )
 

@@ -51,7 +51,8 @@ def get_checkfiles_command_status(event, context):
         
         status = result['Status']
         
-        slack_message = {
+        # Create the progress_notification object with the correct structure
+        progress_notification = {
             'detailType': 'CheckfilesProgress',
             'source': 'RunCheckfilesStepFunction',
             'detail': {
@@ -75,11 +76,11 @@ def get_checkfiles_command_status(event, context):
             'iterator': iterator,
             'line_count': line_count,
             'number_of_files_pending': number_of_files_pending,
-            'progress_notification': slack_message,
+            'progress_notification': progress_notification,
             'instance_name_suffix': instance_name_suffix,
-            'backend_uri': event.get('backend_uri'),
-            'query': event.get('query'),
-            'update': event.get('update')
+            'backend_uri': backend_uri,
+            'query': query,
+            'update': update
         }
         
     except Exception as e:
