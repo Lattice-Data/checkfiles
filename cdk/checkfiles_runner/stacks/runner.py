@@ -146,12 +146,15 @@ class RunCheckfilesStepFunction(Stack):
                         }
                     }
                 },
+                'instance_id.$': '$.instance_id',
                 'instance_id_list.$': '$.instance_id_list',
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update',
+                'command_id.$': '$.command_id',
+                'checkfiles_command_status.$': '$.checkfiles_command_status'
             },
         )
 
