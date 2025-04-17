@@ -586,7 +586,7 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'WaitOneMinute',
             time=WaitTime.duration(
-                Duration.seconds(1)
+                Duration.seconds(5)
             )
         )
 
