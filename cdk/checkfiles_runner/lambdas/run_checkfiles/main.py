@@ -15,16 +15,18 @@ def get_backend_uri():
 
 
 def run_checkfiles_command(event, context):
-    # Get update parameter from event
-    update_parameter = event.get('update', False)  # Default to False if not provided
-    if update_parameter and update_parameter == 'true':
-        update = True
-    else:
-        update = False
+    # Required parameters
     instance_id = event['instance_id']
     backend_uri = event['backend_uri']
     instance_name_suffix = event['instance_name_suffix']
     query = event['query']
+    iterator = event['iterator']
+    
+    # Optional parameters
+    update = event.get('update', False)
+    if isinstance(update, str):
+        update = update.lower() == 'true'
+    
     secret_arn = get_secret_arn()
     put_portal_key_to_env_cmd = f"export PORTAL_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_KEY)"
     put_secret_key_to_env_cmd = f"export PORTAL_SECRET_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_SECRET_KEY)"
@@ -49,15 +51,15 @@ def run_checkfiles_command(event, context):
             'CloudWatchOutputEnabled': True,
         }
     )
-    iterator = event['iterator']
     command_id = response['Command']['CommandId']
 
-    return {'instance_id': instance_id,
-            'command_id': command_id,
-            'update': update,
-            'iterator': iterator,
-            'backend_uri': backend_uri,
-            'instance_name_suffix': instance_name_suffix,
-            'query': query,
-            'number_of_files_pending': event.get('number_of_files_pending')
-            }
+    return {
+        'instance_id': instance_id,
+        'command_id': command_id,
+        'update': update,
+        'iterator': iterator,
+        'backend_uri': backend_uri,
+        'instance_name_suffix': instance_name_suffix,
+        'query': query,
+        'number_of_files_pending': event.get('number_of_files_pending')
+    }

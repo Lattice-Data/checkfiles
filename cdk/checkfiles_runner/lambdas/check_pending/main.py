@@ -94,10 +94,9 @@ def check_pending_files(event, context):
         'files_pending': files_pending,
         'number_of_files_pending': number_of_files_pending,
         'instance_name_suffix': event.get('instance_name_suffix'),
-        'backend_uri': event['backend_uri'],
-        'query': event['query'],
-        'update': event.get('update', False),
-        'iterator': event.get('iterator', {}) 
+        'backend_uri': backend_uri,
+        'query': query,
+        'update': event.get('update', False)
     }
 
 

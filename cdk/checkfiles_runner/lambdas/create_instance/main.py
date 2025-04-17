@@ -116,13 +116,13 @@ def create_checkfiles_instance(event, context):
 
     instance.wait_until_running()
 
-    return {'instance_id': instance.id,
-            'instance_type': instance.instance_type,
-            'iterator': iterator,
-            'instance_name_suffix': instance_name_suffix,
-            'number_of_files_pending': number_of_files_pending,
-            'backend_uri': backend_uri,
-            'query': query,
-            'update': update,
-            'command_id': event.get('command_id') 
-            }
+    return {
+        'instance_id': instance.id,
+        'instance_type': instance.instance_type,
+        'iterator': iterator,
+        'instance_name_suffix': instance_name_suffix,
+        'number_of_files_pending': number_of_files_pending,
+        'backend_uri': backend_uri,
+        'query': query,
+        'update': update
+    }

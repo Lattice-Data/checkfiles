@@ -178,8 +178,7 @@ class RunCheckfilesStepFunction(Stack):
                 "query.$": "$.query",
                 "instance_name_suffix.$": "$.instance_name_suffix",
                 "backend_uri.$": "$.backend_uri",
-                "update.$": "$.update",
-                "iterator.$": "$.iterator" 
+                "update.$": "$.update"
             }),
             payload_response_only=True,
             result_selector={
@@ -188,8 +187,7 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                "update.$": "$.update",
-                "iterator.$": "$.iterator" 
+                "update.$": "$.update"
             }
         )
 
@@ -364,9 +362,7 @@ class RunCheckfilesStepFunction(Stack):
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
                 "update.$": "$.update",
-                "iterator.$": "$.iterator",
-                "instance_type.$": "$.instance_type",
-                "instance_id_list.$": "$.instance_id_list" 
+                "iterator.$": "$.iterator"
             }),
             payload_response_only=True,
             result_selector={
@@ -377,9 +373,7 @@ class RunCheckfilesStepFunction(Stack):
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                'update.$': '$.update',
-                'instance_type.$': '$.instance_type',
-                'instance_id_list.$': '$.instance_id_list'
+                'update.$': '$.update'
             }
         )
 
@@ -414,9 +408,7 @@ class RunCheckfilesStepFunction(Stack):
                 "backend_uri.$": "$.backend_uri",
                 "query.$": "$.query",
                 "update.$": "$.update",
-                "iterator.$": "$.iterator",
-                "instance_type.$": "$.instance_type",
-                "instance_id_list.$": "$.instance_id_list" 
+                "iterator.$": "$.iterator"
             }),
             payload_response_only=True,
             result_selector={
@@ -430,8 +422,7 @@ class RunCheckfilesStepFunction(Stack):
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update',
-                'instance_name_suffix.$': '$.instance_name_suffix',
-                'instance_type.$': '$.instance_type'
+                'instance_name_suffix.$': '$.instance_name_suffix'
             }
         )
 

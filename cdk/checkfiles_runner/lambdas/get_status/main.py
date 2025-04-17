@@ -69,11 +69,10 @@ def get_checkfiles_command_status(event, context):
         return {
             'checkfiles_command_status': status,
             'instance_id': instance_id,
-            'instance_type': event.get('instance_type')
             'command_id': command_id,
             'instance_id_list': [instance_id],
             'in_progress': status in ['Pending', 'InProgress'],
-            'iterator': event.get('iterator', {}),
+            'iterator': iterator,
             'line_count': line_count,
             'number_of_files_pending': number_of_files_pending,
             'progress_notification': slack_message,
