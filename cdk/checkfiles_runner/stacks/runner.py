@@ -419,6 +419,7 @@ class RunCheckfilesStepFunction(Stack):
                 'checkfiles_command_status.$': '$.checkfiles_command_status',
                 'instance_id.$': '$.instance_id',
                 'command_id.$': '$.command_id',
+                'line_count.$': '$.line_count', 
                 'instance_id_list.$': '$.instance_id_list',
                 'in_progress.$': '$.in_progress',
                 'iterator.$': '$.iterator',
@@ -446,7 +447,7 @@ class RunCheckfilesStepFunction(Stack):
                                 ':hourglass_flowing_sand: *Checkfiles {} Progress* | Status: {} | Processed {} out of {} files.',
                                 JsonPath.string_at('$.instance_name_suffix'),
                                 JsonPath.string_at('$.checkfiles_command_status'),
-                                JsonPath.string_at('$.line_count'),
+                                JsonPath.string_at('$.line_count'), 
                                 JsonPath.string_at('$.number_of_files_pending')
                             )
                         }
