@@ -220,11 +220,13 @@ class RunCheckfilesStepFunction(Stack):
             'IncrementCounter',
             lambda_function=increment_counter_lambda,
             payload=TaskInput.from_object({
-                "iterator.$": "$.iterator",
-                "instance_name_suffix.$": "$.instance_name_suffix",
-                "backend_uri.$": "$.backend_uri",
-                "query.$": "$.query",
-                "update.$": "$.update"
+                        "iterator.$": "$.iterator",
+                        "instance_id.$": "$.instance_id",
+                        "instance_name_suffix.$": "$.instance_name_suffix",
+                        "backend_uri.$": "$.backend_uri",
+                        "query.$": "$.query",
+                        "update.$": "$.update",
+                        "number_of_files_pending.$": "$.number_of_files_pending"
             }),
             payload_response_only=True,
             result_selector={
@@ -232,7 +234,8 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                'update.$': '$.update'
+                'update.$': '$.update',
+                'number_of_files_pending.$': '$.number_of_files_pending'
             }
         )
 

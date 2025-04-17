@@ -23,6 +23,7 @@ def run_checkfiles_command(event, context):
         update = False
     instance_id = event['instance_id']
     backend_uri = event['backend_uri']
+    instance_name_suffix = event['instance_name_suffix']
     query = event['query']
     secret_arn = get_secret_arn()
     put_portal_key_to_env_cmd = f"export PORTAL_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_KEY)"
@@ -56,4 +57,7 @@ def run_checkfiles_command(event, context):
             'update': update,
             'iterator': iterator,
             'backend_uri': backend_uri,
+            'instance_name_suffix': instance_name_suffix,
+            'query': query,
+            'number_of_files_pending': number_of_files_pending
             }
