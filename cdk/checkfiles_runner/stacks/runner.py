@@ -46,7 +46,8 @@ class RunCheckfilesStepFunctionProps:
     instance_security_group_id: str
     checkfiles_tag: str
     portal_secrets_arn: str
-
+    slack_channel_id_arn: str 
+    slack_token_arn: str 
 
 class RunCheckfilesStepFunction(Stack):
 
@@ -433,6 +434,77 @@ class RunCheckfilesStepFunction(Stack):
             'SendProgressSlackNotification'
         )
 
+        upload_report_lambda = PythonFunction(
+            self,
+            'UploadReportLambda',
+            entry='checkfiles_runner/lambdas/upload_report',
+            runtime=Runtime.PYTHON_3_11,
+            index='main.py',
+            handler='upload_report_to_slack',
+            timeout=Duration.seconds(300),
+            environment={
+                'PORTAL_SECRETS_ARN': self.props.slack_token_arn,
+                'SLACK_CHANNEL_ID_ARN': self.props.slack_channel_id_arn
+            }
+        )
+        slack_token_secret = SMSecret.from_secret_complete_arn(
+            self,
+            'SlackTokenSecret',
+            secret_complete_arn=self.props.slack_token_arn
+        )
+        slack_channel_secret = SMSecret.from_secret_complete_arn(
+            self,
+            'SlackChannelSecret',
+            secret_complete_arn=self.props.slack_channel_id_arn
+        )
+
+        slack_token_secret.grant_read(upload_report_lambda)
+        slack_channel_secret.grant_read(upload_report_lambda)
+        self.portal_secrets.grant_read(upload_report_lambda)
+
+        upload_report = LambdaInvoke(  # This is the LambdaInvoke task
+            self,
+            'UploadReport',
+            lambda_function=upload_report_lambda,
+            payload=TaskInput.from_object({
+                "instance_id.$": "$.instance_id",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "instance_id_list.$": "$.instance_id_list",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update"
+            }),
+            payload_response_only=True,
+            result_selector={
+                'status.$': '$.status',
+                'file_url.$': '$.file_url',
+                'slack_notification.$': '$.slack_notification',
+                'instance_id.$': '$.instance_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
+        )
+        make_report_uploaded_message = Pass(
+            self,
+            'MakeReportUploadedMessage',
+            parameters={
+                'detailType.$': '$.slack_notification.detailType',
+                'source.$': '$.slack_notification.source',
+                'detail.$': '$.slack_notification.detail',
+                'instance_id.$': '$.instance_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
+        )
+
+
+
         no_files_to_process = Succeed(
             self,
             'No files to process.'
@@ -464,6 +536,8 @@ class RunCheckfilesStepFunction(Stack):
             'SendPendingFilesCheckedSlackNotification')
         send_checkfiles_finished_slack_notification = self.make_slack_notification_task(
             'SendCheckfilesFinishedSlackNotification')
+        send_report_uploaded_notification = self.make_slack_notification_task(
+            'SendReportUploadedSlackNotification')
 
         definition = check_pending_files.next(
             make_pending_files_checked_message
@@ -509,6 +583,17 @@ class RunCheckfilesStepFunction(Stack):
                     ).otherwise(
                         make_checkfiles_finished_message.next(
                             send_checkfiles_finished_slack_notification
+                        ).next(
+                            LambdaInvoke(  # Add upload_report step
+                                self,
+                                'UploadReport',
+                                lambda_function=upload_report_lambda,
+                                payload_response_only=True
+                            )
+                        ).next(
+                            make_report_uploaded_message
+                        ).next(
+                            send_report_uploaded_notification
                         ).next(
                             terminate_instance
                         )
