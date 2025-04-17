@@ -59,5 +59,5 @@ def run_checkfiles_command(event, context):
             'backend_uri': backend_uri,
             'instance_name_suffix': instance_name_suffix,
             'query': query,
-            'number_of_files_pending': number_of_files_pending
+            'number_of_files_pending': event.get('number_of_files_pending')
             }
