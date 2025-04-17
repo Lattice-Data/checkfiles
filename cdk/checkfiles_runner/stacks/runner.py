@@ -600,12 +600,7 @@ class RunCheckfilesStepFunction(Stack):
                         make_checkfiles_finished_message.next(
                             send_checkfiles_finished_slack_notification
                         ).next(
-                            LambdaInvoke(  # Add upload_report step
-                                self,
-                                'UploadReport',
-                                lambda_function=upload_report_lambda,
-                                payload_response_only=True
-                            )
+                            upload_report
                         ).next(
                             make_report_uploaded_message
                         ).next(
