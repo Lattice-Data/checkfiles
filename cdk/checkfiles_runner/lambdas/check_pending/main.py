@@ -18,10 +18,6 @@ def get_secret_arn():
     return os.environ['PORTAL_SECRETS_ARN']
 
 
-def get_backend_uri():
-    return os.environ['BACKEND_URI']
-
-
 def get_portal_key(secret):
     return secret['PORTAL_KEY']
 
@@ -82,21 +78,24 @@ def files_are_pending(pending_files):
 
 def check_pending_files(event, context):
     query = event.get("query")
-    backend_uri = get_backend_uri() + query
+    backend_uri = event['backend_uri']
+    backend_uri_query = backend_uri + query
     secret_arn = get_secret_arn()
     secret = get_secret(secret_arn)
-    logging.info(f'looking for pending files in backend: {backend_uri}')
-    number_of_files_pending = get_number_of_pending_files(secret, backend_uri)
+    logging.info(f'looking for pending files in backend: {backend_uri_query}')
+    number_of_files_pending = get_number_of_pending_files(secret, backend_uri_query)
     files_pending = files_are_pending(number_of_files_pending)
     if files_pending:
         logging.info(
-            f'found {number_of_files_pending} files pending for check in {backend_uri}.')
+            f'found {number_of_files_pending} files pending for check in {backend_uri_query}.')
     else:
-        logging.info(f'no files in upload_status pending in {backend_uri}')
+        logging.info(f'no files in upload_status pending in {backend_uri_query}')
     return {
         'files_pending': files_pending,
         'number_of_files_pending': number_of_files_pending,
-        'instance_name_suffix': event.get('instance_name_suffix')
+        'instance_name_suffix': event.get('instance_name_suffix'),
+        'backend_uri': event['backend_uri'],
+        'query': event['query']
     }
 
 

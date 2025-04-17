@@ -91,6 +91,8 @@ class RunCheckfilesStepFunction(Stack):
                 'files_pending.$': '$.files_pending',
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
             },
         )
 
@@ -117,6 +119,8 @@ class RunCheckfilesStepFunction(Stack):
                 'files_pending.$': '$.files_pending',
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
             },
         )
 
@@ -132,11 +136,15 @@ class RunCheckfilesStepFunction(Stack):
                     },
                     'data': {
                         'slack': {
-                            'text': JsonPath.format(
-                                ':white_check_mark: *Checkfiles {} finished*  | command_status: {} | See log group checkfiles-log for details',
+                            'text': JsonPath.string_at("$.instance_name_suffix") != None ? 
+                            JsonPath.format(
+                                ':white_check_mark: *Checkfiles {} finished* | command_status: {} | See log group checkfiles-log for details',
                                 JsonPath.string_at('$.instance_name_suffix'),
-                                JsonPath.string_at(
-                                    '$.checkfiles_command_status')
+                                JsonPath.string_at('$.checkfiles_command_status')
+                            ) : 
+                            JsonPath.format(
+                                ':white_check_mark: *CheckFilesFinished* | command_status: {} | See log group checkfiles-log for details',
+                                JsonPath.string_at('$.checkfiles_command_status')
                             )
                         }
                     }
@@ -144,6 +152,8 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_id_list.$': '$.instance_id_list',
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
             },
         )
 
@@ -157,7 +167,6 @@ class RunCheckfilesStepFunction(Stack):
             timeout=Duration.seconds(30),
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
-                'BACKEND_URI': self.props.backend_uri
             }
         )
 
@@ -170,12 +179,15 @@ class RunCheckfilesStepFunction(Stack):
             payload=TaskInput.from_object({
                 "query.$": "$.query",
                 "instance_name_suffix.$": "$.instance_name_suffix",
+                "backend_uri.$": "$.backend_uri",
             }),
             payload_response_only=True,
             result_selector={
                 'files_pending.$': '$.files_pending',
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
             }
         )
 
@@ -187,6 +199,8 @@ class RunCheckfilesStepFunction(Stack):
                 'iterator': {'index': 0, 'step': 1, 'count': 23},
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
             }
         )
 
@@ -287,7 +301,6 @@ class RunCheckfilesStepFunction(Stack):
             timeout=Duration.seconds(60),
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
-                'BACKEND_URI': self.props.backend_uri
             }
         )
 
@@ -319,11 +332,18 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'RunCheckFilesCommand',
             lambda_function=run_checkfiles_command_lambda,
+            payload=TaskInput.from_object({
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+            }),
             payload_response_only=True,
             result_selector={
                 'instance_id.$': '$.instance_id',
                 'command_id.$': '$.command_id',
-                'iterator.$': '$.iterator'
+                'iterator.$': '$.iterator',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
             }
         )
 
@@ -350,6 +370,9 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'GetCheckfilesCommandStatus',
             lambda_function=get_checkfiles_command_status_lambda,
+            payload=TaskInput.from_object({
+                "instance_name_suffix.$": "$.instance_name_suffix",
+            }),
             payload_response_only=True,
             result_selector={
                 'checkfiles_command_status.$': '$.checkfiles_command_status',

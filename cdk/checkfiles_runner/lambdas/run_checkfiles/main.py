@@ -15,12 +15,14 @@ def get_backend_uri():
 
 
 def run_checkfiles_command(event, context):
+
     instance_id = event['instance_id']
-    backend_uri = get_backend_uri()
+    backend_uri = event['backend_uri']
+    query = event['query']
     secret_arn = get_secret_arn()
     put_portal_key_to_env_cmd = f"export PORTAL_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_KEY)"
     put_secret_key_to_env_cmd = f"export PORTAL_SECRET_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_SECRET_KEY)"
-    run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py --server {backend_uri} --portal-key-id $(echo $PORTAL_KEY) --portal-secret-key $(echo $PORTAL_SECRET_KEY)"
+    run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py --server {backend_uri} --portal-key-id $(echo $PORTAL_KEY) --portal-secret-key $(echo $PORTAL_SECRET_KEY) -q {query}"
     ssm = boto3.client('ssm')
     response = ssm.send_command(
         InstanceIds=[instance_id],
@@ -42,5 +44,6 @@ def run_checkfiles_command(event, context):
 
     return {'instance_id': instance_id,
             'command_id': response['Command']['CommandId'],
-            'iterator': iterator
+            'iterator': iterator,
+            'backend_uri': backend_uri,
             }
