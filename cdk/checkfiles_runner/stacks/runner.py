@@ -393,7 +393,8 @@ class RunCheckfilesStepFunction(Stack):
         get_checkfiles_command_status_lambda.add_to_role_policy(
             PolicyStatement(
                 actions=[
-                    'ssm:GetCommandInvocation'
+                    'ssm:GetCommandInvocation',
+                    'ssm:SendCommand' 
                 ],
                 resources=['*'],
             )
