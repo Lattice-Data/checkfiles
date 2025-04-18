@@ -4,9 +4,8 @@ import requests
 import logging
 import time
 import os
-import tempfile
 import io
-import base64 
+import base64
 
 # Configure logging
 logging.basicConfig(
@@ -57,28 +56,21 @@ def upload_report_to_slack(event, context):
         slack_token = json.loads(token_secret)['BOT_TOKEN']
         slack_channel_id = json.loads(channel_secret)['CHANNEL_ID']
         
-        print ('zopa')
-        
-        
-        # Use SSM to get the base64 encoded content
+        # Get file content from EC2
         copy_command = ssm.send_command(
             InstanceIds=[instance_id],
             DocumentName='AWS-RunShellScript',
             Parameters={
                 'commands': [
                     'cd /home/ubuntu/checkfiles && ' +
-                    # First verify the file exists and its size
                     'ls -l report.tsv.gz || ls -l report.tsv && ' +
-                    # If report.tsv exists but not report.tsv.gz, compress it
                     '[ ! -f report.tsv.gz ] && [ -f report.tsv ] && gzip -f report.tsv; ' +
-                    # Output the base64 encoded content without wrapping
                     'base64 -w 0 report.tsv.gz'
                 ]
             }
         )
         
-        print ('zopa 2')
-        time.sleep(2)  # Wait for command to complete
+        time.sleep(2)
         
         result = ssm.get_command_invocation(
             CommandId=copy_command['Command']['CommandId'],
@@ -86,13 +78,8 @@ def upload_report_to_slack(event, context):
         )
         
         if result['Status'] == 'Success':
-            # Add debug logging
-            logging.info(f"Command output length: {len(result.get('StandardOutputContent', ''))}")
-            logging.info(f"Command output last few chars: {result.get('StandardOutputContent', '')[-10:]}")
-            
-            # Clean the base64 string
+            # Process base64 content
             base64_content = result['StandardOutputContent'].strip()
-            # Ensure the length is a multiple of 4 by adding padding if needed
             padding_needed = len(base64_content) % 4
             if padding_needed:
                 base64_content += '=' * (4 - padding_needed)
@@ -102,59 +89,86 @@ def upload_report_to_slack(event, context):
                 file_content = base64.b64decode(base64_content)
                 logging.info(f"Successfully decoded base64 content, size: {len(file_content)} bytes")
                 
-                # Generate filename with timestamp
+                # Generate filename
                 timestamp = time.strftime('%Y%m%d-%H%M%S')
                 filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv.gz'
-                
-                # Create in-memory file-like object
-                file_obj = io.BytesIO(file_content)
-                
-                # Upload to Slack
-                files = {
-                    'file': (filename, file_obj, 'application/gzip')
-                }
-                
-                data = {
-                    'channels': slack_channel_id,
-                    'initial_comment': f'Checkfiles report for {instance_name_suffix}',
-                    'title': filename
-                }
-                
+
+                # Create headers for Slack API calls
                 headers = {
-                    'Authorization': f'Bearer {slack_token}'
+                    "Authorization": f"Bearer {slack_token}",
+                    "Content-Type": "application/json"
                 }
-                
-                response = requests.post(
-                    'https://slack.com/api/files.upload',
+
+                # Step 1: Get external upload URL
+                upload_request_payload = {
+                    "filename": filename,
+                    "length": len(file_content),  # Use length of our file content
+                    "channels": [slack_channel_id]
+                }
+
+                upload_url_response = requests.post(
+                    "https://slack.com/api/files.getUploadURLExternal",
                     headers=headers,
-                    data=data,
-                    files=files
+                    data=json.dumps(upload_request_payload)
                 )
-                
-                if response.status_code == 200 and response.json().get('ok'):
-                    file_url = response.json().get('file', {}).get('permalink', 'File URL not available')
-                    
-                    return {
-                        'status': 'SUCCESS',
-                        'file_url': file_url,
-                        'filename': filename,
-                        # Preserve other state data
-                        'instance_id': instance_id,
-                        'instance_id_list': event.get('instance_id_list', []),
-                        'instance_name_suffix': instance_name_suffix,
-                        'backend_uri': event.get('backend_uri'),
-                        'query': event.get('query'),
-                        'update': event.get('update')
-                    }
-                else:
-                    error_msg = f"Failed to upload to Slack: {response.text}"
-                    logging.error(error_msg)
-                    raise Exception(error_msg)
-                
-            except Exception as decode_error:
-                logging.error(f"Base64 decode error: {str(decode_error)}")
-                logging.error(f"First 100 chars of content: {base64_content[:100]}")
-                raise Exception(f"Failed to decode base64 content: {str(decode_error)}")
+
+                upload_data = upload_url_response.json()
+                if not upload_data.get("ok"):
+                    raise Exception(f"Failed to get upload URL: {upload_data.get('error', 'Unknown error')}")
+
+                upload_url = upload_data["upload_url"]
+                file_id = upload_data["file_id"]
+
+                # Step 2: Upload the file content
+                upload_response = requests.post(
+                    upload_url,
+                    headers={"Content-Type": "application/octet-stream"},
+                    data=file_content  # Direct use of our file content
+                )
+
+                if upload_response.status_code != 200:
+                    raise Exception(f"Upload to Slack failed: {upload_response.text}")
+
+                # Step 3: Complete the upload and attach to channel
+                complete_payload = {
+                    "files": [
+                        {
+                            "id": file_id,
+                            "title": filename
+                        }
+                    ],
+                    "channel_id": slack_channel_id,
+                    "initial_comment": f"Checkfiles report for {instance_name_suffix}"
+                }
+
+                complete_response = requests.post(
+                    "https://slack.com/api/files.completeUploadExternal",
+                    headers=headers,
+                    data=json.dumps(complete_payload)
+                )
+
+                complete_data = complete_response.json()
+                if not complete_data.get("ok"):
+                    raise Exception(f"Failed to complete upload: {complete_response.text}")
+
+                # Return success response
+                return {
+                    'status': 'SUCCESS',
+                    'file_url': complete_data.get('file', {}).get('url', 'File URL not available'),
+                    'filename': filename,
+                    # Preserve other state data
+                    'instance_id': instance_id,
+                    'instance_id_list': event.get('instance_id_list', []),
+                    'instance_name_suffix': instance_name_suffix,
+                    'backend_uri': event.get('backend_uri'),
+                    'query': event.get('query'),
+                    'update': event.get('update')
+                }
+
+            except Exception as upload_error:
+                logging.error(f"Upload error: {str(upload_error)}")
+                raise Exception(f"Failed to upload file: {str(upload_error)}")
+
         else:
             error_msg = f"Command failed: {result.get('StandardErrorContent', 'No error message available')}"
             logging.error(error_msg)
