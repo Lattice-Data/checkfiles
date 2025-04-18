@@ -563,27 +563,31 @@ class RunCheckfilesStepFunction(Stack):
             parameters={
                 'detailType': 'CheckfilesReport',
                 'source': 'RunCheckfilesStepFunction',
+                # Define the formatted text at the top level
+                'FormattedSlackText': JsonPath.format(
+                    ':white_check_mark: *Checkfiles {} Report* | Gzipped report uploaded to Slack\nFile: {}',
+                    JsonPath.string_at('$.instance_name_suffix'),
+                    JsonPath.string_at('$.filename')
+                ),
                 'detail': {
                     'metadata': {
                         'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
-                            'text': JsonPath.format(
-                                ':white_check_mark: *Checkfiles {} Report* | Gzipped report uploaded to Slack\nFile: {}',
-                                JsonPath.string_at('$.instance_name_suffix'),
-                                JsonPath.string_at('$.filename')
-                            )
+                            # Reference the formatted text using JsonPath
+                            'text.$': '$.FormattedSlackText'
                         }
                     }
                 },
+                # Pass through all necessary fields
                 'instance_id.$': '$.instance_id',
                 'instance_id_list.$': '$.instance_id_list',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update',
-                'filename.$': '$.filename'
+                'filename.$': '$.filename'  # Ensure filename is passed
             }
         )
 
