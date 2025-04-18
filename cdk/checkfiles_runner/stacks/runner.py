@@ -563,20 +563,13 @@ class RunCheckfilesStepFunction(Stack):
             parameters={
                 'detailType': 'CheckfilesReport',
                 'source': 'RunCheckfilesStepFunction',
-                # Define the formatted text at the top level
-                'FormattedSlackText': JsonPath.format(
-                    ':white_check_mark: *Checkfiles {} Report* | Gzipped report uploaded to Slack\nFile: {}',
-                    JsonPath.string_at('$.instance_name_suffix'),
-                    JsonPath.string_at('$.filename')
-                ),
                 'detail': {
                     'metadata': {
                         'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
-                            # Reference the formatted text using JsonPath
-                            'text.$': '$.FormattedSlackText'
+                            'text.$': "States.Format(':white_check_mark: *Checkfiles {} Report* | Gzipped report uploaded to Slack\nFile: {}', $.instance_name_suffix, $.filename)"
                         }
                     }
                 },
@@ -587,10 +580,9 @@ class RunCheckfilesStepFunction(Stack):
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update',
-                'filename.$': '$.filename'  # Ensure filename is passed
+                'filename.$': '$.filename'
             }
         )
-
         no_files_to_process = Succeed(
             self,
             'No files to process.'
