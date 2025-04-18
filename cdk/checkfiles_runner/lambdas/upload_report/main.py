@@ -124,26 +124,10 @@ def upload_report_to_slack(event, context):
                     if response.status_code == 200 and response.json().get('ok'):
                         file_url = response.json().get('file', {}).get('permalink', 'File URL not available')
                         
-                        # Create success notification
-                        slack_message = {
-                            'detailType': 'CheckfilesReport',
-                            'source': 'RunCheckfilesStepFunction',
-                            'detail': {
-                                'metadata': {
-                                    'includes_slack_notification': True
-                                },
-                                'data': {
-                                    'slack': {
-                                        'text': f':white_check_mark: *Checkfiles {instance_name_suffix} Report* | Gzipped report uploaded to Slack\nFile: {filename}'
-                                    }
-                                }
-                            }
-                        }
-                        
                         return {
                             'status': 'SUCCESS',
                             'file_url': file_url,
-                            'slack_notification': slack_message,
+                            'filename': filename,
                             # Preserve other state data
                             'instance_id': instance_id,
                             'instance_id_list': event.get('instance_id_list', []),

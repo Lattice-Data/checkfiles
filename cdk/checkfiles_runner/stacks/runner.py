@@ -557,7 +557,34 @@ class RunCheckfilesStepFunction(Stack):
             }
         )
 
-
+        make_upload_notification = Pass(
+            self,
+            'MakeUploadNotification',
+            parameters={
+                'detailType': 'CheckfilesReport',
+                'source': 'RunCheckfilesStepFunction',
+                'detail': {
+                    'metadata': {
+                        'includes_slack_notification': True
+                    },
+                    'data': {
+                        'slack': {
+                            'text': JsonPath.format(
+                                ':white_check_mark: *Checkfiles {} Report* | Gzipped report uploaded to Slack\nFile: {}',
+                                JsonPath.string_at('$.instance_name_suffix'),
+                                JsonPath.string_at('$.filename')
+                            )
+                        }
+                    }
+                },
+                'instance_id.$': '$.instance_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
+        )
 
         no_files_to_process = Succeed(
             self,
@@ -646,11 +673,11 @@ class RunCheckfilesStepFunction(Stack):
                         make_checkfiles_finished_message.next(
                             send_checkfiles_finished_slack_notification
                         ).next(
-                            upload_report
-                        ).next(
-                            make_report_uploaded_message
-                        ).next(
-                            send_report_uploaded_notification
+                            upload_report.next(
+                                make_upload_notification
+                            ).next(
+                                send_report_uploaded_notification
+                            )
                         ).next(
                             terminate_instance
                         )
