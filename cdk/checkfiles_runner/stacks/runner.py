@@ -582,7 +582,8 @@ class RunCheckfilesStepFunction(Stack):
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                'update.$': '$.update'
+                'update.$': '$.update',
+                'filename.$': '$.filename'
             }
         )
 
