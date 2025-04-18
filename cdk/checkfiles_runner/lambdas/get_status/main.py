@@ -51,22 +51,6 @@ def get_checkfiles_command_status(event, context):
         
         status = result['Status']
         
-        # Create the progress_notification object with the correct structure
-        progress_notification = {
-            'detailType': 'CheckfilesProgress',
-            'source': 'RunCheckfilesStepFunction',
-            'detail': {
-                'metadata': {
-                    'includes_slack_notification': True
-                },
-                'data': {
-                    'slack': {
-                        'text': f':hourglass_flowing_sand: *Checkfiles {instance_name_suffix} Progress* | Status: {status} | Processed {line_count} out of {number_of_files_pending} files.'
-                    }
-                }
-            }
-        }
-        
         return {
             'checkfiles_command_status': status,
             'instance_id': instance_id,
@@ -76,7 +60,6 @@ def get_checkfiles_command_status(event, context):
             'iterator': iterator,
             'line_count': line_count,
             'number_of_files_pending': number_of_files_pending,
-            'progress_notification': progress_notification,
             'instance_name_suffix': instance_name_suffix,
             'backend_uri': backend_uri,
             'query': query,

@@ -157,7 +157,97 @@ class RunCheckfilesStepFunction(Stack):
                 'checkfiles_command_status.$': '$.checkfiles_command_status'
             },
         )
+        
 
+        make_progress_message = Pass(
+            self,
+            'MakeProgressMessage',
+            parameters={
+                'detailType': 'CheckfilesProgress',
+                'source': 'RunCheckfilesStepFunction',
+                'detail': {
+                    'metadata': {
+                        'includes_slack_notification': True
+                    },
+                    'data': {
+                        'slack': {
+                            'text': JsonPath.format(
+                                ':hourglass_flowing_sand: *Checkfiles {} Progress* | Status: {} | Processed {} out of {} files.',
+                                JsonPath.string_at('$.instance_name_suffix'),
+                                JsonPath.string_at('$.checkfiles_command_status'),
+                                JsonPath.string_at('$.line_count'),
+                                JsonPath.string_at('$.number_of_files_pending')
+                            )
+                        }
+                    }
+                },
+                'checkfiles_command_status.$': '$.checkfiles_command_status',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'in_progress.$': '$.in_progress',
+                'iterator.$': '$.iterator',
+                'line_count.$': '$.line_count',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
+        )
+
+        get_checkfiles_command_status_lambda = PythonFunction(
+            self,
+            'GetCheckfilesCommandStatusLambda',
+            entry='checkfiles_runner/lambdas/get_status',
+            runtime=Runtime.PYTHON_3_11,
+            index='main.py',
+            handler='get_checkfiles_command_status',
+            timeout=Duration.seconds(180),
+        )
+
+        get_checkfiles_command_status_lambda.add_to_role_policy(
+            PolicyStatement(
+                actions=[
+                    'ssm:GetCommandInvocation',
+                    'ssm:SendCommand' 
+                ],
+                resources=['*'],
+            )
+        )
+
+
+        get_checkfiles_command_status = LambdaInvoke(
+            self,
+            'GetCheckfilesCommandStatus',
+            lambda_function=get_checkfiles_command_status_lambda,
+            payload=TaskInput.from_object({
+                "command_id.$": "$.command_id",
+                "instance_id.$": "$.instance_id",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update",
+                "iterator.$": "$.iterator"
+            }),
+            payload_response_only=True,
+            result_selector={
+                'checkfiles_command_status.$': '$.checkfiles_command_status',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
+                'line_count.$': '$.line_count', 
+                'instance_id_list.$': '$.instance_id_list',
+                'in_progress.$': '$.in_progress',
+                'iterator.$': '$.iterator',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
+                'instance_name_suffix.$': '$.instance_name_suffix'
+            }
+        )
+        
         check_pending_files_lambda = PythonFunction(
             self,
             'CheckPendingFilesLambda',
@@ -199,7 +289,7 @@ class RunCheckfilesStepFunction(Stack):
             'InitializeCounter',
 
             parameters={
-                'iterator': {'index': 0, 'step': 1, 'count': 23},
+                'iterator': {'index': 0, 'step': 1, 'count': 23, 'continue': True},
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
@@ -377,80 +467,6 @@ class RunCheckfilesStepFunction(Stack):
                 'iterator.$': '$.iterator',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'number_of_files_pending.$': '$.number_of_files_pending',
-                'backend_uri.$': '$.backend_uri',
-                'query.$': '$.query',
-                'update.$': '$.update'
-            }
-        )
-
-        get_checkfiles_command_status_lambda = PythonFunction(
-            self,
-            'GetCheckfilesCommandStatusLambda',
-            entry='checkfiles_runner/lambdas/get_status',
-            runtime=Runtime.PYTHON_3_11,
-            index='main.py',
-            handler='get_checkfiles_command_status',
-            timeout=Duration.seconds(180),
-        )
-
-        get_checkfiles_command_status_lambda.add_to_role_policy(
-            PolicyStatement(
-                actions=[
-                    'ssm:GetCommandInvocation',
-                    'ssm:SendCommand' 
-                ],
-                resources=['*'],
-            )
-        )
-
-        get_checkfiles_command_status = LambdaInvoke(
-            self,
-            'GetCheckfilesCommandStatus',
-            lambda_function=get_checkfiles_command_status_lambda,
-            payload=TaskInput.from_object({
-                "command_id.$": "$.command_id",
-                "instance_id.$": "$.instance_id",
-                "instance_name_suffix.$": "$.instance_name_suffix",
-                "number_of_files_pending.$": "$.number_of_files_pending",
-                "backend_uri.$": "$.backend_uri",
-                "query.$": "$.query",
-                "update.$": "$.update",
-                "iterator.$": "$.iterator"
-            }),
-            payload_response_only=True,
-            result_selector={
-                'checkfiles_command_status.$': '$.checkfiles_command_status',
-                'instance_id.$': '$.instance_id',
-                'command_id.$': '$.command_id',
-                'line_count.$': '$.line_count', 
-                'instance_id_list.$': '$.instance_id_list',
-                'in_progress.$': '$.in_progress',
-                'iterator.$': '$.iterator',
-                'number_of_files_pending.$': '$.number_of_files_pending',
-                'backend_uri.$': '$.backend_uri',
-                'query.$': '$.query',
-                'update.$': '$.update',
-                'instance_name_suffix.$': '$.instance_name_suffix',
-                'progress_notification.$': '$.progress_notification'
-            }
-        )
-
-        make_progress_message = Pass(
-            self,
-            'MakeProgressMessage',
-            parameters={
-                'detailType.$': '$.progress_notification.detailType',
-                'source.$': '$.progress_notification.source',
-                'detail.$': '$.progress_notification.detail',
-                'checkfiles_command_status.$': '$.checkfiles_command_status',
-                'instance_id.$': '$.instance_id',
-                'command_id.$': '$.command_id',
-                'instance_id_list.$': '$.instance_id_list',
-                'in_progress.$': '$.in_progress',
-                'iterator.$': '$.iterator',
-                'line_count.$': '$.line_count',
-                'number_of_files_pending.$': '$.number_of_files_pending',
-                'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
                 'update.$': '$.update'
