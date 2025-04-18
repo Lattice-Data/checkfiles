@@ -27,11 +27,11 @@ For more details:
 def generate_report():
     # First create the regular TSV file
     with open('/home/ubuntu/checkfiles/report.tsv', 'w') as f:
-        for i in range(1, 5):
+        for i in range(1, 3):
             f.write(f"{i}\n")
             f.flush() 
             print(f"Added number {i} to report, waiting 2 minutes...")
-            time.sleep(30) 
+            time.sleep(5) 
     
     # Now gzip it
     with open('/home/ubuntu/checkfiles/report.tsv', 'rb') as f_in:

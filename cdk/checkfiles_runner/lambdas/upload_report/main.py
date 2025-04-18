@@ -6,6 +6,7 @@ import time
 import os
 import tempfile
 import io
+import base64 
 
 # Configure logging
 logging.basicConfig(
@@ -56,9 +57,8 @@ def upload_report_to_slack(event, context):
         slack_token = json.loads(token_secret)['BOT_TOKEN']
         slack_channel_id = json.loads(channel_secret)['CHANNEL_ID']
         
-
-        print(slack_token)
-        print(slack_channel_id)
+        print ('zopa')
+        
         
         # Use SSM to get the base64 encoded content
         copy_command = ssm.send_command(
@@ -77,6 +77,7 @@ def upload_report_to_slack(event, context):
             }
         )
         
+        print ('zopa 2')
         time.sleep(2)  # Wait for command to complete
         
         result = ssm.get_command_invocation(
