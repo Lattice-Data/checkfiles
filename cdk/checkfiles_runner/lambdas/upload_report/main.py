@@ -1,4 +1,3 @@
-
 import json
 import boto3
 import requests
@@ -15,6 +14,32 @@ def upload_report_to_slack(event, context):
     secrets = boto3.client('secretsmanager')
     
     try:
+        # First, check the file status
+        check_commands = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName='AWS-RunShellScript',
+            Parameters={
+                'commands': [
+                    'ls -l /home/ubuntu/checkfiles/',  # List directory contents
+                    'pwd',  # Check current directory
+                    'whoami',  # Check user context
+                    'find /home/ubuntu/checkfiles -name "*.gz"'  # Find any .gz files
+                ]
+            }
+        )
+        
+        time.sleep(2)
+        
+        check_result = ssm.get_command_invocation(
+            CommandId=check_commands['Command']['CommandId'],
+            InstanceId=instance_id
+        )
+        
+        if check_result['Status'] == 'Success':
+            logging.info(f"Directory contents: {check_result['StandardOutputContent']}")
+        else:
+            logging.error(f"Failed to check directory: {check_result['StandardErrorContent']}")
+
         token_secret = secrets.get_secret_value(
             SecretId=os.environ['SLACK_TOKEN_ARN']
         )['SecretString']
@@ -32,13 +57,25 @@ def upload_report_to_slack(event, context):
         
         # Create a temporary file to store the content
         with tempfile.NamedTemporaryFile(suffix='.tsv.gz') as temp_file:
+            
             # Use SSM to copy the gzipped file content
             copy_command = ssm.send_command(
                 InstanceIds=[instance_id],
                 DocumentName='AWS-RunShellScript',
                 Parameters={
                     'commands': [
-                        'base64 /home/ubuntu/checkfiles/report.tsv.gz'
+                        'cd /home/ubuntu/checkfiles && ' +
+                        'if [ ! -f report.tsv.gz ]; then ' +
+                        '  echo "File not found in expected location, checking if it needs to be compressed..." && ' +
+                        '  if [ -f report.tsv ]; then ' +
+                        '    gzip -f report.tsv && ' +
+                        '    echo "Compressed report.tsv to report.tsv.gz" ; ' +
+                        '  else ' +
+                        '    echo "Neither report.tsv nor report.tsv.gz found" ; ' +
+                        '    exit 1 ; ' +
+                        '  fi ; ' +
+                        'fi && ' +
+                        'base64 report.tsv.gz'
                     ]
                 }
             )

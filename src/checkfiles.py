@@ -31,7 +31,7 @@ def generate_report():
             f.write(f"{i}\n")
             f.flush() 
             print(f"Added number {i} to report, waiting 2 minutes...")
-            time.sleep(60) 
+            time.sleep(30) 
     
     # Now gzip it
     with open('/home/ubuntu/checkfiles/report.tsv', 'rb') as f_in:
@@ -46,7 +46,7 @@ def main():
     print("CHECKFILES STARTED")
     print("Generating report...")
     generate_report()
-    time.sleep(120)  # Reduced sleep time for testing
+    time.sleep(60)  # Reduced sleep time for testing
     print("CHECKFILES FINISHED")
 
 
