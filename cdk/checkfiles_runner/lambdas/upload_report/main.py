@@ -24,7 +24,6 @@ def upload_report_to_slack(event, context):
         token_secret = secrets.get_secret_value(
             SecretId=os.environ['SLACK_TOKEN_ARN']
         )['SecretString']
-        
         channel_secret = secrets.get_secret_value(
             SecretId=os.environ['SLACK_CHANNEL_ID_ARN']
         )['SecretString']
@@ -52,7 +51,8 @@ def upload_report_to_slack(event, context):
             CommandId=copy_command['Command']['CommandId'],
             InstanceId=instance_id
         )
-        
+        print('result')
+        print(result)
         if result['Status'] != 'Success':
             raise Exception(f"Command failed: {result.get('StandardErrorContent', 'No error message available')}")
 
@@ -65,39 +65,47 @@ def upload_report_to_slack(event, context):
         file_content = base64.b64decode(base64_content)
         timestamp = time.strftime('%Y%m%d-%H%M%S')
         filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv.gz'
-
+        print('file_content')
+        print(file_content)
+        print('filename')
+        print(filename)
         # Get upload URL
         headers = {
-            "Authorization": f"Bearer {slack_token}"
+            "Authorization": f"Bearer {slack_token}",
+            "Content-Type": "application/json; charset=utf-8"
         }
 
         form_data = {
             "filename": filename,
-            "length": str(len(file_content)),
-            "initial_comment": f"Checkfiles report for {instance_name_suffix}",
+            "length": len(file_content),
             "channels": [slack_channel_id]
         }
 
+        print('form_data')
+        print(form_data)
         upload_url_response = requests.post(
             "https://slack.com/api/files.getUploadURLExternal",
             headers=headers,
-            data=form_data
+            json=form_data
         )
-
+        print('upload_url_response')
+        print(upload_url_response)
         upload_data = upload_url_response.json()
         if not upload_data.get("ok"):
             raise Exception(f"Failed to get upload URL: {upload_data.get('error', 'Unknown error')}")
 
         upload_url = upload_data["upload_url"]
         file_id = upload_data["file_id"]
-
+        print(upload_url)
+        print(file_id)
         # Upload file content
         upload_response = requests.post(
             upload_url,
             headers={"Content-Type": "application/octet-stream"},
-            data=file_content
+            json=file_content
         )
-
+        print('upload_response')
+        print(upload_response)
         if upload_response.status_code != 200:
             raise Exception(f"File upload failed: {upload_response.text}")
 
@@ -110,9 +118,12 @@ def upload_report_to_slack(event, context):
                     "public": True
                 }
             ],
+            "channels": slack_channel_id,
             "channel_ids": [slack_channel_id],
             "initial_comment": f"Checkfiles report for {instance_name_suffix}"
         }
+        print("complete_payload")
+        print(complete_payload)
 
         complete_response = requests.post(
             "https://slack.com/api/files.completeUploadExternal",
@@ -122,6 +133,8 @@ def upload_report_to_slack(event, context):
             },
             json=complete_payload
         )
+        print("complete_response")
+        print(complete_response)
 
         response_data = complete_response.json()
         if not response_data.get("ok"):
