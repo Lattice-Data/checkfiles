@@ -73,7 +73,9 @@ def upload_report_to_slack(event, context):
 
         form_data = {
             "filename": filename,
-            "length": str(len(file_content))
+            "length": str(len(file_content)),
+            "initial_comment": f"Checkfiles report for {instance_name_suffix}",
+            "channels": [slack_channel_id]
         }
 
         upload_url_response = requests.post(
@@ -104,9 +106,12 @@ def upload_report_to_slack(event, context):
             "files": [
                 {
                     "id": file_id,
-                    "title": filename
+                    "title": filename,
+                    "public": True
                 }
-            ]
+            ],
+            "channel_ids": [slack_channel_id],
+            "initial_comment": f"Checkfiles report for {instance_name_suffix}"
         }
 
         complete_response = requests.post(
@@ -140,7 +145,7 @@ def upload_report_to_slack(event, context):
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"<{file_info['url_private']}|{filename}>"
+                            "text": f"<{file_info['url_private_download']}|Download {filename}>"
                         }
                     }
                 ]
