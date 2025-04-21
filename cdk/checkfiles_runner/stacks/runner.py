@@ -531,23 +531,6 @@ class RunCheckfilesStepFunction(Stack):
             payload_response_only=True,
             result_selector={
                 'status.$': '$.status',
-                'file_url.$': '$.file_url',
-                'slack_notification.$': '$.slack_notification',
-                'instance_id.$': '$.instance_id',
-                'instance_id_list.$': '$.instance_id_list',
-                'instance_name_suffix.$': '$.instance_name_suffix',
-                'backend_uri.$': '$.backend_uri',
-                'query.$': '$.query',
-                'update.$': '$.update'
-            }
-        )
-        make_report_uploaded_message = Pass(
-            self,
-            'MakeReportUploadedMessage',
-            parameters={
-                'detailType.$': '$.slack_notification.detailType',
-                'source.$': '$.slack_notification.source',
-                'detail.$': '$.slack_notification.detail',
                 'instance_id.$': '$.instance_id',
                 'instance_id_list.$': '$.instance_id_list',
                 'instance_name_suffix.$': '$.instance_name_suffix',
@@ -557,32 +540,6 @@ class RunCheckfilesStepFunction(Stack):
             }
         )
 
-        make_upload_notification = Pass(
-            self,
-            'MakeUploadNotification',
-            parameters={
-                'detailType': 'CheckfilesReport',
-                'source': 'RunCheckfilesStepFunction',
-                'detail': {
-                    'metadata': {
-                        'includes_slack_notification': True
-                    },
-                    'data': {
-                        'slack': {
-                            'text.$': "States.Format(':white_check_mark: *Checkfiles {} Report* | Gzipped report uploaded to Slack\nFile: {}', $.instance_name_suffix, $.filename)"
-                        }
-                    }
-                },
-                # Pass through all necessary fields
-                'instance_id.$': '$.instance_id',
-                'instance_id_list.$': '$.instance_id_list',
-                'instance_name_suffix.$': '$.instance_name_suffix',
-                'backend_uri.$': '$.backend_uri',
-                'query.$': '$.query',
-                'update.$': '$.update',
-                'filename.$': '$.filename'
-            }
-        )
         no_files_to_process = Succeed(
             self,
             'No files to process.'
@@ -622,8 +579,7 @@ class RunCheckfilesStepFunction(Stack):
             'SendPendingFilesCheckedSlackNotification')
         send_checkfiles_finished_slack_notification = self.make_slack_notification_task(
             'SendCheckfilesFinishedSlackNotification')
-        send_report_uploaded_notification = self.make_slack_notification_task(
-            'SendReportUploadedSlackNotification')
+
 
         definition = check_pending_files.next(
             make_pending_files_checked_message
@@ -671,12 +627,8 @@ class RunCheckfilesStepFunction(Stack):
                             send_checkfiles_finished_slack_notification
                         ).next(
                             upload_report.next(
-                                make_upload_notification
-                            ).next(
-                                send_report_uploaded_notification
+                                terminate_instance
                             )
-                        ).next(
-                            terminate_instance
                         )
                     )
                 )
