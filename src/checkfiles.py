@@ -34,9 +34,9 @@ def generate_report():
             time.sleep(5) 
     
     # Now gzip it
-    with open('/home/ubuntu/checkfiles/report.tsv', 'rb') as f_in:
-        with gzip.open('/home/ubuntu/checkfiles/report.tsv.gz', 'wb') as f_out:
-            f_out.write(f_in.read())
+    #with open('/home/ubuntu/checkfiles/report.tsv', 'rb') as f_in:
+    #    with gzip.open('/home/ubuntu/checkfiles/report.tsv.gz', 'wb') as f_out:
+    #        f_out.write(f_in.read())
     
     # Remove the original uncompressed file
     #os.remove('/home/ubuntu/checkfiles/report.tsv')

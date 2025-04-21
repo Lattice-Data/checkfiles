@@ -33,17 +33,14 @@ def upload_report_to_slack(event, context):
 
         # Get file content from EC2
         copy_command = ssm.send_command(
-            InstanceIds=[instance_id],
-            DocumentName='AWS-RunShellScript',
-            Parameters={
-                'commands': [
-                    'cd /home/ubuntu/checkfiles && ' +
-                    'ls -l report.tsv.gz || ls -l report.tsv && ' +
-                    '[ ! -f report.tsv.gz ] && [ -f report.tsv ] && gzip -f report.tsv; ' +
-                    'base64 -w 0 report.tsv.gz'
-                ]
-            }
-        )
+        InstanceIds=[instance_id],
+        DocumentName='AWS-RunShellScript',
+        Parameters={
+            'commands': [
+                'cd /home/ubuntu/checkfiles && base64 -w 0 report.tsv'
+            ]
+        }
+    )
         
         time.sleep(2)
         
@@ -64,21 +61,19 @@ def upload_report_to_slack(event, context):
         
         file_content = base64.b64decode(base64_content)
         timestamp = time.strftime('%Y%m%d-%H%M%S')
-        filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv.gz'
+        filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv'
         print('file_content')
         print(file_content)
         print('filename')
         print(filename)
         # Get upload URL
         headers = {
-            "Authorization": f"Bearer {slack_token}",
-            "Content-Type": "application/json; charset=utf-8"
+            "Authorization": f"Bearer {slack_token}"
         }
 
         form_data = {
             "filename": filename,
-            "length": len(file_content),
-            "channels": [slack_channel_id]
+            "length": len(file_content)
         }
 
         print('form_data')
@@ -86,10 +81,11 @@ def upload_report_to_slack(event, context):
         upload_url_response = requests.post(
             "https://slack.com/api/files.getUploadURLExternal",
             headers=headers,
-            json=form_data
+            data=form_data
         )
         print('upload_url_response')
-        print(upload_url_response)
+        print(upload_url_response.json())
+
         upload_data = upload_url_response.json()
         if not upload_data.get("ok"):
             raise Exception(f"Failed to get upload URL: {upload_data.get('error', 'Unknown error')}")
@@ -102,10 +98,11 @@ def upload_report_to_slack(event, context):
         upload_response = requests.post(
             upload_url,
             headers={"Content-Type": "application/octet-stream"},
-            json=file_content
+            data=file_content
         )
         print('upload_response')
         print(upload_response)
+
         if upload_response.status_code != 200:
             raise Exception(f"File upload failed: {upload_response.text}")
 
@@ -114,8 +111,7 @@ def upload_report_to_slack(event, context):
             "files": [
                 {
                     "id": file_id,
-                    "title": filename,
-                    "public": True
+                    "title": filename
                 }
             ],
             "channels": slack_channel_id,
@@ -140,41 +136,6 @@ def upload_report_to_slack(event, context):
         if not response_data.get("ok"):
             raise Exception(f"Failed to complete upload: {response_data.get('error', 'Unknown error')}")
 
-        # Share file to channel
-        if "files" in response_data:
-            file_info = response_data["files"][0]
-            message_payload = {
-                "channel": slack_channel_id,
-                "text": f"Checkfiles report for {instance_name_suffix}",
-                "blocks": [
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"Checkfiles report for {instance_name_suffix}"
-                        }
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f"<{file_info['url_private_download']}|Download {filename}>"
-                        }
-                    }
-                ]
-            }
-
-            share_response = requests.post(
-                "https://slack.com/api/chat.postMessage",
-                headers={
-                    "Authorization": f"Bearer {slack_token}",
-                    "Content-Type": "application/json; charset=utf-8"
-                },
-                json=message_payload
-            )
-
-            if not share_response.json().get("ok"):
-                raise Exception(f"Failed to share file: {share_response.text}")
 
         return {
             'status': 'SUCCESS',
