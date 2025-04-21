@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools-rust>=1.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools-rust]
+rust-extensions = [
+    { path = "rust", binding = "PyO3" }
+]
