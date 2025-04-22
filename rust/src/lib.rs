@@ -4,92 +4,204 @@ use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
 use pyo3::types::{PyBytes, PyDict};
 use std::collections::HashMap;
+use regex::Regex;
+
+// FASTQ format regex patterns
+lazy_static::lazy_static! {
+    static ref SEQNAME_REGEX: Regex = Regex::new(r"^[A-Za-z0-9_.:-]+").unwrap();
+    static ref SEQ_REGEX: Regex = Regex::new(r"^[A-Za-z.~]+$").unwrap();
+    static ref QUAL_REGEX: Regex = Regex::new(r"^[!-~]+$").unwrap();
+}
+
+/// Result of FASTQ validation with detailed error information
+struct FastqValidationResult {
+    valid: bool,
+    error_message: Option<String>,
+    line_number: Option<usize>,
+}
+
+impl FastqValidationResult {
+    fn new_valid() -> Self {
+        FastqValidationResult {
+            valid: true,
+            error_message: None,
+            line_number: None,
+        }
+    }
+
+    fn new_invalid(error_message: String, line_number: usize) -> Self {
+        FastqValidationResult {
+            valid: false,
+            error_message: Some(error_message),
+            line_number: Some(line_number),
+        }
+    }
+}
 
 /// Validate a FASTQ input stream for correct format
 /// 
-/// This function can process any type that implements BufRead
-fn validate_fastq_stream<R: BufRead>(reader: R) -> Result<bool, String> {
-    let mut line_count = 0;
-    let mut lines = reader.lines();
+/// This function checks:
+/// 1. Every block starts with @ (header)
+/// 2. Header line matches the required seqname pattern
+/// 3. Sequence line contains only valid sequence characters
+/// 4. + line follows the sequence, with optional matching seqname
+/// 5. Quality line contains valid quality characters
+/// 6. Sequence and quality lines have equal length
+fn validate_fastq_stream<R: BufRead>(reader: R) -> FastqValidationResult {
+    let mut line_count: usize = 0;
+    let mut lines = reader.lines().peekable();
     
-    while let Some(header_result) = lines.next() {
-        // Process header line (should start with @)
-        let header = match header_result {
-            Ok(line) => line,
-            Err(e) => return Err(format!("Error reading line {}: {}", line_count + 1, e)),
-        };
+    // Process the file block by block
+    while let Some(Ok(header_line)) = lines.next() {
+        line_count += 1;
         
-        if !header.starts_with('@') {
-            return Ok(false);
+        // Check header line starts with @
+        if !header_line.starts_with('@') {
+            return FastqValidationResult::new_invalid(
+                format!("Header line must start with @: '{}'", header_line),
+                line_count
+            );
         }
         
-        // Process sequence line
-        let sequence = match lines.next() {
-            Some(Ok(line)) => line,
-            Some(Err(e)) => return Err(format!("Error reading sequence line: {}", e)),
-            None => return Ok(false), // Unexpected EOF
-        };
-        
-        // Store sequence length for comparison
-        let sequence_length = sequence.trim().len();
-        
-        // Process quality header line (should start with +)
-        let quality_header = match lines.next() {
-            Some(Ok(line)) => line,
-            Some(Err(e)) => return Err(format!("Error reading quality header: {}", e)),
-            None => return Ok(false), // Unexpected EOF
-        };
-        
-        if !quality_header.starts_with('+') {
-            return Ok(false);
+        // Extract and validate seqname from header
+        let seqname = &header_line[1..];
+        if !SEQNAME_REGEX.is_match(seqname) {
+            return FastqValidationResult::new_invalid(
+                format!("Invalid sequence name format: '{}'", seqname),
+                line_count
+            );
         }
         
-        // Process quality line
-        let quality = match lines.next() {
+        // Get sequence line
+        let seq_line = match lines.next() {
             Some(Ok(line)) => line,
-            Some(Err(e)) => return Err(format!("Error reading quality line: {}", e)),
-            None => return Ok(false), // Unexpected EOF
+            _ => return FastqValidationResult::new_invalid(
+                "Unexpected end of file after header line".to_string(),
+                line_count + 1
+            ),
         };
+        line_count += 1;
         
-        // Check sequence and quality lengths match
-        let quality_length = quality.trim().len();
-        if sequence_length != quality_length {
-            return Ok(false);
+        // Validate sequence characters
+        if !SEQ_REGEX.is_match(&seq_line) {
+            return FastqValidationResult::new_invalid(
+                format!("Invalid sequence characters: '{}'", seq_line),
+                line_count
+            );
         }
         
-        line_count += 4;
+        // Get + line
+        let plus_line = match lines.next() {
+            Some(Ok(line)) => line,
+            _ => return FastqValidationResult::new_invalid(
+                "Unexpected end of file after sequence line".to_string(),
+                line_count + 1
+            ),
+        };
+        line_count += 1;
+        
+        // Check + line format
+        if !plus_line.starts_with('+') {
+            return FastqValidationResult::new_invalid(
+                format!("Quality header must start with +: '{}'", plus_line),
+                line_count
+            );
+        }
+        
+        // If + is followed by a seqname, check it matches the header seqname
+        if plus_line.len() > 1 {
+            let plus_seqname = &plus_line[1..];
+            if !plus_seqname.is_empty() && plus_seqname != seqname {
+                return FastqValidationResult::new_invalid(
+                    format!("Seqname in + line ('{}') doesn't match header seqname ('{}')", 
+                           plus_seqname, seqname),
+                    line_count
+                );
+            }
+        }
+        
+        // Get quality line
+        let qual_line = match lines.next() {
+            Some(Ok(line)) => line,
+            _ => return FastqValidationResult::new_invalid(
+                "Unexpected end of file after + line".to_string(),
+                line_count + 1
+            ),
+        };
+        line_count += 1;
+        
+        // Validate quality characters
+        if !QUAL_REGEX.is_match(&qual_line) {
+            return FastqValidationResult::new_invalid(
+                format!("Invalid quality characters: '{}'", qual_line),
+                line_count
+            );
+        }
+        
+        // Check sequence and quality line lengths match
+        if seq_line.len() != qual_line.len() {
+            return FastqValidationResult::new_invalid(
+                format!("Sequence length ({}) and quality length ({}) don't match", 
+                       seq_line.len(), qual_line.len()),
+                line_count
+            );
+        }
+        
+        // Check for valid quality values (ASCII 33-126)
+        for (i, c) in qual_line.chars().enumerate() {
+            let ascii_val = c as u32;
+            if ascii_val < 33 || ascii_val > 126 {
+                return FastqValidationResult::new_invalid(
+                    format!("Invalid quality value at position {}: ASCII {}", i + 1, ascii_val),
+                    line_count
+                );
+            }
+        }
     }
     
-    // A valid FASTQ file should have a multiple of 4 lines
-    Ok(line_count % 4 == 0 && line_count > 0)
+    // A valid FASTQ file should have at least one block
+    if line_count == 0 {
+        return FastqValidationResult::new_invalid(
+            "Empty FASTQ file".to_string(), 
+            0
+        );
+    }
+    
+    // Check if file has a complete number of blocks
+    if line_count % 4 != 0 {
+        return FastqValidationResult::new_invalid(
+            format!("Incomplete FASTQ block. Line count ({}) is not a multiple of 4", line_count),
+            line_count
+        );
+    }
+    
+    FastqValidationResult::new_valid()
 }
 
 /// Python-facing function to validate a FASTQ file
 #[pyfunction]
-fn validate_fastq(filename: &str) -> PyResult<bool> {
+fn validate_fastq(filename: &str) -> PyResult<(bool, Option<String>, Option<usize>)> {
     let file = match File::open(filename) {
         Ok(file) => file,
         Err(e) => return Err(PyValueError::new_err(format!("Cannot open file {}: {}", filename, e))),
     };
     
     let reader = BufReader::new(file);
-    match validate_fastq_stream(reader) {
-        Ok(result) => Ok(result),
-        Err(e) => Err(PyValueError::new_err(e)),
-    }
+    let result = validate_fastq_stream(reader);
+    
+    Ok((result.valid, result.error_message, result.line_number))
 }
 
 /// Python-facing function to validate a FASTQ stream from bytes
 #[pyfunction]
-fn validate_fastq_from_bytes(_py: Python, data: &PyBytes) -> PyResult<bool> {
+fn validate_fastq_from_bytes(_py: Python, data: &PyBytes) -> PyResult<(bool, Option<String>, Option<usize>)> {
     let bytes = data.as_bytes();
     let cursor = std::io::Cursor::new(bytes);
     let reader = BufReader::new(cursor);
     
-    match validate_fastq_stream(reader) {
-        Ok(result) => Ok(result),
-        Err(e) => Err(PyValueError::new_err(e)),
-    }
+    let result = validate_fastq_stream(reader);
+    
+    Ok((result.valid, result.error_message, result.line_number))
 }
 
 /// Calculate statistics for a FASTQ stream
@@ -98,13 +210,16 @@ fn fastq_stats_stream<R: BufRead>(reader: R) -> Result<HashMap<String, usize>, S
     let mut total_length = 0;
     let mut min_length = usize::MAX;
     let mut max_length = 0;
+    let mut base_counts = HashMap::new();
+    let mut quality_sum = 0;
     let mut lines = reader.lines();
     
     while let Some(header_result) = lines.next() {
-        // Skip header line
-        if header_result.is_err() {
-            return Err("Error reading header line".to_string());
-        }
+        // Process header line
+        let _header = match header_result {
+            Ok(line) => line,
+            Err(e) => return Err(format!("Error reading header line: {}", e)),
+        };
         
         // Process sequence line
         let sequence = match lines.next() {
@@ -112,16 +227,32 @@ fn fastq_stats_stream<R: BufRead>(reader: R) -> Result<HashMap<String, usize>, S
             _ => return Err("Error reading sequence line".to_string()),
         };
         
+        // Count bases
+        for base in sequence.chars() {
+            *base_counts.entry(base).or_insert(0) += 1;
+        }
+        
         // Update statistics
-        let length = sequence.trim().len();
+        let length = sequence.len();
         read_count += 1;
         total_length += length;
         min_length = min_length.min(length);
         max_length = max_length.max(length);
         
-        // Skip quality header and quality line
-        if lines.next().is_none() || lines.next().is_none() {
-            return Err("Incomplete FASTQ record".to_string());
+        // Skip + line
+        if lines.next().is_none() {
+            return Err("Incomplete FASTQ record (missing + line)".to_string());
+        }
+        
+        // Process quality line
+        let quality = match lines.next() {
+            Some(Ok(line)) => line,
+            _ => return Err("Error reading quality line".to_string()),
+        };
+        
+        // Calculate quality stats
+        for q in quality.chars() {
+            quality_sum += (q as u32 - 33) as usize;
         }
     }
     
@@ -132,11 +263,19 @@ fn fastq_stats_stream<R: BufRead>(reader: R) -> Result<HashMap<String, usize>, S
         stats.insert("min_length".to_string(), min_length);
         stats.insert("max_length".to_string(), max_length);
         stats.insert("total_length".to_string(), total_length);
+        stats.insert("avg_quality".to_string(), quality_sum / total_length);
+        
+        // Add base counts
+        for (base, count) in base_counts {
+            let base_key = format!("base_{}", base);
+            stats.insert(base_key, count);
+        }
     } else {
         stats.insert("read_count".to_string(), 0);
         stats.insert("min_length".to_string(), 0);
         stats.insert("max_length".to_string(), 0);
         stats.insert("total_length".to_string(), 0);
+        stats.insert("avg_quality".to_string(), 0);
     }
     
     Ok(stats)

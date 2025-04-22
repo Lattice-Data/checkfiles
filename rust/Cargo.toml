@@ -8,4 +8,6 @@ name = "fastq_validator"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.18.0", features = ["extension-module"] }
+pyo3 = { version = "0.18.3", features = ["extension-module"] }
+regex = "1.8.4"
+lazy_static = "1.4.0"
