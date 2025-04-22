@@ -1,4 +1,3 @@
-
 variable "aws_access_key" {
   type    = string
   default = ""
@@ -69,11 +68,42 @@ source "amazon-ebs" "builder" {
 # https://www.packer.io/docs/from-1.5/blocks/build
 build {
   sources = ["source.amazon-ebs.builder"]
+
+  # Create necessary directories
+  provisioner "shell" {
+    inline = [
+      "sudo mkdir -p /tmp/build",
+      "sudo chmod 777 /tmp/build"
+    ]
+  }
+
+  # Copy Rust-related files
+  provisioner "file" {
+    source = "../../rust/Cargo.toml"
+    destination = "/tmp/build/Cargo.toml"
+  }
+
+  provisioner "file" {
+    source = "../../rust/Cargo.lock"
+    destination = "/tmp/build/Cargo.lock"
+  }
+
+  provisioner "file" {
+    source = "../../rust/src/"
+    destination = "/tmp/build/src/"
+  }
+
+  provisioner "file" {
+    source = "./rust-dependencies.json"
+    destination = "/tmp/build/rust-dependencies.json"
+  }
+
   provisioner "shell" {
     pause_before = "60s"
     scripts = "${var.installation_scripts}"
     max_retries = 5
   }
+
   post-processor "manifest" {
     output = "manifest.json"
     custom_data = {

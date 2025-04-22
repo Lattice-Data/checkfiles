@@ -5,6 +5,7 @@
     "installation_scripts": [
         "../scripts/install_base_checkfiles_packages.sh",
         "../scripts/install_rust.sh",
+        "../scripts/install_rust_dependencies.sh",
         "../scripts/install_goofys_and_validatefiles.sh",
         "../scripts/goofys_mount.sh"
     ],
