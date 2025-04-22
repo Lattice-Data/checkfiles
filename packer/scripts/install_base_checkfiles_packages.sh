@@ -13,4 +13,10 @@ sudo apt-get -y install \
     libsqlite3-dev \
     fuse \
     awscli \
-    jq
+    jq \
+    pkg-config \
+    libssl-dev
+
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' | sudo tee /etc/profile.d/rust.sh
+
+sudo chmod +rx /etc/profile.d/rust.sh
