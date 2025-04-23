@@ -49,6 +49,13 @@ class FastqValidator(BaseValidator):
                 errors={"file_not_found": f"File not found: {file_path}"}
             )
         
+        # Check for empty file
+        if os.path.getsize(file_path) == 0:
+            return self.format_validation_result(
+                valid=False,
+                errors={"empty_file": "FASTQ file is empty"}
+            )
+        
         errors = {}
         warnings = {}
         stats = {}

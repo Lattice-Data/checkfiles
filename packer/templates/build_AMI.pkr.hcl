@@ -89,8 +89,8 @@ build {
   }
 
   provisioner "file" {
-    source = "../../rust/src/"
-    destination = "/tmp/build/src/"
+    source = "../../rust/src"
+    destination = "/tmp/build/src"
   }
 
   provisioner "file" {
