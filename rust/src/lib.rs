@@ -2,13 +2,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
-use pyo3::types::{PyBytes, PyDict};
+use pyo3::types::{PyBytes, PyDict, IntoPyDict};
 use std::collections::HashMap;
 use regex::Regex;
 
 // FASTQ format regex patterns
 lazy_static::lazy_static! {
-    static ref SEQNAME_REGEX: Regex = Regex::new(r"^[A-Za-z0-9_.:-]+").unwrap();
     static ref SEQ_REGEX: Regex = Regex::new(r"^[A-Za-z.~]+$").unwrap();
     static ref QUAL_REGEX: Regex = Regex::new(r"^[!-~]+$").unwrap();
 }
@@ -63,15 +62,6 @@ fn validate_fastq_stream<R: BufRead>(reader: R) -> FastqValidationResult {
             );
         }
         
-        // Extract and validate seqname from header
-        let seqname = &header_line[1..];
-        if !SEQNAME_REGEX.is_match(seqname) {
-            return FastqValidationResult::new_invalid(
-                format!("Invalid sequence name format: '{}'", seqname),
-                line_count
-            );
-        }
-        
         // Get sequence line
         let seq_line = match lines.next() {
             Some(Ok(line)) => line,
@@ -108,13 +98,14 @@ fn validate_fastq_stream<R: BufRead>(reader: R) -> FastqValidationResult {
             );
         }
         
-        // If + is followed by a seqname, check it matches the header seqname
+        // If + is followed by a seqname, check it matches the header seqname exactly
         if plus_line.len() > 1 {
-            let plus_seqname = &plus_line[1..];
-            if !plus_seqname.is_empty() && plus_seqname != seqname {
+            let plus_seqname = &plus_line[1..];  // Everything after +
+            let header_seqname = &header_line[1..];  // Everything after @
+            if plus_seqname != header_seqname {
                 return FastqValidationResult::new_invalid(
                     format!("Seqname in + line ('{}') doesn't match header seqname ('{}')", 
-                           plus_seqname, seqname),
+                           plus_seqname, header_seqname),
                     line_count
                 );
             }
@@ -180,7 +171,7 @@ fn validate_fastq_stream<R: BufRead>(reader: R) -> FastqValidationResult {
 
 /// Python-facing function to validate a FASTQ file
 #[pyfunction]
-fn validate_fastq(filename: &str) -> PyResult<(bool, Option<String>, Option<usize>)> {
+fn validate_fastq(py: Python, filename: &str) -> PyResult<PyObject> {
     let file = match File::open(filename) {
         Ok(file) => file,
         Err(e) => return Err(PyValueError::new_err(format!("Cannot open file {}: {}", filename, e))),
@@ -189,19 +180,39 @@ fn validate_fastq(filename: &str) -> PyResult<(bool, Option<String>, Option<usiz
     let reader = BufReader::new(file);
     let result = validate_fastq_stream(reader);
     
-    Ok((result.valid, result.error_message, result.line_number))
+    // Convert usize to u64 for Python compatibility
+    let line_number = result.line_number.map(|n| n as u64);
+    
+    // Create Python tuple directly without using eval
+    let tuple = (
+        result.valid,
+        result.error_message,
+        line_number
+    ).into_py(py);
+    
+    Ok(tuple)
 }
 
 /// Python-facing function to validate a FASTQ stream from bytes
 #[pyfunction]
-fn validate_fastq_from_bytes(_py: Python, data: &PyBytes) -> PyResult<(bool, Option<String>, Option<usize>)> {
+fn validate_fastq_from_bytes(py: Python, data: &PyBytes) -> PyResult<PyObject> {
     let bytes = data.as_bytes();
     let cursor = std::io::Cursor::new(bytes);
     let reader = BufReader::new(cursor);
     
     let result = validate_fastq_stream(reader);
     
-    Ok((result.valid, result.error_message, result.line_number))
+    // Convert usize to u64 for Python compatibility
+    let line_number = result.line_number.map(|n| n as u64);
+    
+    // Create Python tuple directly without using eval
+    let tuple = (
+        result.valid,
+        result.error_message,
+        line_number
+    ).into_py(py);
+    
+    Ok(tuple)
 }
 
 /// Calculate statistics for a FASTQ stream
