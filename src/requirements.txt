@@ -2,6 +2,10 @@
 requests==2.28.1
 pysam==0.21.0
 boto3==1.26.0
+crcmod>=1.7
+pytest>=7.3.1
+pytest-cov>=4.1.0
 
 # Build dependencies
 maturin>=1.0.0  # For building Rust extensions
+

@@ -8,6 +8,9 @@ import os
 import concurrent.futures
 import threading
 from datetime import datetime
+import hashlib
+import zlib
+import io
 
 class SimpleActivityTracker:
     """Simple activity tracker for validation processes."""
@@ -117,21 +120,18 @@ def has_gz_extension(filename):
 def stream_s3_file(s3_path, debug=False, progress_tracker=None):
     """Stream a file from S3 using AWS CLI, decompressing if necessary."""
     try:
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Initializing S3 stream")
+        track_validation_progress(s3_path, progress_tracker, "Initializing S3 stream")
             
         print(f"Attempting to stream file from: {s3_path}")
         
         # Prepare command based on file extension
         is_gzipped = has_gz_extension(s3_path)
         if is_gzipped:
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Setting up decompression")
+            track_validation_progress(s3_path, progress_tracker, "Setting up decompression")
             print("File has gzip extension, using decompression pipeline")
             cmd = f"aws s3 cp {s3_path} - | gunzip -c"
         else:
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Setting up direct stream")
+            track_validation_progress(s3_path, progress_tracker, "Setting up direct stream")
             print("File does not have gzip extension, streaming directly")
             cmd = f"aws s3 cp {s3_path} -"
             
@@ -174,8 +174,7 @@ def stream_s3_file(s3_path, debug=False, progress_tracker=None):
             stderr=subprocess.PIPE
         )
         
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Stream ready for validation")
+        track_validation_progress(s3_path, progress_tracker, "Stream ready for validation")
             
         return process.stdout
             
@@ -187,52 +186,82 @@ def stream_s3_file(s3_path, debug=False, progress_tracker=None):
             if stderr_output:
                 print(f"Subprocess error output: {stderr_output}")
                 
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status=f"Error: {str(e)}")
+        track_validation_progress(s3_path, progress_tracker, f"Error: {str(e)}")
             
         return None
+
+def initialize_validator(file_format):
+    """Initialize and return the appropriate validator for the given file format.
+    
+    Args:
+        file_format (str): The format of the file to validate (e.g., "fastq")
+        
+    Returns:
+        object: An initialized validator object or None if format is unsupported
+        
+    Raises:
+        ValueError: If the file format is not supported
+        ImportError: If there's an issue importing the validator module
+    """
+    if file_format.lower() == "fastq":
+        try:
+            from src.validators.fastq import FastqValidator
+            return FastqValidator()
+        except ImportError as e:
+            raise ImportError(f"Error importing FastqValidator: {e}\nMake sure the Rust implementation is properly installed")
+    else:
+        raise ValueError(f"Unsupported file format: {file_format}")
+
+def track_validation_progress(file_path, progress_tracker, status_message, success=None, results=None):
+    """Helper function to handle progress tracking for file validation.
+    
+    Args:
+        file_path (str): Path to the file being processed
+        progress_tracker (SimpleActivityTracker): Progress tracker instance or None
+        status_message (str): Status message to update
+        success (bool, optional): Whether validation was successful
+        results (dict, optional): Results of validation if complete
+    """
+    if not progress_tracker:
+        return
+        
+    if status_message:
+        progress_tracker.update_progress(file_path, status=status_message)
+        
+    if success is not None and results is not None:
+        progress_tracker.complete_file(file_path, success, results)
 
 def validate_local_file(file_path, file_format, debug=False, validator=None, progress_tracker=None):
     """Validate a local file."""
     try:
         if progress_tracker:
-            progress_tracker.init_file(file_path)  # Ensure we initialize tracking
-            progress_tracker.update_progress(file_path, status="Initializing")
+            progress_tracker.init_file(file_path)
+            
+        track_validation_progress(file_path, progress_tracker, "Initializing")
             
         if validator is None:
-            if file_format.lower() == "fastq":
-                from src.validators.fastq import FastqValidator
-                validator = FastqValidator()
-                
-                if progress_tracker:
-                    progress_tracker.update_progress(file_path, status="Validator created")
-            else:
-                raise ValueError(f"Unsupported file format: {file_format}")
+            try:
+                validator = initialize_validator(file_format)
+                track_validation_progress(file_path, progress_tracker, "Validator created")
+            except (ValueError, ImportError) as e:
+                raise e
                 
         print(f"Validating local file: {file_path}")
         
-        if progress_tracker:
-            progress_tracker.update_progress(file_path, status="Reading file")
+        track_validation_progress(file_path, progress_tracker, "Reading file")
         
         # Check if local file is gzipped
         if has_gz_extension(file_path):
-            if progress_tracker:
-                progress_tracker.update_progress(file_path, status="Decompressing")
+            track_validation_progress(file_path, progress_tracker, "Decompressing")
                 
             with gzip.open(file_path, 'rb') as f:
-                if progress_tracker:
-                    progress_tracker.update_progress(file_path, status="Running validation")
-                    
+                track_validation_progress(file_path, progress_tracker, "Running validation")
                 results = validator.validate_stream(f)
         else:
-            if progress_tracker:
-                progress_tracker.update_progress(file_path, status="Running validation")
-                
+            track_validation_progress(file_path, progress_tracker, "Running validation")
             results = validator.validate_file(file_path)
             
-        if progress_tracker:
-            progress_tracker.update_progress(file_path, status="Validation complete")
-            progress_tracker.complete_file(file_path, True, results)
+        track_validation_progress(file_path, progress_tracker, "Validation complete", True, results)
             
         return {
             "file_path": file_path,
@@ -244,9 +273,7 @@ def validate_local_file(file_path, file_format, debug=False, validator=None, pro
         error_msg = f"Error validating {file_path}: {str(e)}"
         print(error_msg)
         
-        if progress_tracker:
-            progress_tracker.update_progress(file_path, status=f"Error: {str(e)}")
-            progress_tracker.complete_file(file_path, False, {"error": str(e)})
+        track_validation_progress(file_path, progress_tracker, f"Error: {str(e)}", False, {"error": str(e)})
             
         return {
             "file_path": file_path,
@@ -261,26 +288,65 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
             progress_tracker.init_file(s3_path)
             
         if validator is None:
-            if file_format.lower() == "fastq":
-                from src.validators.fastq import FastqValidator
-                validator = FastqValidator()
-                
+            try:
+                validator = initialize_validator(file_format)
                 if progress_tracker:
                     progress_tracker.update_progress(s3_path, status="Validator created")
-            else:
-                raise ValueError(f"Unsupported file format: {file_format}")
+            except (ValueError, ImportError) as e:
+                raise e
                 
         print(f"Validating S3 file: {s3_path}")
         
         if progress_tracker:
             progress_tracker.update_progress(s3_path, status="Starting S3 streaming")
             
+        # Initialize hash objects for streaming
+        md5_hash = hashlib.md5()
+        sha256_hash = hashlib.sha256()
+        
+        # Use crcmod for CRC32C calculation
+        import crcmod.predefined
+        crc32c_func = crcmod.predefined.Crc('crc-32c')
+        
+        content_md5_hash = hashlib.md5() if has_gz_extension(s3_path) else None
+            
         stream = stream_s3_file(s3_path, debug=debug, progress_tracker=progress_tracker)
         if stream:
             if progress_tracker:
                 progress_tracker.update_progress(s3_path, status="Running validation")
                 
-            results = validator.validate_stream(stream)
+            # Create a buffer to store chunks for validation
+            chunks = []
+            while chunk := stream.read(65536):  # 64kb chunks
+                # Update all hashes
+                md5_hash.update(chunk)
+                sha256_hash.update(chunk)
+                crc32c_func.update(chunk)
+                
+                # Store chunk for validation
+                chunks.append(chunk)
+            
+            # Combine chunks for validation
+            combined_stream = io.BytesIO(b''.join(chunks))
+            results = validator.validate_stream(combined_stream)
+            
+            # Add hash results
+            results['md5sum'] = md5_hash.hexdigest()
+            results['sha256'] = sha256_hash.hexdigest()
+            results['crc32c'] = format(crc32c_func.crcValue, '08x')
+            
+            # If gzipped, calculate uncompressed md5
+            if has_gz_extension(s3_path):
+                try:
+                    # Use system command for uncompressed content
+                    output = subprocess.check_output(
+                        f'aws s3 cp {s3_path} - | gunzip -c | md5sum',
+                        shell=True,
+                        stderr=subprocess.PIPE
+                    ).decode('utf-8')
+                    results['content_md5sum'] = output.split()[0]
+                except (subprocess.SubprocessError, IndexError):
+                    results['content_md5sum'] = None
             
             if progress_tracker:
                 progress_tracker.update_progress(s3_path, status="Validation complete")
@@ -328,17 +394,13 @@ def main():
         return
         
     # Initialize validator
-    validator = None
-    if args.file_format.lower() == "fastq":
-        try:
-            from src.validators.fastq import FastqValidator
-            validator = FastqValidator()
-        except ImportError as e:
-            print(f"Error importing FastqValidator: {e}")
-            print("Make sure the Rust implementation is properly installed")
-            return
-    else:
-        print(f"Unsupported file format: {args.file_format}")
+    try:
+        validator = initialize_validator(args.file_format)
+    except ValueError as e:
+        print(str(e))
+        return
+    except ImportError as e:
+        print(str(e))
         return
         
     # Get list of files to process
