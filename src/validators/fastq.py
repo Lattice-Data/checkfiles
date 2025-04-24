@@ -86,6 +86,10 @@ class FastqValidator(BaseValidator):
             
             # Get statistics from Rust
             stats = fastq_validator.fastq_stats(file_path)
+            
+            # Process the collections data
+            self._add_collections_to_stats(stats)
+            
             logger.debug(f"Validated FASTQ file with Rust: {file_path}")
             
         except ValueError as e:
@@ -143,6 +147,10 @@ class FastqValidator(BaseValidator):
             
             # Get statistics from Rust
             stats = fastq_validator.fastq_stats_from_bytes(data)
+            
+            # Process the collections data
+            self._add_collections_to_stats(stats)
+            
             logger.debug("Validated FASTQ stream with Rust")
             
             # Try to reset stream position if possible
@@ -209,3 +217,49 @@ class FastqValidator(BaseValidator):
             warnings["low_sequence_volume"] = f"Total sequence volume is very small: {total_length} bp"
         
         return {"errors": errors, "warnings": warnings}
+    
+    def _add_collections_to_stats(self, stats: Dict[str, Any]) -> None:
+        """Add the collections data to the stats dictionary."""
+        # Initialize empty collections
+        stats["machine_ids"] = []
+        stats["flowcells"] = []
+        stats["lanes"] = []
+        stats["instrument_types"] = []
+        
+        # Get counts
+        machine_ids_count = stats.get("machine_ids_count", 0)
+        flowcells_count = stats.get("flowcells_count", 0)
+        lanes_count = stats.get("lanes_count", 0)
+        instrument_types_count = stats.get("instrument_types_count", 0)
+        
+        # If we have collections data, fetch and parse it
+        if machine_ids_count > 0:
+            machine_ids_str = fastq_validator.get_last_machine_ids()
+            if machine_ids_str:
+                stats["machine_ids"] = machine_ids_str.split("|")
+        
+        if flowcells_count > 0:
+            flowcells_str = fastq_validator.get_last_flowcells()
+            if flowcells_str:
+                stats["flowcells"] = flowcells_str.split("|")
+        
+        if lanes_count > 0:
+            lanes_str = fastq_validator.get_last_lanes()
+            if lanes_str:
+                # Convert string lane numbers to integers
+                stats["lanes"] = [int(lane) for lane in lanes_str.split("|")]
+        
+        if instrument_types_count > 0:
+            instrument_types_str = fastq_validator.get_last_instrument_types()
+            if instrument_types_str:
+                stats["instrument_types"] = instrument_types_str.split("|")
+        
+        # Remove the count keys to clean up the stats
+        stats.pop("machine_ids_count", None)
+        stats.pop("machine_ids_data", None)
+        stats.pop("flowcells_count", None)
+        stats.pop("flowcells_data", None)
+        stats.pop("lanes_count", None)
+        stats.pop("lanes_data", None)
+        stats.pop("instrument_types_count", None)
+        stats.pop("instrument_types_data", None)
