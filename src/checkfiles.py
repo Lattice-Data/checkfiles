@@ -13,6 +13,7 @@ import zlib
 import io
 import signal
 import crcmod.predefined
+import multiprocessing
 
 class SimpleActivityTracker:
     """Simple activity tracker for validation processes."""
@@ -84,6 +85,9 @@ class SimpleActivityTracker:
         print(f"\nValidation completed in {total_time:.1f} seconds")
 
 def parse_arguments():
+    # Get the number of available CPUs for default thread count
+    default_threads = multiprocessing.cpu_count()
+    
     parser = argparse.ArgumentParser(
         description='Checkfiles utility - validates file formats like FASTQ. Accepts files from local paths, S3, or stdin.',
         epilog='''Examples:
@@ -108,8 +112,8 @@ def parse_arguments():
                         help='Use streaming mode for validation (default: True)')
     parser.add_argument('-d', '--debug', action='store_true', 
                         help='Enable debug output')
-    parser.add_argument('-t', '--threads', type=int, default=4, 
-                        help='Number of threads for parallel processing (default: 4)')
+    parser.add_argument('-t', '--threads', type=int, default=default_threads, 
+                        help=f'Number of threads for parallel processing (default: {default_threads}, based on CPU count)')
     parser.add_argument('-q', '--quiet', action='store_true', 
                         help='Suppress progress indicators and only show final results')
     
@@ -530,6 +534,9 @@ def main():
     if not args.quiet:
         progress_tracker = SimpleActivityTracker(total_files)
     
+    # Report on thread count
+    print(f"Using {args.threads} threads for parallel processing")
+    
     # Process files in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
         futures = []
@@ -554,9 +561,18 @@ def main():
                 
         # Collect and store results
         all_results = []
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            all_results.append(result)
+        with open('validation_progress.log', 'w') as progress_file:
+            progress_file.write(f"Starting validation of {total_files} files at {datetime.now()}\n")
+            
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                all_results.append(result)
+                
+                # Log each completion to file
+                status = "Valid" if result["success"] and result["results"].get("valid", False) else "Invalid"
+                progress_file.write(f"{datetime.now()}: Completed {result['file_path']} - {status}\n")
+                progress_file.write(f"Progress: {len(all_results)}/{total_files} ({(len(all_results)/total_files)*100:.1f}%)\n")
+                progress_file.flush()  # Ensure it's written immediately
     
     # Close progress tracker
     if progress_tracker:

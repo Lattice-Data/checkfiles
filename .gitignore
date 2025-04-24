@@ -144,3 +144,4 @@ key.json
 
 packer/templates/manifest.json
 
+validation_progress.log
