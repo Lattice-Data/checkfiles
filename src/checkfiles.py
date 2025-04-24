@@ -493,6 +493,7 @@ def validate_gzip_format(file_path):
     return error
     
 def main():
+
     args = parse_arguments()
     
     # Check if file format is supported
