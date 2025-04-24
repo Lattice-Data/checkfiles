@@ -37,7 +37,7 @@ def upload_report_to_slack(event, context):
         DocumentName='AWS-RunShellScript',
         Parameters={
             'commands': [
-                'cd /home/ubuntu/checkfiles && base64 -w 0 report.tsv'
+                'cd /home/ubuntu/checkfiles && base64 -w 0 validation_progress.log'
             ]
         }
     )
