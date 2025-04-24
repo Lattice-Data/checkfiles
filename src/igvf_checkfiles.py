@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 from collections import namedtuple
 from math import floor
 from typing import Optional
@@ -67,6 +68,17 @@ def file_validation(portal_url, portal_auth: PortalAuth, validation_record: file
     gzipped_format_error = check_valid_gzipped_file_format(
         is_gzipped, file_format)
     validation_record.update_errors(gzipped_format_error)
+    
+    # Add gzip validation if file is supposed to be gzipped
+    if is_gzipped:
+        # Check if this is an S3 file
+        is_s3 = local_file_path.startswith('s3://')
+        gzip_validation_error = validate_gzip_format(local_file_path, is_s3=is_s3)
+        validation_record.update_errors(gzip_validation_error)
+        if gzip_validation_error:
+            logger.warning(f'{uuid} failed gzip validation: {gzip_validation_error}')
+            return validation_record
+
     logger.info(f'{uuid} calculated md5sum is {validation_record.file.md5sum}')
     md5_sum_error = check_md5sum(
         submitted_md5sum, validation_record.file.md5sum)
@@ -516,6 +528,60 @@ def patch_file(portal_uri: str, portal_auth: PortalAuth, validation_record: file
     response = requests.patch(
         f'{portal_uri}/{uuid_to_patch}', data=payload, headers=headers, auth=portal_auth)
     return response.json()
+
+
+def validate_gzip_format(file_path, is_s3=False):
+    """
+    Validate if a file is properly gzipped by checking magic number and basic header structure.
+    Does not read the entire file to avoid performance issues with large files.
+    
+    Args:
+        file_path (str): Path to the file to check
+        is_s3 (bool): Whether the file is from S3 and needs to be streamed
+        
+    Returns:
+        dict: Empty if valid, contains error message if invalid
+    """
+    error = {}
+    try:
+        if is_s3:
+            # For S3 files, use aws s3 cp to stream just the first few bytes
+            cmd = f"aws s3 cp {file_path} - --range 0-1"  # Get first 2 bytes for magic number
+            try:
+                magic_number = subprocess.check_output(
+                    cmd, shell=True, stderr=subprocess.PIPE)[:2]
+                if magic_number != b'\x1f\x8b':
+                    error = {'gzip_error': 'File does not have valid gzip magic number'}
+                    return error
+                
+                # Try reading a bit more to verify header structure
+                cmd = f"aws s3 cp {file_path} - --range 0-9 | gunzip -c"
+                subprocess.check_output(cmd, shell=True, stderr=subprocess.PIPE)
+            except subprocess.CalledProcessError as e:
+                error = {'gzip_error': f'File has invalid gzip header structure: {e.stderr.decode("utf-8")}'}
+        else:
+            # For local files, read directly
+            with open(file_path, 'rb') as f:
+                # Check gzip magic number (1f 8b)
+                magic_number = f.read(2)
+                if magic_number != b'\x1f\x8b':
+                    error = {'gzip_error': 'File does not have valid gzip magic number'}
+                    return error
+                
+                # Verify basic gzip header structure by reading first block
+                try:
+                    with gzip.open(file_path, 'rb') as gz:
+                        # Just read a small amount to verify header structure
+                        gz.read(1)
+                except (EOFError, zlib.error) as e:
+                    error = {'gzip_error': f'File has invalid gzip header structure: {str(e)}'}
+                    
+    except (IsADirectoryError, FileNotFoundError) as e:
+        error = {'gzip_error': str(e)}
+    except Exception as e:
+        error = {'gzip_error': f'Unexpected error checking gzip format: {str(e)}'}
+        
+    return error
 
 
 def main(args):

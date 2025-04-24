@@ -56,22 +56,13 @@ class FastqValidator(BaseValidator):
                 errors={"empty_file": "FASTQ file is empty"}
             )
         
-        # Special check for known invalid files
-        if os.path.basename(file_path) in ["mismatched_ids.fastq", "incomplete_record.fastq"]:
-            with open(file_path, 'r') as f:
-                content = f.read()
-                # If "mismatched_ids.fastq", check if it contains mismatched ID
-                if "read1" in content and "read2" in content:
-                    return self.format_validation_result(
-                        valid=False,
-                        errors={"invalid_format": "Seqname in + line doesn't match header seqname"}
-                    )
-        
         errors = {}
         warnings = {}
         stats = {}
         
+        file_handle = None
         try:
+            file_handle = open(file_path, 'rb')
             # Validate with Rust - unpack the tuple (valid, error_message, line_number)
             is_valid, error_msg, line_num = fastq_validator.validate_fastq(file_path)
             
@@ -96,6 +87,12 @@ class FastqValidator(BaseValidator):
             errors["validation_error"] = f"Validation error: {str(e)}"
             logger.error(f"Rust validation failed: {str(e)}")
             return self.format_validation_result(valid=False, errors=errors)
+        finally:
+            if file_handle:
+                try:
+                    file_handle.close()
+                except:
+                    pass
         
         # Additional validations and quality checks based on stats
         validation_result = self._perform_additional_validations(stats)

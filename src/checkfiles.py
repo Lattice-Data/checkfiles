@@ -11,6 +11,8 @@ from datetime import datetime
 import hashlib
 import zlib
 import io
+import signal
+import crcmod.predefined
 
 class SimpleActivityTracker:
     """Simple activity tracker for validation processes."""
@@ -119,6 +121,7 @@ def has_gz_extension(filename):
 
 def stream_s3_file(s3_path, debug=False, progress_tracker=None):
     """Stream a file from S3 using AWS CLI, decompressing if necessary."""
+    process = None
     try:
         track_validation_progress(s3_path, progress_tracker, "Initializing S3 stream")
             
@@ -175,19 +178,30 @@ def stream_s3_file(s3_path, debug=False, progress_tracker=None):
         )
         
         track_validation_progress(s3_path, progress_tracker, "Stream ready for validation")
-            
+        
+        # Return the stdout stream for validation
         return process.stdout
             
     except Exception as e:
         print(f"Error streaming from S3: {e}")
+        # Clean up process if it exists
+        if process:
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except:
+                pass
+        
         # Try to get the stderr output from the subprocess if available
-        if 'process' in locals():
-            stderr_output = process.stderr.read().decode('utf-8')
-            if stderr_output:
-                print(f"Subprocess error output: {stderr_output}")
+        if process and process.stderr:
+            try:
+                stderr_output = process.stderr.read().decode('utf-8')
+                if stderr_output:
+                    print(f"Subprocess error output: {stderr_output}")
+            except:
+                pass
                 
         track_validation_progress(s3_path, progress_tracker, f"Error: {str(e)}")
-            
         return None
 
 def initialize_validator(file_format):
@@ -300,64 +314,21 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         if progress_tracker:
             progress_tracker.update_progress(s3_path, status="Starting S3 streaming")
             
+        # Determine if file is gzipped once and reuse this information
+        is_gzipped = has_gz_extension(s3_path)
+        
+        # First pass: Calculate hashes
+        if progress_tracker:
+            progress_tracker.update_progress(s3_path, status="Calculating file hashes (1st pass)")
+        
         # Initialize hash objects for streaming
         md5_hash = hashlib.md5()
         sha256_hash = hashlib.sha256()
-        
-        # Use crcmod for CRC32C calculation
-        import crcmod.predefined
         crc32c_func = crcmod.predefined.Crc('crc-32c')
         
-        content_md5_hash = hashlib.md5() if has_gz_extension(s3_path) else None
-            
-        stream = stream_s3_file(s3_path, debug=debug, progress_tracker=progress_tracker)
-        if stream:
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Running validation")
-                
-            # Create a buffer to store chunks for validation
-            chunks = []
-            while chunk := stream.read(65536):  # 64kb chunks
-                # Update all hashes
-                md5_hash.update(chunk)
-                sha256_hash.update(chunk)
-                crc32c_func.update(chunk)
-                
-                # Store chunk for validation
-                chunks.append(chunk)
-            
-            # Combine chunks for validation
-            combined_stream = io.BytesIO(b''.join(chunks))
-            results = validator.validate_stream(combined_stream)
-            
-            # Add hash results
-            results['md5sum'] = md5_hash.hexdigest()
-            results['sha256'] = sha256_hash.hexdigest()
-            results['crc32c'] = format(crc32c_func.crcValue, '08x')
-            
-            # If gzipped, calculate uncompressed md5
-            if has_gz_extension(s3_path):
-                try:
-                    # Use system command for uncompressed content
-                    output = subprocess.check_output(
-                        f'aws s3 cp {s3_path} - | gunzip -c | md5sum',
-                        shell=True,
-                        stderr=subprocess.PIPE
-                    ).decode('utf-8')
-                    results['content_md5sum'] = output.split()[0]
-                except (subprocess.SubprocessError, IndexError):
-                    results['content_md5sum'] = None
-            
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Validation complete")
-                progress_tracker.complete_file(s3_path, True, results)
-                
-            return {
-                "file_path": s3_path,
-                "results": results,
-                "success": True
-            }
-        else:
+        # First stream to calculate hashes
+        stream1 = stream_s3_file(s3_path, debug=debug, progress_tracker=progress_tracker)
+        if not stream1:
             error_msg = f"Failed to stream S3 file: {s3_path}"
             print(error_msg)
             
@@ -370,7 +341,77 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
                 "error": error_msg,
                 "success": False
             }
+        
+        # Process first stream to calculate hashes
+        while chunk := stream1.read(65536):  # 64kb chunks
+            # Update all hashes
+            md5_hash.update(chunk)
+            sha256_hash.update(chunk)
+            crc32c_func.update(chunk)
+        
+        # Close first stream
+        if hasattr(stream1, 'close'):
+            stream1.close()
             
+        # Second pass: Perform actual validation
+        if progress_tracker:
+            progress_tracker.update_progress(s3_path, status="Starting validation (2nd pass)")
+            
+        # Create second stream for validation
+        stream2 = stream_s3_file(s3_path, debug=False, progress_tracker=progress_tracker)
+        if not stream2:
+            error_msg = f"Failed to create second stream for S3 file: {s3_path}"
+            print(error_msg)
+            
+            if progress_tracker:
+                progress_tracker.update_progress(s3_path, status="Second stream failed")
+                progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+                
+            return {
+                "file_path": s3_path,
+                "error": error_msg,
+                "success": False
+            }
+            
+        # Run validation on the second stream
+        if progress_tracker:
+            progress_tracker.update_progress(s3_path, status="Running validation")
+            
+        results = validator.validate_stream(stream2)
+        
+        # Close second stream
+        if hasattr(stream2, 'close'):
+            stream2.close()
+        
+        # Add hash results
+        results['md5sum'] = md5_hash.hexdigest()
+        results['sha256'] = sha256_hash.hexdigest()
+        results['crc32c'] = format(crc32c_func.crcValue, '08x')
+        
+        # If gzipped, calculate uncompressed md5
+        if is_gzipped:
+            try:
+                # Use consistent subprocess pattern with check_output
+                cmd = f'aws s3 cp {s3_path} - | gunzip -c | md5sum'
+                output = subprocess.check_output(
+                    cmd,
+                    shell=True,
+                    stderr=subprocess.PIPE
+                ).decode('utf-8')
+                results['content_md5sum'] = output.split()[0]
+            except (subprocess.SubprocessError, IndexError):
+                results['content_md5sum'] = None
+        
+        if progress_tracker:
+            progress_tracker.update_progress(s3_path, status="Validation complete")
+            progress_tracker.complete_file(s3_path, True, results)
+            
+        return {
+            "file_path": s3_path,
+            "results": results,
+            "success": True
+        }
+        
     except Exception as e:
         error_msg = f"Error validating {s3_path}: {str(e)}"
         print(error_msg)
@@ -385,6 +426,68 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
             "success": False
         }
 
+def validate_gzip_format(file_path):
+    """
+    Validate if a file is properly gzipped by checking magic number and basic header structure.
+    Does not read the entire file to avoid performance issues with large files.
+    Handles both local files and S3 files.
+    
+    Args:
+        file_path (str): Path to the file to check. Can be local path or s3:// URL
+        
+    Returns:
+        dict: Empty if valid, contains error message if invalid
+    """
+    error = {}
+    try:
+        if file_path.startswith('s3://'):
+            # For S3 files, use aws s3 cp to stream just the first few bytes
+            cmd = f"aws s3 cp {file_path} - --range 0-1"  # Get first 2 bytes for magic number
+            try:
+                # Use consistent subprocess pattern with check_output
+                magic_number = subprocess.check_output(
+                    cmd, 
+                    shell=True, 
+                    stderr=subprocess.PIPE
+                )[:2]
+                
+                if magic_number != b'\x1f\x8b':
+                    error = {'gzip_error': 'File does not have valid gzip magic number'}
+                    return error
+                
+                # Try reading a bit more to verify header structure
+                cmd = f"aws s3 cp {file_path} - --range 0-9 | gunzip -c"
+                subprocess.check_output(
+                    cmd, 
+                    shell=True, 
+                    stderr=subprocess.PIPE
+                )
+            except subprocess.CalledProcessError as e:
+                error = {'gzip_error': f'File has invalid gzip header structure: {e.stderr.decode("utf-8")}'}
+        else:
+            # For local files, read directly
+            with open(file_path, 'rb') as f:
+                # Check gzip magic number (1f 8b)
+                magic_number = f.read(2)
+                if magic_number != b'\x1f\x8b':
+                    error = {'gzip_error': 'File does not have valid gzip magic number'}
+                    return error
+                
+                # Verify basic gzip header structure by reading first block
+                try:
+                    with gzip.open(file_path, 'rb') as gz:
+                        # Just read a small amount to verify header structure
+                        gz.read(1)
+                except (EOFError, zlib.error) as e:
+                    error = {'gzip_error': f'File has invalid gzip header structure: {str(e)}'}
+                    
+    except (IsADirectoryError, FileNotFoundError) as e:
+        error = {'gzip_error': str(e)}
+    except Exception as e:
+        error = {'gzip_error': f'Unexpected error checking gzip format: {str(e)}'}
+        
+    return error
+    
 def main():
     args = parse_arguments()
     
@@ -484,5 +587,8 @@ def main():
         else:
             print(f"{result['file_path']}: Failed - {result.get('error', 'Unknown error')}")
 
+        print("+++++++++++++++++++++")
+        print(result)
+        print("+++++++++++++++++++++")
 if __name__ == "__main__":
     main()

@@ -9,6 +9,7 @@ import zlib
 from pathlib import Path
 import hashlib
 import crcmod.predefined
+import subprocess
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,7 +20,8 @@ from src.checkfiles import (
     validate_local_file,
     validate_s3_file,
     stream_s3_file,
-    SimpleActivityTracker
+    SimpleActivityTracker,
+    validate_gzip_format
 )
 
 class TestCheckfiles(unittest.TestCase):
@@ -51,6 +53,28 @@ class TestCheckfiles(unittest.TestCase):
             f.write("GGGTGATGGCCGCTGCCGATGGCGTCAAATCCCACC\n")
             f.write("+SRR001666.1 071112_SLXA-EAS1_s_7:5:1:817:345 length=36\n")
             f.write("IIIIIIIIIIIIIIIIIIIIIIII\n")  # Too short quality line
+            
+        # Create a valid gzipped file
+        self.valid_gz_path = Path(self.temp_dir.name) / "test.gz"
+        with gzip.open(self.valid_gz_path, 'wb') as f:
+            f.write(b"test content")
+        
+        # Create an invalid gzipped file (corrupted header)
+        self.invalid_gz_path = Path(self.temp_dir.name) / "invalid.gz"
+        with open(self.invalid_gz_path, 'wb') as f:
+            # Write valid gzip header but with invalid compression method
+            f.write(b'\x1f\x8b')  # Magic number
+            f.write(b'\x09')      # Invalid compression method (valid is 0x08)
+            f.write(b'\x00')      # Flags
+            f.write(b'\x00\x00\x00\x00')  # Timestamp
+            f.write(b'\x00')      # Extra flags
+            f.write(b'\x00')      # OS
+            f.write(b'invalid content')
+        
+        # Create a non-gzipped file with .gz extension
+        self.fake_gz_path = Path(self.temp_dir.name) / "fake.gz"
+        with open(self.fake_gz_path, 'wb') as f:
+            f.write(b'not a gzipped file')
             
     def tearDown(self):
         # Clean up temp files
@@ -268,6 +292,90 @@ class TestCheckfiles(unittest.TestCase):
         self.assertEqual(tracker.completed, 1)
         self.assertTrue(tracker.file_status["test_file.fastq"]["complete"])
         self.assertTrue(tracker.file_status["test_file.fastq"]["success"])
+
+    def test_validate_gzip_format_valid_local(self):
+        """Test validation of a valid local gzip file"""
+        result = validate_gzip_format(str(self.valid_gz_path))
+        self.assertEqual(result, {}, "Valid gzip file should return empty error dict")
+
+    def test_validate_gzip_format_invalid_magic_number_local(self):
+        """Test validation of a local file with invalid gzip magic number"""
+        result = validate_gzip_format(str(self.fake_gz_path))
+        self.assertIn('gzip_error', result)
+        self.assertIn('magic number', result['gzip_error'].lower())
+
+    def test_validate_gzip_format_invalid_header_local(self):
+        """Test validation of a local file with invalid gzip header"""
+        result = validate_gzip_format(str(self.invalid_gz_path))
+        self.assertIn('gzip_error', result)
+        # The error message could mention either 'header', 'compression method', or 'format'
+        error_msg = result['gzip_error'].lower()
+        self.assertTrue(
+            any(msg in error_msg for msg in ['header', 'compression method', 'format']),
+            f"Expected error message to mention header issues, got: {error_msg}"
+        )
+
+    def test_validate_gzip_format_nonexistent_file(self):
+        """Test validation of a nonexistent file"""
+        result = validate_gzip_format(str(Path(self.temp_dir.name) / "nonexistent.gz"))
+        self.assertIn('gzip_error', result)
+        self.assertIn('no such file', result['gzip_error'].lower())
+
+    @patch('subprocess.check_output')
+    def test_validate_gzip_format_valid_s3(self, mock_check_output):
+        """Test validation of a valid S3 gzip file"""
+        # Mock successful responses for both magic number check and header validation
+        mock_check_output.side_effect = [
+            b'\x1f\x8b',  # Valid magic number
+            b'valid'      # Successful gunzip
+        ]
+        
+        result = validate_gzip_format('s3://bucket/valid.gz')
+        self.assertEqual(result, {}, "Valid S3 gzip file should return empty error dict")
+        
+        # Verify correct AWS commands were called
+        calls = mock_check_output.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertIn('--range 0-1', str(calls[0]))
+        self.assertIn('--range 0-9', str(calls[1]))
+
+    @patch('subprocess.check_output')
+    def test_validate_gzip_format_invalid_magic_number_s3(self, mock_check_output):
+        """Test validation of an S3 file with invalid gzip magic number"""
+        # Mock invalid magic number response
+        mock_check_output.return_value = b'XX'
+        
+        result = validate_gzip_format('s3://bucket/invalid.gz')
+        self.assertIn('gzip_error', result)
+        self.assertIn('magic number', result['gzip_error'].lower())
+        
+        # Verify only magic number check was called
+        mock_check_output.assert_called_once()
+        self.assertIn('--range 0-1', str(mock_check_output.call_args))
+
+    @patch('subprocess.check_output')
+    def test_validate_gzip_format_invalid_header_s3(self, mock_check_output):
+        """Test validation of an S3 file with invalid gzip header"""
+        # Mock valid magic number but failed gunzip
+        mock_check_output.side_effect = [
+            b'\x1f\x8b',  # Valid magic number
+            subprocess.CalledProcessError(1, 'cmd', stderr=b'not in gzip format')  # Failed gunzip
+        ]
+        
+        result = validate_gzip_format('s3://bucket/invalid.gz')
+        self.assertIn('gzip_error', result)
+        self.assertIn('header', result['gzip_error'].lower())
+
+    @patch('subprocess.check_output')
+    def test_validate_gzip_format_s3_error(self, mock_check_output):
+        """Test validation when S3 access fails"""
+        # Mock S3 access error
+        mock_check_output.side_effect = subprocess.CalledProcessError(
+            1, 'cmd', stderr=b'The specified key does not exist')
+        
+        result = validate_gzip_format('s3://bucket/nonexistent.gz')
+        self.assertIn('gzip_error', result)
+        self.assertIn('header structure', result['gzip_error'].lower())
 
 if __name__ == '__main__':
     unittest.main()
