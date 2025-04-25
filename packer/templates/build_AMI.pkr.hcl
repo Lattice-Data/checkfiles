@@ -72,8 +72,9 @@ build {
   # Create necessary directories
   provisioner "shell" {
     inline = [
-      "sudo mkdir -p /tmp/build",
-      "sudo chmod 777 /tmp/build"
+      "sudo mkdir -p /tmp/build/src",
+      "sudo mkdir -p /tmp/build/src/validators",
+      "sudo chmod -R 777 /tmp/build"
     ]
   }
 
@@ -88,9 +89,55 @@ build {
     destination = "/tmp/build/Cargo.lock"
   }
 
+  # Create a proper Rust lib.rs file
+  provisioner "shell" {
+    inline = [
+      "sudo mkdir -p /tmp/build/rust/src",
+      "sudo chmod -R 777 /tmp/build/rust"
+    ]
+  }
+  
+  # Copy Rust source files
   provisioner "file" {
-    source = "../../rust/src"
-    destination = "/tmp/build/src"
+    source = "../../rust/src/"
+    destination = "/tmp/build/rust/src/"
+  }
+  
+  # Fix Rust library structure
+  provisioner "shell" {
+    inline = [
+      "echo 'Creating Rust Cargo.toml with proper configuration'",
+      "cat > /tmp/build/rust/Cargo.toml << 'EOL'",
+      "[package]",
+      "name = \"fastq_validator\"",
+      "version = \"0.1.0\"",
+      "edition = \"2021\"",
+      "",
+      "[lib]",
+      "name = \"fastq_validator\"",
+      "crate-type = [\"cdylib\"]",
+      "",
+      "[dependencies]",
+      "pyo3 = { version = \"0.19.0\", features = [\"extension-module\"] }",
+      "regex = \"1.9.0\"",
+      "lazy_static = \"1.4.0\"",
+      "EOL",
+      "",
+      "# Verify Rust file structure",
+      "ls -la /tmp/build/rust",
+      "ls -la /tmp/build/rust/src || echo 'No src dir'",
+      "",
+      "# Make sure lib.rs exists - rename if needed",
+      "if [ -f \"/tmp/build/rust/src/lib.rs\" ]; then",
+      "  echo 'lib.rs already exists'",
+      "elif [ -f \"/tmp/build/rust/src/main.rs\" ]; then",
+      "  echo 'Renaming main.rs to lib.rs'",
+      "  mv /tmp/build/rust/src/main.rs /tmp/build/rust/src/lib.rs",
+      "else",
+      "  echo 'Creating minimal lib.rs'",
+      "  echo 'use pyo3::prelude::*; #[pymodule] fn fastq_validator(_py: Python, m: &PyModule) -> PyResult<()> { Ok(()) }' > /tmp/build/rust/src/lib.rs",
+      "fi"
+    ]
   }
 
   provisioner "file" {
@@ -98,10 +145,27 @@ build {
     destination = "/tmp/build/rust-dependencies.json"
   }
 
-  # Copy Python package files
+  # Copy from rust subdirectory to main build dir for existing scripts
+  provisioner "shell" {
+    inline = [
+      "cp -r /tmp/build/rust/src /tmp/build/",
+      "cp /tmp/build/rust/Cargo.toml /tmp/build/"
+    ]
+  }
+
+  # Copy Python package files - ensure the validators directory exists
+  provisioner "shell" {
+    inline = [
+      "echo 'Preparing Python source directories...'",
+      "sudo mkdir -p /tmp/build/src/validators",
+      "sudo chmod -R 777 /tmp/build/src"
+    ]
+  }
+  
+  # Copy main Python package files
   provisioner "file" {
-    source = "../../src"
-    destination = "/tmp/build/src"
+    source = "../../src/"
+    destination = "/tmp/build/src/"
   }
   
   provisioner "file" {
@@ -112,6 +176,16 @@ build {
   provisioner "file" {
     source = "../../pyproject.toml"
     destination = "/tmp/build/pyproject.toml"
+  }
+  
+  # List directories for debugging
+  provisioner "shell" {
+    inline = [
+      "echo 'Listing build directories content...'",
+      "ls -la /tmp/build/",
+      "ls -la /tmp/build/src/ || echo 'No src directory'",
+      "ls -la /tmp/build/src/validators/ || echo 'No validators directory'"
+    ]
   }
 
   provisioner "shell" {

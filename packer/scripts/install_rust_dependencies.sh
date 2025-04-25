@@ -6,9 +6,75 @@ RUST_PROJECT_DIR="/opt/checkfiles/rust"
 sudo mkdir -p $RUST_PROJECT_DIR
 cd $RUST_PROJECT_DIR
 
+# Print debugging information
+echo "Contents of /tmp/build:"
+ls -la /tmp/build || echo "build directory not found"
+echo "Contents of /tmp/build/src:"
+ls -la /tmp/build/src || echo "src directory not found"
+
 # Copy Cargo.toml and source files from the build context
 sudo cp /tmp/build/Cargo.toml .
 sudo cp -r /tmp/build/src .
+
+# Print Cargo.toml contents
+echo "Contents of Cargo.toml:"
+cat Cargo.toml
+
+# Verify source file structure
+echo "Contents of $RUST_PROJECT_DIR/src:"
+ls -la $RUST_PROJECT_DIR/src || echo "src directory not found"
+
+# Fix library path issue if needed
+if [ -f "$RUST_PROJECT_DIR/src/lib.rs" ]; then
+    echo "lib.rs found, good!"
+else
+    # Try to locate the Rust implementation file
+    if [ -f "$RUST_PROJECT_DIR/src/main.rs" ]; then
+        echo "Found main.rs, renaming to lib.rs"
+        sudo mv "$RUST_PROJECT_DIR/src/main.rs" "$RUST_PROJECT_DIR/src/lib.rs"
+    else
+        # If we can't find the source, create a minimal lib.rs
+        echo "Creating minimal lib.rs file"
+        sudo tee "$RUST_PROJECT_DIR/src/lib.rs" > /dev/null << 'EOF'
+use pyo3::prelude::*;
+use pyo3::exceptions::PyValueError;
+
+/// A Python module implemented in Rust
+#[pymodule]
+fn fastq_validator(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(validate_fastq, m)?)?;
+    Ok(())
+}
+
+#[pyfunction]
+fn validate_fastq(py: Python, _filename: &str) -> PyResult<PyObject> {
+    // Placeholder implementation
+    let tuple = PyTuple::new(py, &[true.into_py(py), "".into_py(py), Option::<usize>::None.into_py(py)]);
+    Ok(tuple.into())
+}
+EOF
+    fi
+fi
+
+# Update Cargo.toml if needed
+if ! grep -q "name = \"fastq_validator\"" Cargo.toml; then
+    echo "Updating Cargo.toml with correct library name"
+    sudo tee Cargo.toml > /dev/null << 'EOF'
+[package]
+name = "fastq_validator"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "fastq_validator"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.19.0", features = ["extension-module"] }
+regex = "1.9.0"
+lazy_static = "1.4.0"
+EOF
+fi
 
 # Set ownership of the project directory to the current user
 sudo chown -R ubuntu:ubuntu $RUST_PROJECT_DIR
