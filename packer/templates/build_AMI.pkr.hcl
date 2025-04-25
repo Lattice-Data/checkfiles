@@ -98,6 +98,22 @@ build {
     destination = "/tmp/build/rust-dependencies.json"
   }
 
+  # Copy Python package files
+  provisioner "file" {
+    source = "../../src"
+    destination = "/tmp/build/src"
+  }
+  
+  provisioner "file" {
+    source = "../../setup.py"
+    destination = "/tmp/build/setup.py"
+  }
+  
+  provisioner "file" {
+    source = "../../pyproject.toml"
+    destination = "/tmp/build/pyproject.toml"
+  }
+
   provisioner "shell" {
     pause_before = "60s"
     scripts = "${var.installation_scripts}"
