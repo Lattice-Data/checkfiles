@@ -9,22 +9,27 @@ import concurrent.futures
 import threading
 from datetime import datetime
 import hashlib
-import zlib
 import io
-import signal
 import crcmod.predefined
 import multiprocessing
 import logging
 import queue
+import shlex
+
+# Create logs directory in current working directory if it doesn't exist
+log_dir = os.path.join(os.getcwd(), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'checkfiles_debug.log')
 
 # Configure logging to a file for debugging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    filename='/home/ubuntu/checkfiles/checkfiles_debug.log',
+    filename=log_file,
     filemode='w'
 )
 logger = logging.getLogger(__name__)
+logger.debug(f"Logging to: {log_file}")
 
 # Print debugging information
 logger.debug(f"Python version: {sys.version}")
@@ -66,14 +71,17 @@ class SimpleActivityTracker:
     
     def init_file(self, file_path):
         """Initialize tracking for a new file."""
+        thread_id = threading.get_ident()
         with self.lock:
             self.file_status[file_path] = {
                 'status': 'Starting...',
                 'start_time': datetime.now(),
                 'updates': 0,
-                'complete': False
+                'complete': False,
+                'thread_id': thread_id,
+                'thread_name': f"Thread-{thread_id % 1000:03d}"  # Last 3 digits of thread ID for readability
             }
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Started: {file_path}")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] [T-{thread_id % 1000:03d}] Started: {file_path}")
     
     def update_progress(self, file_path, status=None):
         """Update the status for a specific file."""
@@ -84,12 +92,13 @@ class SimpleActivityTracker:
             if status is not None:
                 self.file_status[file_path]['status'] = status
                 self.file_status[file_path]['updates'] += 1
+                thread_name = self.file_status[file_path]['thread_name']
                 
                 # Only print every other update to reduce output noise
                 if self.file_status[file_path]['updates'] % 2 == 0:
                     now = datetime.now()
                     elapsed = (now - self.file_status[file_path]['start_time']).total_seconds()
-                    print(f"[{now.strftime('%H:%M:%S')}] {file_path}: {status} (elapsed: {elapsed:.1f}s)")
+                    print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] {file_path}: {status} (elapsed: {elapsed:.1f}s)")
     
     def complete_file(self, file_path, success, result_summary):
         """Mark a file as completed."""
@@ -98,6 +107,7 @@ class SimpleActivityTracker:
             now = datetime.now()
             
             if file_path in self.file_status:
+                thread_name = self.file_status[file_path]['thread_name']
                 self.file_status[file_path]['complete'] = True
                 self.file_status[file_path]['success'] = success
                 self.file_status[file_path]['result_summary'] = result_summary
@@ -106,12 +116,12 @@ class SimpleActivityTracker:
                 # Calculate elapsed time
                 elapsed = (now - self.file_status[file_path]['start_time']).total_seconds()
                 
-                # Print completion message with validity status
+                # Print completion message with validity status and thread info
                 if success:
                     valid_status = "Valid" if result_summary.get('valid', False) else "Invalid"
-                    print(f"[{now.strftime('%H:%M:%S')}] Completed {file_path}: {valid_status} (took {elapsed:.1f}s)")
+                    print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] Completed {file_path}: {valid_status} (took {elapsed:.1f}s)")
                 else:
-                    print(f"[{now.strftime('%H:%M:%S')}] Failed to process {file_path} (took {elapsed:.1f}s)")
+                    print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] Failed to process {file_path} (took {elapsed:.1f}s)")
             
             # Print overall progress
             print(f"Progress: {self.completed}/{self.total_files} files processed")
@@ -121,6 +131,16 @@ class SimpleActivityTracker:
         end_time = datetime.now()
         total_time = (end_time - self.start_time).total_seconds()
         print(f"\nValidation completed in {total_time:.1f} seconds")
+        
+        # Add thread distribution summary
+        thread_counts = {}
+        for path, info in self.file_status.items():
+            thread_name = info.get('thread_name', 'Unknown')
+            thread_counts[thread_name] = thread_counts.get(thread_name, 0) + 1
+        
+        print("\nThread distribution:")
+        for thread, count in thread_counts.items():
+            print(f"  {thread}: {count} file(s)")
 
 def parse_arguments():
     # Get the number of available CPUs for default thread count
@@ -154,6 +174,8 @@ def parse_arguments():
                         help=f'Number of threads for parallel processing (default: {default_threads}, based on CPU count)')
     parser.add_argument('-q', '--quiet', action='store_true', 
                         help='Suppress progress indicators and only show final results')
+    parser.add_argument('--log-file', 
+                        help='Path to log file (default: ./logs/checkfiles_debug.log)')
     
     return parser.parse_args()
 
@@ -195,15 +217,7 @@ def initialize_validator(file_format):
         raise ValueError(f"Unsupported file format: {file_format}")
 
 def track_validation_progress(file_path, progress_tracker, status_message, success=None, results=None):
-    """Helper function to handle progress tracking for file validation.
-    
-    Args:
-        file_path (str): Path to the file being processed
-        progress_tracker (SimpleActivityTracker): Progress tracker instance or None
-        status_message (str): Status message to update
-        success (bool, optional): Whether validation was successful
-        results (dict, optional): Results of validation if complete
-    """
+    """Helper function to handle progress tracking for file validation."""
     if not progress_tracker:
         return
         
@@ -263,14 +277,56 @@ def validate_local_file(file_path, file_format, debug=False, validator=None, pro
             "success": False
         }
 
+# Define this above the validate_s3_file function
+class QueueStream:
+    """Stream-like object that reads from a queue."""
+    def __init__(self, q):
+        self.queue = q
+        self.buffer = b""
+        self.eof = False
+        
+    def read(self, size=-1):
+        if self.eof and not self.buffer:
+            return b""
+                
+        if size == -1:
+            # Read all remaining data
+            result = self.buffer
+            self.buffer = b""
+            
+            while not self.eof:
+                chunk = self.queue.get()
+                if chunk is None:
+                    self.eof = True
+                    break
+                result += chunk
+            
+            return result
+        else:
+            # Read specific amount
+            while len(self.buffer) < size and not self.eof:
+                chunk = self.queue.get()
+                if chunk is None:
+                    self.eof = True
+                    break
+                self.buffer += chunk
+            
+            # Return what we have, up to size
+            available = min(len(self.buffer), size)
+            result = self.buffer[:available]
+            self.buffer = self.buffer[available:]
+            return result
+
 def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress_tracker=None):
     """Validate an S3 file."""
     process = None
+    main_thread_id = threading.get_ident()
+    
     try:
         if progress_tracker:
             progress_tracker.init_file(s3_path)
-            progress_tracker.update_progress(s3_path, status="Starting validation")
-            
+            progress_tracker.update_progress(s3_path, status=f"Starting validation (main thread: {main_thread_id % 1000:03d})")
+        
         if validator is None:
             validator = initialize_validator(file_format)
             if progress_tracker:
@@ -279,14 +335,13 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         print(f"Validating S3 file: {s3_path}")
         
         # Create command based on file type
+        s3_path_escaped = shlex.quote(s3_path)
         if has_gz_extension(s3_path):
-            cmd = f"aws s3 cp {s3_path} - | gunzip -c"
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Setting up decompression stream")
+            cmd = f"aws s3 cp {s3_path_escaped} - | gunzip -c"
+            track_validation_progress(s3_path, progress_tracker, "Setting up decompression stream")
         else:
-            cmd = f"aws s3 cp {s3_path} -"
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Setting up direct stream")
+            cmd = f"aws s3 cp {s3_path_escaped} -"
+            track_validation_progress(s3_path, progress_tracker, "Setting up direct stream")
         
         # Start the subprocess
         process = subprocess.Popen(
@@ -311,8 +366,15 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         
         # Function to read from stream and add to both queues
         def reader_thread():
+            reader_id = threading.get_ident()
             try:
                 total_bytes = 0
+                if progress_tracker:
+                    progress_tracker.update_progress(
+                        s3_path, 
+                        status=f"Reader thread {reader_id % 1000:03d} started"
+                    )
+                
                 while True:
                     chunk = process.stdout.read(65536)  # 64KB chunks
                     if not chunk:
@@ -326,21 +388,21 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
                     valid_queue.put(chunk)
                     
                     # Update progress occasionally
-                    if progress_tracker and total_bytes % (1024*1024*10) == 0:  # Every ~10MB
+                    if progress_tracker and total_bytes % (1024*1024*100) == 0:  # Every ~100MB
                         progress_tracker.update_progress(
                             s3_path, 
-                            status=f"Streaming data: {total_bytes/1024/1024:.1f} MB read"
+                            status=f"Reader {reader_id % 1000:03d}: {total_bytes/1024/1024:.1f} MB read"
                         )
                 
-                logger.debug(f"Reader thread complete for {s3_path}, {total_bytes} bytes read")
+                logger.debug(f"Reader thread {reader_id % 1000:03d} complete for {s3_path}, {total_bytes} bytes read")
             except Exception as e:
-                logger.error(f"Error in reader thread: {str(e)}")
+                logger.error(f"Error in reader thread {reader_id % 1000:03d}: {str(e)}")
                 # Signal error to queues
                 hash_queue.put(None)
                 valid_queue.put(None)
         
         # Start reader thread
-        reader = threading.Thread(target=reader_thread, daemon=True)
+        reader = threading.Thread(target=reader_thread, daemon=True, name=f"Reader-{main_thread_id % 1000:03d}")
         reader.start()
         
         if progress_tracker:
@@ -351,49 +413,17 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         sha256_hash = hashlib.sha256()
         crc32c_func = crcmod.predefined.Crc('crc-32c')
         
-        # Improved QueueStream with better EOF handling
-        class QueueStream:
-            def __init__(self, q):
-                self.queue = q
-                self.buffer = b""
-                self.eof = False
-                
-            def read(self, size=-1):
-                if self.eof and not self.buffer:
-                    return b""
-                    
-                if size == -1:
-                    # Read all remaining data
-                    result = self.buffer
-                    self.buffer = b""
-                    
-                    while not self.eof:
-                        chunk = self.queue.get()
-                        if chunk is None:
-                            self.eof = True
-                            break
-                        result += chunk
-                    
-                    return result
-                else:
-                    # Read specific amount
-                    while len(self.buffer) < size and not self.eof:
-                        chunk = self.queue.get()
-                        if chunk is None:
-                            self.eof = True
-                            break
-                        self.buffer += chunk
-                    
-                    # Return what we have, up to size
-                    available = min(len(self.buffer), size)
-                    result = self.buffer[:available]
-                    self.buffer = self.buffer[available:]
-                    return result
-        
         # Compute hashes in a separate thread
         def hash_thread():
+            hash_id = threading.get_ident()
             total_bytes = 0
             try:
+                if progress_tracker:
+                    progress_tracker.update_progress(
+                        s3_path, 
+                        status=f"Hash thread {hash_id % 1000:03d} started"
+                    )
+                
                 while True:
                     chunk = hash_queue.get()
                     if chunk is None:
@@ -404,12 +434,18 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
                     crc32c_func.update(chunk)
                     
                     total_bytes += len(chunk)
+                    # Update occasionally
+                    if progress_tracker and total_bytes % (1024*1024*100) == 0:  # Every ~100MB
+                        progress_tracker.update_progress(
+                            s3_path, 
+                            status=f"Hash {hash_id % 1000:03d}: {total_bytes/1024/1024:.1f} MB processed"
+                        )
                 
-                logger.debug(f"Hash calculation complete for {s3_path}, {total_bytes} bytes processed")
+                logger.debug(f"Hash thread {hash_id % 1000:03d} complete for {s3_path}, {total_bytes} bytes processed")
             except Exception as e:
-                logger.error(f"Error in hash thread: {str(e)}")
+                logger.error(f"Error in hash thread {hash_id % 1000:03d}: {str(e)}")
         
-        hash_worker = threading.Thread(target=hash_thread, daemon=True)
+        hash_worker = threading.Thread(target=hash_thread, daemon=True, name=f"Hash-{main_thread_id % 1000:03d}")
         hash_worker.start()
         
         # Create validation stream
@@ -537,8 +573,20 @@ def validate_gzip_format(file_path):
     return error
     
 def main():
-
     args = parse_arguments()
+    
+    # Set up logging with custom path if provided
+    if args.log_file:
+        # Proper way to reconfigure logging
+        logging.root.handlers = []  # Clear all handlers
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            filename=args.log_file,
+            filemode='w'
+        )
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Logging redirected to: {args.log_file}")
     
     # Check if file format is supported
     if not args.file_format:
@@ -574,50 +622,56 @@ def main():
         print(f"Validation results: {results}")
         return
     
-    # Initialize activity tracker if not in quiet mode
+    # Initialize activity tracker
     progress_tracker = None
     if not args.quiet:
         progress_tracker = SimpleActivityTracker(total_files)
     
-    # Report on thread count
-    print(f"Using {args.threads} threads for parallel processing")
+    # Set a more reasonable thread count based on file count and system resources
+    thread_count = min(args.threads, total_files, min(32, multiprocessing.cpu_count() * 2))
+    print(f"Using {thread_count} threads for parallel file processing")
+    
+    # In main() before the ThreadPoolExecutor
+    if local_files:
+        # Pre-validate gzip files before starting threads
+        validated_local_files = []
+        for file_path in local_files:
+            if has_gz_extension(file_path):
+                gzip_errors = validate_gzip_format(file_path)
+                if gzip_errors:
+                    print(f"GZIP validation failed for {file_path}: {gzip_errors}")
+                    continue
+            validated_local_files.append(file_path)
+        local_files = validated_local_files
     
     # Process files in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
         futures = []
         
-        # Process local files if provided
+        # Process local files
         if local_files:
             print(f"Processing {len(local_files)} local files...")
             for file_path in local_files:
+                # Name the threads for better tracking
                 futures.append(
                     executor.submit(validate_local_file, file_path, args.file_format, 
-                                    args.debug, validator, progress_tracker)
+                                    args.debug, None, progress_tracker)
                 )
                 
-        # Process S3 files if provided
+        # Process S3 files
         if s3_files:
             print(f"Processing {len(s3_files)} S3 files...")
             for s3_path in s3_files:
                 futures.append(
                     executor.submit(validate_s3_file, s3_path, args.file_format, 
-                                    args.debug, validator, progress_tracker)
+                                    args.debug, None, progress_tracker)
                 )
-                
-        # Collect and store results
+        
+        # Collect results
         all_results = []
-        with open('validation_progress.log', 'w') as progress_file:
-            progress_file.write(f"Starting validation of {total_files} files at {datetime.now()}\n")
-            
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                all_results.append(result)
-                
-                # Log each completion to file
-                status = "Valid" if result["success"] and result["results"].get("valid", False) else "Invalid"
-                progress_file.write(f"{datetime.now()}: Completed {result['file_path']} - {status}\n")
-                progress_file.write(f"Progress: {len(all_results)}/{total_files} ({(len(all_results)/total_files)*100:.1f}%)\n")
-                progress_file.flush()  # Ensure it's written immediately
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            all_results.append(result)
     
     # Close progress tracker
     if progress_tracker:
@@ -651,5 +705,6 @@ def main():
         print("+++++++++++++++++++++")
         print(result)
         print("+++++++++++++++++++++")
+
 if __name__ == "__main__":
     main()
