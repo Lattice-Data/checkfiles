@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  checkfiles:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ../src:/app/src
+      - ../test_data:/app/test_data
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    command: ["python", "-m", "src.main"]
