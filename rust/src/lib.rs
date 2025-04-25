@@ -571,7 +571,6 @@ fn fastq_validator(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fastq_stats, m)?)?;
     m.add_function(wrap_pyfunction!(fastq_stats_from_bytes, m)?)?;
     
-    // Add new functions
     m.add_function(wrap_pyfunction!(get_last_machine_ids, m)?)?;
     m.add_function(wrap_pyfunction!(get_last_flowcells, m)?)?;
     m.add_function(wrap_pyfunction!(get_last_lanes, m)?)?;

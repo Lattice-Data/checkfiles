@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 import logging
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,6 +86,31 @@ def run_checkfiles_command(event, context):
         }
     )
     command_id = response['Command']['CommandId']
+
+    # Add debugging diagnostics
+    debug_cmd = ssm.send_command(
+        InstanceIds=[instance_id],
+        DocumentName='AWS-RunShellScript',
+        Parameters={'commands': [
+            "cd /home/ubuntu/checkfiles",
+            "echo 'DEBUG: Python environment info'",
+            "python3 -c 'import sys; print(\"Python version:\", sys.version); print(\"Python path:\", sys.path)'",
+            "echo 'DEBUG: Checking fastq_validator module'",
+            "python3 -c 'try: import fastq_validator; print(\"Available functions:\", dir(fastq_validator)) except Exception as e: print(\"Error importing fastq_validator:\", e)'",
+            "echo 'DEBUG: Checking Rust library'",
+            "ls -la /opt/checkfiles/lib/",
+            "echo 'DEBUG: Checking library symbols'",
+            "nm -D /opt/checkfiles/lib/libfastq_validator.so | grep -E 'validate|fastq' || echo 'No validate functions found'",
+            "echo 'DEBUG: Checking Python module'",
+            "ls -la /usr/local/lib/python3.10/dist-packages/fastq_validator || echo 'No module directory'"
+        ]}
+    )
+    time.sleep(2)  # Wait for command to complete
+    debug_result = ssm.get_command_invocation(
+        CommandId=debug_cmd['Command']['CommandId'],
+        InstanceId=instance_id
+    )
+    print(f"Debug output: {debug_result['StandardOutputContent']}")
 
     return {
         'instance_id': instance_id,
