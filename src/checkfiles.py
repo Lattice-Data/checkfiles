@@ -181,47 +181,56 @@ def stream_s3_file(s3_path, debug=False, progress_tracker=None):
             
         print(f"Executing command: {cmd}")
         
-        # If in debug mode, first show a preview, then restart the stream
-        if debug:
-            # Start a process just for preview
-            preview_process = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            
-            # Read first chunk for preview
-            chunk = preview_process.stdout.read(4096)
-            
-            if chunk:
-                try:
-                    preview = chunk[:1000].decode('utf-8', errors='replace')
-                    print("\n=== START OF FILE PREVIEW ===")
-                    print(preview)
-                    print("=== END OF FILE PREVIEW ===\n")
-                except Exception as e:
-                    print(f"Error decoding preview: {e}")
-            else:
-                print("No data received from preview stream")
-            
-            # Terminate the preview process
-            preview_process.terminate()
-            
-            print("Preview complete, starting new stream for validation")
-            
-        # Start a fresh process for the actual validation
+        # Start process with explicit buffer management
         process = subprocess.Popen(
             cmd,
             shell=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            bufsize=1048576  # Use 1MB buffer
         )
+        
+        # Check if process started correctly
+        if process.poll() is not None:
+            stderr_output = process.stderr.read().decode('utf-8')
+            raise RuntimeError(f"Process failed to start: {stderr_output}")
+        
+        # Test if we can read from the stream
+        test_chunk = process.stdout.read(4096)
+        if not test_chunk:
+            stderr_output = process.stderr.read().decode('utf-8')
+            raise RuntimeError(f"Stream didn't return data: {stderr_output}")
+            
+        # Reset for actual reading
+        process.stdout = io.BufferedReader(io.FileIO(process.stdout.fileno(), mode='rb'))
+        
+        # Seek back to beginning (via a custom wrapper that prepends our test chunk)
+        class PrefixedReader:
+            def __init__(self, prefix, reader):
+                self.prefix = prefix
+                self.prefix_used = False
+                self.reader = reader
+                
+            def read(self, size=-1):
+                if not self.prefix_used:
+                    self.prefix_used = True
+                    if size == -1 or size >= len(self.prefix):
+                        return self.prefix + self.reader.read(size - len(self.prefix) if size != -1 else -1)
+                    else:
+                        result = self.prefix[:size]
+                        self.prefix = self.prefix[size:]
+                        self.prefix_used = False
+                        return result
+                return self.reader.read(size)
+                
+            def close(self):
+                self.reader.close()
+        
+        stream = PrefixedReader(test_chunk, process.stdout)
         
         track_validation_progress(s3_path, progress_tracker, "Stream ready for validation")
         
-        # Return the stdout stream for validation
-        return process.stdout
+        return stream
             
     except Exception as e:
         print(f"Error streaming from S3: {e}")
@@ -232,16 +241,7 @@ def stream_s3_file(s3_path, debug=False, progress_tracker=None):
                 process.wait(timeout=5)
             except:
                 pass
-        
-        # Try to get the stderr output from the subprocess if available
-        if process and process.stderr:
-            try:
-                stderr_output = process.stderr.read().decode('utf-8')
-                if stderr_output:
-                    print(f"Subprocess error output: {stderr_output}")
-            except:
-                pass
-                
+            
         track_validation_progress(s3_path, progress_tracker, f"Error: {str(e)}")
         return None
 
@@ -366,82 +366,85 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         if progress_tracker:
             progress_tracker.update_progress(s3_path, status="Starting S3 streaming")
             
-        # Determine if file is gzipped once and reuse this information
-        is_gzipped = has_gz_extension(s3_path)
-        
         # First pass: Calculate hashes
         if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Calculating file hashes (1st pass)")
+            progress_tracker.update_progress(s3_path, status="Starting hash calculation (1st pass)")
         
-        # Initialize hash objects for streaming
+        # Initialize hash objects
         md5_hash = hashlib.md5()
         sha256_hash = hashlib.sha256()
         crc32c_func = crcmod.predefined.Crc('crc-32c')
         
-        # First stream to calculate hashes
-        stream1 = stream_s3_file(s3_path, debug=debug, progress_tracker=progress_tracker)
-        if not stream1:
-            error_msg = f"Failed to stream S3 file: {s3_path}"
-            print(error_msg)
-            
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Stream failed")
-                progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+        # First stream
+        stream1 = None
+        try:
+            stream1 = stream_s3_file(s3_path, debug=debug, progress_tracker=progress_tracker)
+            if not stream1:
+                raise ValueError(f"Failed to create stream for S3 file: {s3_path}")
                 
-            return {
-                "file_path": s3_path,
-                "error": error_msg,
-                "success": False
-            }
-        
-        # Process first stream to calculate hashes
-        while chunk := stream1.read(65536):  # 64kb chunks
-            # Update all hashes
-            md5_hash.update(chunk)
-            sha256_hash.update(chunk)
-            crc32c_func.update(chunk)
-        
-        # Close first stream
-        if hasattr(stream1, 'close'):
-            stream1.close()
-            
-        # Second pass: Perform actual validation
+            # Process first stream
+            bytes_read = 0
+            while chunk := stream1.read(65536):  # 64kb chunks
+                bytes_read += len(chunk)
+                md5_hash.update(chunk)
+                sha256_hash.update(chunk)
+                crc32c_func.update(chunk)
+                
+            if bytes_read == 0:
+                raise ValueError(f"No data read from stream for S3 file: {s3_path}")
+                
+            print(f"Successfully read {bytes_read} bytes from first stream")
+        finally:
+            # Ensure first stream is properly closed
+            if stream1:
+                stream1.close()
+                print("First stream closed")
+                
+        # Second pass: Perform validation
         if progress_tracker:
             progress_tracker.update_progress(s3_path, status="Starting validation (2nd pass)")
-            
-        # Create second stream for validation
-        stream2 = stream_s3_file(s3_path, debug=False, progress_tracker=progress_tracker)
-        if not stream2:
-            error_msg = f"Failed to create second stream for S3 file: {s3_path}"
-            print(error_msg)
-            
-            if progress_tracker:
-                progress_tracker.update_progress(s3_path, status="Second stream failed")
-                progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+        
+        # Create second stream
+        stream2 = None
+        try:
+            stream2 = stream_s3_file(s3_path, debug=False, progress_tracker=progress_tracker)
+            if not stream2:
+                raise ValueError(f"Failed to create second stream for S3 file: {s3_path}")
                 
-            return {
-                "file_path": s3_path,
-                "error": error_msg,
-                "success": False
-            }
+            # Run validation
+            if progress_tracker:
+                progress_tracker.update_progress(s3_path, status="Running validation")
+                
+            # Test read to ensure stream2 has data
+            test_chunk = stream2.read(4096)
+            if not test_chunk:
+                raise ValueError(f"Second stream returned no data for S3 file: {s3_path}")
+                
+            # Reset for validation (using our PrefixedReader from earlier)
+            validation_stream = io.BytesIO(test_chunk)
+            bytes_from_stream2 = 0
+            while chunk := stream2.read(65536):
+                bytes_from_stream2 += len(chunk)
+                validation_stream.write(chunk)
+                
+            print(f"Read {bytes_from_stream2 + len(test_chunk)} bytes from second stream")
             
-        # Run validation on the second stream
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Running validation")
-            
-        results = validator.validate_stream(stream2)
-        
-        # Close second stream
-        if hasattr(stream2, 'close'):
-            stream2.close()
-        
+            # Rewind for validation
+            validation_stream.seek(0)
+            results = validator.validate_stream(validation_stream)
+        finally:
+            # Ensure second stream is properly closed
+            if stream2:
+                stream2.close()
+                print("Second stream closed")
+                
         # Add hash results
         results['md5sum'] = md5_hash.hexdigest()
         results['sha256'] = sha256_hash.hexdigest()
         results['crc32c'] = format(crc32c_func.crcValue, '08x')
         
         # If gzipped, calculate uncompressed md5
-        if is_gzipped:
+        if has_gz_extension(s3_path):
             try:
                 # Use consistent subprocess pattern with check_output
                 cmd = f'aws s3 cp {s3_path} - | gunzip -c | md5sum'
