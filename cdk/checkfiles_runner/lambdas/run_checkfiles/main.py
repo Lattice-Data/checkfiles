@@ -63,11 +63,11 @@ def run_checkfiles_command(event, context):
     if update:
         run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -m prod -q \"{query}\" --update"
     else:
-        file_path_1 = "/home/ubuntu/lattice-files/submissions-czi012eye/HCA2024/Lens/Multi_19w5d_lens/fastq/Multi_19w5d_lens_ATAC_S6_L001_I1_001.fastq.gz"
-        file_path_2 = "/home/ubuntu/lattice-files/submissions-czi012eye/HCA2024/Lens/Multi_19w5d_lens/fastq/Multi_19w5d_lens_ATAC_S6_L002_R1_001.fastq.gz"
-        file_path_3 = "/home/ubuntu/lattice-files/submissions-czi007imm/Yosef_January_2024/raw_data/raw_columbia/D570_001_TCR_CZINY-0758_S30_L001_R1_001.fastq.gz"
+        file_path_1 = "s3://submissions-czi012eye/HCA2024/Lens/Multi_19w5d_lens/fastq/Multi_19w5d_lens_ATAC_S6_L001_I1_001.fastq.gz"
+        file_path_2 = "s3://submissions-czi012eye/HCA2024/Lens/Multi_19w5d_lens/fastq/Multi_19w5d_lens_ATAC_S6_L002_R1_001.fastq.gz"
+        file_path_3 = "s3://submissions-czi007imm/Yosef_January_2024/raw_data/raw_columbia/D570_001_TCR_CZINY-0758_S30_L001_R1_001.fastq.gz"
  
-        run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -f fastq -l {file_path_1},{file_path_2},{file_path_3}"
+        run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -f fastq -s3 {file_path_1},{file_path_2},{file_path_3}"
     ssm = boto3.client('ssm')
     response = ssm.send_command(
         InstanceIds=[instance_id],
