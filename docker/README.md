@@ -60,7 +60,33 @@ docker-compose -f docker/docker-compose.yml build --no-cache
 ## Stopping Docker Containers
 
 ### Stop containers but preserve data
-...
+```bash
+# If running in foreground with docker-compose up
+# Press CTRL+C
+
+# If running in background or from another terminal
+docker-compose -f docker/docker-compose.yml down
+```
+
+### Clean up everything
+```bash
+# Stop containers and remove volumes/networks
+docker-compose -f docker/docker-compose.yml down -v
+
+# To also remove the built images
+docker-compose -f docker/docker-compose.yml down -v --rmi all
+```
+
+### View running containers
+```bash
+docker ps
+```
+
+### Stop a specific container
+```bash
+docker stop <container_id>
+```
+```
 
 ## Troubleshooting
 
