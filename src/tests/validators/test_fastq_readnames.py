@@ -8,15 +8,10 @@ import io
 
 from src.validators.fastq import FastqValidator
 
-# Import Rust validator to check availability
-try:
-    import fastq_validator
-    RUST_INSTALLED = True
-except ImportError:
-    RUST_INSTALLED = False
-    print("Rust FASTQ validator is not available - tests cannot proceed")
+# Get the path to test data directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEST_DATA_DIR = os.path.join(BASE_DIR, "data", "fastq")
 
-@unittest.skipIf(not RUST_INSTALLED, "Rust FASTQ validator is required for these tests")
 class TestFastqReadnameParser(unittest.TestCase):
     """Test cases for the FASTQ validator's readname parsing functionality."""
     
@@ -24,7 +19,11 @@ class TestFastqReadnameParser(unittest.TestCase):
         """Set up the test environment."""
         self.validator = FastqValidator()
         self.temp_dir = tempfile.TemporaryDirectory()
-    
+        
+        # Skip tests if test data directory doesn't exist
+        if not os.path.exists(TEST_DATA_DIR):
+            self.skipTest(f"Test data directory not found: {TEST_DATA_DIR}")
+            
     def tearDown(self):
         """Clean up after the tests."""
         self.temp_dir.cleanup()

@@ -10,6 +10,8 @@ from pathlib import Path
 import hashlib
 import crcmod.predefined
 import subprocess
+import threading
+import queue
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -93,30 +95,15 @@ class TestCheckfiles(unittest.TestCase):
         mock_instance = Mock()
         mock_fastq_validator.return_value = mock_instance
         
-        # We need to patch the import inside initialize_validator
-        with patch('builtins.__import__', side_effect=self._mock_import_fastq(mock_fastq_validator)):
-            # Test fastq validator initialization
-            validator = initialize_validator("fastq")
-            self.assertEqual(validator, mock_instance)
-            mock_fastq_validator.assert_called_once()
-            
-            # Test case insensitivity
-            initialize_validator("FASTQ")
-            self.assertEqual(mock_fastq_validator.call_count, 2)
+        # Test fastq validator initialization
+        validator = initialize_validator("fastq")
+        self.assertEqual(validator, mock_instance)
+        mock_fastq_validator.assert_called_once()
+        
+        # Test case insensitivity
+        initialize_validator("FASTQ")
+        self.assertEqual(mock_fastq_validator.call_count, 2)
 
-    def _mock_import_fastq(self, mock_fastq_validator):
-        """Helper to mock the import of FastqValidator"""
-        original_import = __import__
-        
-        def import_mock(name, *args, **kwargs):
-            if name == 'src.validators.fastq':
-                module = Mock()
-                module.FastqValidator = mock_fastq_validator
-                return module
-            return original_import(name, *args, **kwargs)
-        
-        return import_mock
-    
     def test_initialize_validator_unsupported(self):
         with self.assertRaises(ValueError) as context:
             initialize_validator("unsupported_format")
@@ -194,64 +181,80 @@ class TestCheckfiles(unittest.TestCase):
         self.assertIn("error", result)
         self.assertIn("Test error", result["error"])
     
-    @patch('src.checkfiles.stream_s3_file')
     @patch('src.validators.fastq.FastqValidator')
-    def test_validate_s3_file_success(self, mock_fastq_validator, mock_stream_s3):
-        # Setup mocks for stream and validator
-        mock_stream = MagicMock(spec=io.BytesIO)
-        mock_stream.read.side_effect = [b'test data', b'']  # Return data then EOF
-        
+    def test_validate_s3_file_success(self, mock_fastq_validator):
+        # Setup mock validator
         mock_validator = Mock()
-        mock_validator.validate_stream.return_value = {"valid": True, "records": 1}
+        mock_validator.validate_stream.return_value = {"valid": True, "stats": {"read_count": 1}}
         
-        # Create mock hash objects
-        mock_md5 = MagicMock(spec=hashlib.md5())
-        mock_md5.hexdigest.return_value = "a1b2c3d4"
+        # Setup mock process
+        mock_process = Mock()
+        mock_process.poll.return_value = None  # Process running normally
+        mock_process.returncode = 0  # Success exit code when checked
+        mock_process.stdout = Mock()
         
-        mock_sha256 = MagicMock(spec=hashlib.sha256())
-        mock_sha256.hexdigest.return_value = "e5f6g7h8"
+        # Setup patching
+        with patch('src.checkfiles.initialize_validator', return_value=mock_validator):
+            with patch('src.checkfiles.subprocess.Popen', return_value=mock_process):
+                with patch('src.checkfiles.hashlib.md5') as mock_md5:
+                    with patch('src.checkfiles.hashlib.sha256') as mock_sha256:
+                        with patch('crcmod.predefined.Crc') as mock_crc:
+                            # Setup hash mocks
+                            md5_instance = Mock()
+                            md5_instance.hexdigest.return_value = "md5hash"
+                            mock_md5.return_value = md5_instance
+                            
+                            sha256_instance = Mock()
+                            sha256_instance.hexdigest.return_value = "sha256hash"
+                            mock_sha256.return_value = sha256_instance
+                            
+                            crc_instance = Mock()
+                            crc_instance.crcValue = 0x12345678
+                            mock_crc.return_value = crc_instance
+                            
+                            # Mock QueueStream to bypass threading complexity
+                            mock_queue_stream = Mock()
+                            with patch('src.checkfiles.QueueStream', return_value=mock_queue_stream):
+                                # Mock threading
+                                with patch('threading.Thread') as mock_thread:
+                                    thread_instance = Mock()
+                                    thread_instance.join.return_value = None
+                                    mock_thread.return_value = thread_instance
+                                    
+                                    # Mock queue
+                                    with patch('src.checkfiles.queue.Queue'):
+                                        # Call the function
+                                        result = validate_s3_file(
+                                            "s3://bucket/test.fastq",
+                                            "fastq"
+                                        )
         
-        # Mock crcmod.predefined.Crc
-        mock_crc32c = Mock()
-        mock_crc32c.crcValue = 0x12345678
-        mock_crc_func = Mock(return_value=mock_crc32c)
-        
-        # Test with all mocked components
-        with patch('src.checkfiles.stream_s3_file', return_value=mock_stream):
-            with patch('src.checkfiles.initialize_validator', return_value=mock_validator):
-                with patch('src.checkfiles.hashlib.md5', return_value=mock_md5):
-                    with patch('src.checkfiles.hashlib.sha256', return_value=mock_sha256):
-                        with patch('crcmod.predefined.Crc', mock_crc_func):
-                            result = validate_s3_file(
-                                "s3://bucket/test.fastq",
-                                "fastq"
-                            )
-        
+        # Verify results
         self.assertTrue(result["success"])
+        self.assertEqual(result["file_path"], "s3://bucket/test.fastq")
         self.assertTrue(result["results"]["valid"])
-        mock_validator.validate_stream.assert_called_once()
-        
-        # Check that hashes were calculated
-        self.assertIn("md5sum", result["results"])
-        self.assertIn("sha256", result["results"])
-        self.assertIn("crc32c", result["results"])
-        mock_crc_func.assert_called_with('crc-32c')
+        self.assertEqual(result["results"]["md5sum"], "md5hash")
+        self.assertEqual(result["results"]["sha256"], "sha256hash")
+        self.assertEqual(result["results"]["crc32c"], "12345678")
     
     @patch('src.checkfiles.subprocess.Popen')
     def test_stream_s3_file(self, mock_popen):
         # Setup mock process
         mock_process = Mock()
+        mock_process.poll.return_value = None  # Process running normally
         mock_process.stdout = Mock()
         mock_popen.return_value = mock_process
         
         # Test non-gzipped file
-        stream_s3_file("s3://bucket/file.fastq")
+        stream = stream_s3_file("s3://bucket/file.fastq")
         mock_popen.assert_called_with(
             "aws s3 cp s3://bucket/file.fastq -",
             shell=True,
-            stdout=unittest.mock.ANY,
-            stderr=unittest.mock.ANY
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1048576  # 1MB buffer
         )
+        self.assertEqual(stream, mock_process.stdout)
         
         # Test gzipped file
         mock_popen.reset_mock()
@@ -259,18 +262,25 @@ class TestCheckfiles(unittest.TestCase):
         mock_popen.assert_called_with(
             "aws s3 cp s3://bucket/file.fastq.gz - | gunzip -c",
             shell=True,
-            stdout=unittest.mock.ANY,
-            stderr=unittest.mock.ANY
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1048576  # 1MB buffer
         )
     
     @patch('src.checkfiles.subprocess.Popen')
     def test_stream_s3_file_error(self, mock_popen):
-        # Setup mock to raise exception
-        mock_popen.side_effect = Exception("Connection error")
+        # Setup mock to simulate a failed process
+        mock_process = Mock()
+        mock_process.poll.return_value = 1  # Exit code 1 (error)
+        mock_process.stderr = Mock()
+        mock_process.stderr.read.return_value = b"Failed to access S3"
+        mock_popen.return_value = mock_process
         
         # Test error handling
-        result = stream_s3_file("s3://bucket/file.fastq")
-        self.assertIsNone(result)
+        with self.assertRaises(RuntimeError) as context:
+            stream_s3_file("s3://bucket/file.fastq")
+        
+        self.assertIn("Failed to start S3 stream", str(context.exception))
 
     def test_simple_activity_tracker(self):
         # Test basic tracker functionality

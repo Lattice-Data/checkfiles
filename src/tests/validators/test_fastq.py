@@ -1,5 +1,5 @@
 """
-Tests for the FASTQ validator with Rust implementation.
+Tests for the FASTQ validator with pure Python implementation.
 """
 import os
 import unittest
@@ -8,14 +8,6 @@ import io
 
 from src.validators.fastq import FastqValidator
 
-# Import Rust validator to check availability
-try:
-    import fastq_validator
-    RUST_INSTALLED = True
-except ImportError:
-    RUST_INSTALLED = False
-    print("Rust FASTQ validator is not available - tests cannot proceed")
-
 # Get the path to test data directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_DATA_DIR = os.path.join(BASE_DIR, "data", "fastq")
@@ -23,7 +15,6 @@ VALID_FILES_DIR = os.path.join(TEST_DATA_DIR, "valid")
 INVALID_FILES_DIR = os.path.join(TEST_DATA_DIR, "invalid")
 
 
-@unittest.skipIf(not RUST_INSTALLED, "Rust FASTQ validator is required for these tests")
 class TestFastqValidator(unittest.TestCase):
     """Test cases for the FASTQ validator."""
     
@@ -160,7 +151,7 @@ class TestFastqValidator(unittest.TestCase):
         self.assertIn("variable_length", result["warnings"])
 
     def test_error_message_content(self):
-        """Test that specific error messages from Rust are included in the validation results."""
+        """Test that specific error messages are included in the validation results."""
         # Create a file with a specific error - header line without @
         bad_header_fastq = os.path.join(self.temp_dir.name, "bad_header.fastq")
         with open(bad_header_fastq, "w") as f:
@@ -211,7 +202,6 @@ class TestFastqValidator(unittest.TestCase):
         self.assertIn("don't match", result["errors"]["invalid_format"])
 
 
-@unittest.skipIf(not RUST_INSTALLED, "Rust FASTQ validator is required for these tests")
 class TestFastqValidatorEnhanced(unittest.TestCase):
     """Enhanced test cases for the FASTQ validator using the test data directory."""
     
@@ -252,83 +242,115 @@ class TestFastqValidatorEnhanced(unittest.TestCase):
             self.assertGreater(len(result["errors"]), 0, f"Errors should be present for: {filename}")
     
     def test_mismatched_lengths(self):
-        """Test validating a FASTQ with mismatched sequence and quality lengths."""
-        file_path = os.path.join(INVALID_FILES_DIR, "mismatched_lengths.fastq")
-        if not os.path.exists(file_path):
-            self.skipTest(f"Test file not found: {file_path}")
+        """Test validating a FASTQ file with mismatched sequence/quality lengths."""
+        # Create a file with mismatched lengths
+        with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as f:
+            f.write(b"@read1\n")
+            f.write(b"ACGTACGT\n")
+            f.write(b"+\n")
+            f.write(b"IIII\n")  # Quality line too short
         
-        result = self.validator.validate_file(file_path)
-        
-        self.assertFalse(result["valid"])
-        self.assertIn("invalid_format", result["errors"])
+        try:
+            result = self.validator.validate_file(f.name)
+            self.assertFalse(result["valid"])
+            self.assertIn("length", result["errors"]["invalid_format"].lower())
+        finally:
+            os.unlink(f.name)
     
     def test_missing_at_symbol(self):
-        """Test validating a FASTQ with a missing @ symbol in the header."""
-        file_path = os.path.join(INVALID_FILES_DIR, "missing_at_symbol.fastq")
-        if not os.path.exists(file_path):
-            self.skipTest(f"Test file not found: {file_path}")
+        """Test validating a FASTQ file with missing @ in header."""
+        with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as f:
+            f.write(b"read1\n")  # Missing @ in header
+            f.write(b"ACGTACGT\n")
+            f.write(b"+\n")
+            f.write(b"IIIIIIII\n")
         
-        result = self.validator.validate_file(file_path)
-        
-        self.assertFalse(result["valid"])
-        self.assertIn("invalid_format", result["errors"])
+        try:
+            result = self.validator.validate_file(f.name)
+            self.assertFalse(result["valid"])
+            self.assertIn("Header line must start with @", result["errors"]["invalid_format"])
+        finally:
+            os.unlink(f.name)
     
     def test_missing_plus(self):
-        """Test validating a FASTQ with a missing + symbol before quality scores."""
-        file_path = os.path.join(INVALID_FILES_DIR, "missing_plus.fastq")
-        if not os.path.exists(file_path):
-            self.skipTest(f"Test file not found: {file_path}")
+        """Test validating a FASTQ file with missing + line."""
+        with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as f:
+            f.write(b"@read1\n")
+            f.write(b"ACGTACGT\n")
+            f.write(b"MISSING_PLUS\n")  # Missing + character
+            f.write(b"IIIIIIII\n")
         
-        result = self.validator.validate_file(file_path)
-        
-        self.assertFalse(result["valid"])
-        self.assertIn("invalid_format", result["errors"])
+        try:
+            result = self.validator.validate_file(f.name)
+            self.assertFalse(result["valid"])
+            self.assertIn("Quality header must start with +", result["errors"]["invalid_format"])
+        finally:
+            os.unlink(f.name)
     
     def test_mismatched_ids(self):
-        """Test validating a FASTQ with mismatched IDs in header and + lines."""
-        file_path = os.path.join(INVALID_FILES_DIR, "mismatched_ids.fastq")
-        if not os.path.exists(file_path):
-            self.skipTest(f"Test file not found: {file_path}")
+        """Test validating a FASTQ file with mismatched IDs in header and + line."""
+        with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as f:
+            f.write(b"@read1\n")
+            f.write(b"ACGTACGT\n")
+            f.write(b"+read2\n")  # Different ID than header
+            f.write(b"IIIIIIII\n")
         
-        result = self.validator.validate_file(file_path)
-        
-        self.assertFalse(result["valid"])
-        self.assertIn("invalid_format", result["errors"])
+        try:
+            result = self.validator.validate_file(f.name)
+            self.assertFalse(result["valid"])
+            self.assertIn("Seqname in + line", result["errors"]["invalid_format"])
+        finally:
+            os.unlink(f.name)
     
     def test_incomplete_record(self):
-        """Test validating a FASTQ with an incomplete record."""
-        file_path = os.path.join(INVALID_FILES_DIR, "incomplete_record.fastq")
-        if not os.path.exists(file_path):
-            self.skipTest(f"Test file not found: {file_path}")
+        """Test validating a FASTQ file with incomplete records."""
+        with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as f:
+            f.write(b"@read1\n")
+            f.write(b"ACGTACGT\n")
+            f.write(b"+\n")
+            # Missing quality line
         
-        result = self.validator.validate_file(file_path)
-        
-        self.assertFalse(result["valid"])
-        self.assertIn("invalid_format", result["errors"])
+        try:
+            result = self.validator.validate_file(f.name)
+            self.assertFalse(result["valid"])
+            self.assertIn("Incomplete FASTQ block", result["errors"]["invalid_format"])
+        finally:
+            os.unlink(f.name)
     
     def test_stream_with_large_data(self):
-        """Test validating a large FASTQ stream."""
-        # Create a large FASTQ stream with many reads
-        read_template = "@read{}\nACGT\n+\nIIII\n"
-        stream_content = "".join([read_template.format(i) for i in range(1000)])
+        """Test validating a large data stream."""
+        # Create a moderately large FASTQ stream (10,000 reads)
+        buffer = io.BytesIO()
+        for i in range(10_000):
+            buffer.write(f"@read{i}\n".encode())
+            buffer.write(b"ACGTACGTACGTACGT\n")
+            buffer.write(f"+read{i}\n".encode())
+            buffer.write(b"IIIIIIIIIIIIIIII\n")
         
-        input_stream = io.BytesIO(stream_content.encode('utf-8'))
-        
-        result = self.validator.validate_stream(input_stream)
+        buffer.seek(0)
+        result = self.validator.validate_stream(buffer)
         
         self.assertTrue(result["valid"])
-        self.assertEqual(result["stats"]["read_count"], 1000)
+        self.assertEqual(result["stats"]["read_count"], 10_000)
     
     def test_with_descriptions(self):
-        """Test validating a FASTQ file with descriptions in headers."""
-        file_path = os.path.join(VALID_FILES_DIR, "with_descriptions.fastq")
-        if not os.path.exists(file_path):
-            self.skipTest(f"Test file not found: {file_path}")
+        """Test validating a FASTQ file with varying descriptions in headers."""
+        with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as f:
+            f.write(b"@A00887:459:HWFCYDRXY:1:1101:1125:1000 1:N:0:GTAGAGGA+CTAAGCCT\n")
+            f.write(b"ACTG\n")
+            f.write(b"+\n")
+            f.write(b"IIII\n")
+            f.write(b"@A00887:459:HWFCYDRXY:1:1101:1554:1000 1:N:0:GTAGAGGA+CTAAGCCT\n")
+            f.write(b"CAGT\n")
+            f.write(b"+\n")
+            f.write(b"IIII\n")
         
-        result = self.validator.validate_file(file_path)
-        
-        self.assertTrue(result["valid"])
-        self.assertEqual(len(result["errors"]), 0)
+        try:
+            result = self.validator.validate_file(f.name)
+            self.assertTrue(result["valid"])
+            self.assertEqual(result["stats"]["read_count"], 2)
+        finally:
+            os.unlink(f.name)
 
 
 if __name__ == "__main__":

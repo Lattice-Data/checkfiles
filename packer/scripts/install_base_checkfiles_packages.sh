@@ -16,9 +16,3 @@ sudo apt-get -y install \
     jq \
     pkg-config \
     libssl-dev
-
-# Add Rust binary directory to system-wide PATH
-echo 'export PATH="$HOME/.cargo/bin:$PATH"' | sudo tee /etc/profile.d/rust.sh
-
-# Make cargo binaries available to all users
-sudo chmod +rx /etc/profile.d/rust.sh

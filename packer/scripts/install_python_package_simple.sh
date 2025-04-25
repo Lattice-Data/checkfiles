@@ -139,24 +139,12 @@ def initialize_validator(file_format):
             return FastqValidator()
         except ImportError as e:
             logger.error(f"Error importing FastqValidator: {e}")
-            raise ImportError(f"Error importing FastqValidator: {e}\nMake sure the Rust implementation is properly installed")
+            raise ImportError(f"Error importing FastqValidator: {e}")
     else:
         raise ValueError(f"Unsupported file format: {file_format}")
 EOF
     sudo chmod 755 "${SITE_PACKAGES}/checkfiles.py"
     sudo ln -sf "${SITE_PACKAGES}/checkfiles.py" "${SRC_DIR}/checkfiles.py"
-fi
-
-# Make sure the Rust-built fastq_validator is available
-if [ -d "/opt/checkfiles/python/fastq_validator" ]; then
-    echo "Linking fastq_validator module to Python path"
-    sudo ln -sf /opt/checkfiles/python/fastq_validator "${SITE_PACKAGES}/fastq_validator"
-fi
-
-# Create a symlink for the Rust library if it exists
-if [ -f "/opt/checkfiles/lib/libfastq_validator.so" ]; then
-    echo "Creating symlink for Rust library"
-    sudo ln -sf /opt/checkfiles/lib/libfastq_validator.so "${SITE_PACKAGES}/libfastq_validator.so"
 fi
 
 # Verify the installation
@@ -195,14 +183,6 @@ except ImportError as e:
     print(f"FastqValidator import error: {e}")
 except Exception as e:
     print(f"FastqValidator other error: {e}")
-
-try:
-    import fastq_validator
-    print(f"Rust fastq_validator module: {fastq_validator}")
-except ImportError as e:
-    print(f"Rust module import error: {e}")
-except Exception as e:
-    print(f"Rust module other error: {e}")
 
 print("\nAvailable files in Python paths:")
 for path in sys.path:

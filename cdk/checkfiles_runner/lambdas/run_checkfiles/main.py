@@ -35,7 +35,6 @@ def run_checkfiles_command(event, context):
             "echo 'DEBUG: Checking Python environment'",
             "cd /home/ubuntu/checkfiles",
             "python3 -c 'import sys; print(\"Python path:\", sys.path)'",
-            "find /usr/local/lib -name 'fastq_validator*'",
             "find /usr/local/lib -name 'src*'",
             "ls -la /home/ubuntu/checkfiles",
             "ls -la /usr/local/lib/python3*/dist-packages/ || echo 'No dist-packages'"
@@ -92,17 +91,14 @@ def run_checkfiles_command(event, context):
         InstanceIds=[instance_id],
         DocumentName='AWS-RunShellScript',
         Parameters={'commands': [
-            "cd /home/ubuntu/checkfiles",
-            "echo 'DEBUG: Python environment info'",
-            "python3 -c 'import sys; print(\"Python version:\", sys.version); print(\"Python path:\", sys.path)'",
-            "echo 'DEBUG: Checking fastq_validator module'",
-            "python3 -c 'try: import fastq_validator; print(\"Available functions:\", dir(fastq_validator)) except Exception as e: print(\"Error importing fastq_validator:\", e)'",
-            "echo 'DEBUG: Checking Rust library'",
-            "ls -la /opt/checkfiles/lib/",
-            "echo 'DEBUG: Checking library symbols'",
-            "nm -D /opt/checkfiles/lib/libfastq_validator.so | grep -E 'validate|fastq' || echo 'No validate functions found'",
-            "echo 'DEBUG: Checking Python module'",
-            "ls -la /usr/local/lib/python3.10/dist-packages/fastq_validator || echo 'No module directory'"
+            "echo 'DEBUG: Checking for libraries'",
+            "find /usr/local/lib -name '*.so'",
+            "echo 'DEBUG: Checking Python packages'",
+            "pip list",
+            "python3 -c 'import sys; print(sys.path)'",
+            "ls -la /opt/checkfiles/",
+            "ls -la /usr/local/lib/python3.10/dist-packages/",
+            "python3 -c 'import src; print(\"src imported\")'",
         ]}
     )
     time.sleep(2)  # Wait for command to complete

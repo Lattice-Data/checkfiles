@@ -16,7 +16,6 @@ docker-compose up
 ## Features
 
 - Single container with all dependencies pre-installed
-- Rust components pre-compiled
 - Python environment configured
 - No need to install Rust, Python, or AWS tools locally
 
@@ -44,7 +43,7 @@ docker-compose -f docker/docker-compose.yml run --entrypoint bash checkfiles
 
 The Docker setup mounts your local `src` directory, allowing you to make code changes without rebuilding the image.
 
-To apply changes to Rust components or dependencies:
+To apply changes to dependencies:
 ```bash
 docker-compose -f docker/docker-compose.yml build --no-cache
 ```
@@ -94,13 +93,6 @@ docker stop <container_id>
 If you encounter permission problems:
 ```bash
 sudo chown -R $(id -u):$(id -g) .
-```
-
-### Library not found
-If the Rust library can't be found:
-- Verify the container has the correct paths by running:
-```bash
-docker-compose -f docker/docker-compose.yml run checkfiles sh -c 'ls -la /opt/checkfiles/lib'
 ```
 
 ## Production Use

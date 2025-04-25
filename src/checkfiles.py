@@ -38,12 +38,6 @@ logger.debug(f"Current directory: {os.getcwd()}")
 
 # Try to fix import path
 try:
-    # First check if we can directly import the Rust module
-    import fastq_validator
-    logger.debug("Successfully imported fastq_validator")
-except ImportError as e:
-    logger.debug(f"Failed to import fastq_validator: {e}")
-    
     # Add potential module locations to path
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     potential_paths = [
@@ -57,7 +51,9 @@ except ImportError as e:
         if path not in sys.path and os.path.exists(path):
             logger.debug(f"Adding {path} to sys.path")
             sys.path.insert(0, path)
-
+except ImportError as e:
+    logger.debug(f"Failed to set up Python paths: {e}")
+    
 class SimpleActivityTracker:
     """Simple activity tracker for validation processes."""
     
@@ -189,30 +185,24 @@ def initialize_validator(file_format):
     
     if file_format.lower() == "fastq":
         try:
-            # First try direct import
-            import fastq_validator
-            logger.debug("Direct import of fastq_validator succeeded")
-            
-            try:
-                from src.validators.fastq import FastqValidator
-                logger.debug("Successfully imported FastqValidator")
-                return FastqValidator()
-            except ImportError as e:
-                logger.error(f"Error importing FastqValidator: {e}")
-                
-                # Try creating a simple validator with direct Rust bindings
-                from src.validators.base import BaseValidator
-                class SimpleValidator(BaseValidator):
-                    def validate_file(self, file_path):
-                        is_valid, error_msg, line_num = fastq_validator.validate_fastq(file_path)
-                        return {"valid": is_valid, "errors": {} if is_valid else {"invalid_format": error_msg}}
-                        
-                logger.debug("Created SimpleValidator as fallback")
-                return SimpleValidator()
-                
+            from src.validators.fastq import FastqValidator
+            logger.debug("Successfully imported FastqValidator")
+            return FastqValidator()
         except ImportError as e:
-            logger.error(f"Error importing fastq_validator: {e}")
-            raise ImportError(f"Error importing FastqValidator: {e}\nMake sure the Rust implementation is properly installed")
+            logger.error(f"Error importing FastqValidator: {e}")
+            print(f"Error importing FastqValidator: {e}")
+            print("Using pure Python implementation - no Rust required")
+            try:
+                # Try alternative import path
+                import sys
+                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                from validators.fastq import FastqValidator
+                logger.debug("Successfully imported FastqValidator using alternative path")
+                return FastqValidator()
+            except ImportError as e2:
+                logger.error(f"Error importing FastqValidator from alternative path: {e2}")
+                print(f"Failed to import FastqValidator: {e2}")
+                raise ImportError(f"Error importing FastqValidator from all paths: {e}, {e2}")
     else:
         raise ValueError(f"Unsupported file format: {file_format}")
 
@@ -453,7 +443,7 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         
         # Run validation with proper progress tracking
         if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Running FASTQ validation (Rust)")
+            progress_tracker.update_progress(s3_path, status="Running FASTQ validation")
         
         results = validator.validate_stream(validation_stream)
         
@@ -705,6 +695,48 @@ def main():
         print("+++++++++++++++++++++")
         print(result)
         print("+++++++++++++++++++++")
+
+def stream_s3_file(s3_path, decompress=None):
+    """
+    Create a stream from an S3 file using AWS CLI.
+    
+    Args:
+        s3_path (str): S3 path in the format s3://bucket/key
+        decompress (bool, optional): Whether to decompress the file. If None, will be determined by file extension.
+    
+    Returns:
+        subprocess.Popen: A process with stdout pipe containing the file content
+    """
+    import subprocess
+    import shlex
+    
+    # Determine if we should decompress based on file extension if not specified
+    if decompress is None:
+        decompress = has_gz_extension(s3_path)
+    
+    # Escape the s3 path for shell safety
+    s3_path_escaped = shlex.quote(s3_path)
+    
+    if decompress:
+        cmd = f"aws s3 cp {s3_path_escaped} - | gunzip -c"
+    else:
+        cmd = f"aws s3 cp {s3_path_escaped} -"
+    
+    # Start the subprocess
+    process = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1048576  # 1MB buffer
+    )
+    
+    # Check if process started successfully
+    if process.poll() is not None:
+        stderr = process.stderr.read().decode('utf-8')
+        raise RuntimeError(f"Failed to start S3 stream: {stderr}")
+    
+    return process.stdout
 
 if __name__ == "__main__":
     main()
