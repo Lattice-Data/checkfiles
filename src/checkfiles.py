@@ -14,6 +14,43 @@ import io
 import signal
 import crcmod.predefined
 import multiprocessing
+import logging
+
+# Configure logging to a file for debugging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='/home/ubuntu/checkfiles/checkfiles_debug.log',
+    filemode='w'
+)
+logger = logging.getLogger(__name__)
+
+# Print debugging information
+logger.debug(f"Python version: {sys.version}")
+logger.debug(f"Python path: {sys.path}")
+logger.debug(f"Current directory: {os.getcwd()}")
+
+# Try to fix import path
+try:
+    # First check if we can directly import the Rust module
+    import fastq_validator
+    logger.debug("Successfully imported fastq_validator")
+except ImportError as e:
+    logger.debug(f"Failed to import fastq_validator: {e}")
+    
+    # Add potential module locations to path
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    potential_paths = [
+        f"/usr/local/lib/python{python_version}/dist-packages",
+        f"/usr/local/lib/python{python_version}/site-packages",
+        "/opt/checkfiles/python",
+        os.path.join(os.getcwd(), "src")
+    ]
+    
+    for path in potential_paths:
+        if path not in sys.path and os.path.exists(path):
+            logger.debug(f"Adding {path} to sys.path")
+            sys.path.insert(0, path)
 
 class SimpleActivityTracker:
     """Simple activity tracker for validation processes."""
@@ -209,23 +246,34 @@ def stream_s3_file(s3_path, debug=False, progress_tracker=None):
         return None
 
 def initialize_validator(file_format):
-    """Initialize and return the appropriate validator for the given file format.
+    """Initialize and return the appropriate validator for the given file format."""
+    logger.debug(f"Initializing validator for {file_format}")
     
-    Args:
-        file_format (str): The format of the file to validate (e.g., "fastq")
-        
-    Returns:
-        object: An initialized validator object or None if format is unsupported
-        
-    Raises:
-        ValueError: If the file format is not supported
-        ImportError: If there's an issue importing the validator module
-    """
     if file_format.lower() == "fastq":
         try:
-            from src.validators.fastq import FastqValidator
-            return FastqValidator()
+            # First try direct import
+            import fastq_validator
+            logger.debug("Direct import of fastq_validator succeeded")
+            
+            try:
+                from src.validators.fastq import FastqValidator
+                logger.debug("Successfully imported FastqValidator")
+                return FastqValidator()
+            except ImportError as e:
+                logger.error(f"Error importing FastqValidator: {e}")
+                
+                # Try creating a simple validator with direct Rust bindings
+                from src.validators.base import BaseValidator
+                class SimpleValidator(BaseValidator):
+                    def validate_file(self, file_path):
+                        is_valid, error_msg, line_num = fastq_validator.validate_fastq(file_path)
+                        return {"valid": is_valid, "errors": {} if is_valid else {"invalid_format": error_msg}}
+                        
+                logger.debug("Created SimpleValidator as fallback")
+                return SimpleValidator()
+                
         except ImportError as e:
+            logger.error(f"Error importing fastq_validator: {e}")
             raise ImportError(f"Error importing FastqValidator: {e}\nMake sure the Rust implementation is properly installed")
     else:
         raise ValueError(f"Unsupported file format: {file_format}")

@@ -1,7 +1,11 @@
 import json
 import os
 import boto3
+import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 TWENTY_THREE__HOURS_IN_SECONDS = str(23 * 3600)
 
@@ -15,6 +19,31 @@ def get_backend_uri():
 
 
 def run_checkfiles_command(event, context):
+    # Log parameters clearly
+    logger.info(f"Event parameters: {json.dumps(event)}")
+    logger.info(f"EC2 instance ID: {event['instance_id']}")
+    
+    # Add debugging commands
+    ssm = boto3.client('ssm')
+    
+    # First, run a diagnostic check to understand the environment
+    debug_cmd = ssm.send_command(
+        InstanceIds=[event['instance_id']],
+        DocumentName='AWS-RunShellScript',
+        Parameters={'commands': [
+            "echo 'DEBUG: Checking Python environment'",
+            "cd /home/ubuntu/checkfiles",
+            "python3 -c 'import sys; print(\"Python path:\", sys.path)'",
+            "find /usr/local/lib -name 'fastq_validator*'",
+            "find /usr/local/lib -name 'src*'",
+            "ls -la /home/ubuntu/checkfiles",
+            "ls -la /usr/local/lib/python3*/dist-packages/ || echo 'No dist-packages'"
+        ]}
+    )
+    
+    # Wait for the debug output
+    logger.info(f"Debug command ID: {debug_cmd['Command']['CommandId']}")
+    
     # Required parameters
     instance_id = event['instance_id']
     backend_uri = event['backend_uri']

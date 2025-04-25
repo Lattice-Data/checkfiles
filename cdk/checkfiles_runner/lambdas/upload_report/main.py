@@ -33,14 +33,18 @@ def upload_report_to_slack(event, context):
 
         # Get file content from EC2
         copy_command = ssm.send_command(
-        InstanceIds=[instance_id],
-        DocumentName='AWS-RunShellScript',
-        Parameters={
-            'commands': [
-                'cd /home/ubuntu/checkfiles && base64 -w 0 validation_progress.log'
-            ]
-        }
-    )
+            InstanceIds=[instance_id],
+            DocumentName='AWS-RunShellScript',
+            Parameters={
+                'commands': [
+                    'cd /home/ubuntu/checkfiles',
+                    'echo "DEBUG: Checking for validation log file"',
+                    'ls -la /home/ubuntu/checkfiles',
+                    'if [ ! -f "validation_progress.log" ]; then echo "Log file not found, creating empty one"; echo "No validation results available" > validation_progress.log; fi',
+                    'base64 -w 0 validation_progress.log'
+                ]
+            }
+        )
         
         time.sleep(2)
         
