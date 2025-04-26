@@ -185,13 +185,17 @@ class TestCheckfiles(unittest.TestCase):
     def test_validate_s3_file_success(self, mock_fastq_validator):
         # Setup mock validator
         mock_validator = Mock()
-        mock_validator.validate_stream.return_value = {"valid": True, "stats": {"read_count": 1}}
+        mock_validator.validate_stream.return_value = {
+            "valid": True, 
+            "stats": {"read_count": 1}
+        }
         
         # Setup mock process
         mock_process = Mock()
         mock_process.poll.return_value = None  # Process running normally
         mock_process.returncode = 0  # Success exit code when checked
         mock_process.stdout = Mock()
+        mock_process.stdout.read.side_effect = [b'some data', b'']  # Return data once, then EOF
         
         # Setup patching
         with patch('src.checkfiles.initialize_validator', return_value=mock_validator):
@@ -212,22 +216,11 @@ class TestCheckfiles(unittest.TestCase):
                             crc_instance.crcValue = 0x12345678
                             mock_crc.return_value = crc_instance
                             
-                            # Mock QueueStream to bypass threading complexity
-                            mock_queue_stream = Mock()
-                            with patch('src.checkfiles.QueueStream', return_value=mock_queue_stream):
-                                # Mock threading
-                                with patch('threading.Thread') as mock_thread:
-                                    thread_instance = Mock()
-                                    thread_instance.join.return_value = None
-                                    mock_thread.return_value = thread_instance
-                                    
-                                    # Mock queue
-                                    with patch('src.checkfiles.queue.Queue'):
-                                        # Call the function
-                                        result = validate_s3_file(
-                                            "s3://bucket/test.fastq",
-                                            "fastq"
-                                        )
+                            # Call the function
+                            result = validate_s3_file(
+                                "s3://bucket/test.fastq",
+                                "fastq"
+                            )
         
         # Verify results
         self.assertTrue(result["success"])
