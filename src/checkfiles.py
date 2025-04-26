@@ -15,6 +15,9 @@ import multiprocessing
 import logging
 import queue
 import shlex
+import zlib
+import time
+import tempfile
 
 # Create logs directory in current working directory if it doesn't exist
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -267,56 +270,15 @@ def validate_local_file(file_path, file_format, debug=False, validator=None, pro
             "success": False
         }
 
-# Define this above the validate_s3_file function
-class QueueStream:
-    """Stream-like object that reads from a queue."""
-    def __init__(self, q):
-        self.queue = q
-        self.buffer = b""
-        self.eof = False
-        
-    def read(self, size=-1):
-        if self.eof and not self.buffer:
-            return b""
-                
-        if size == -1:
-            # Read all remaining data
-            result = self.buffer
-            self.buffer = b""
-            
-            while not self.eof:
-                chunk = self.queue.get()
-                if chunk is None:
-                    self.eof = True
-                    break
-                result += chunk
-            
-            return result
-        else:
-            # Read specific amount
-            while len(self.buffer) < size and not self.eof:
-                chunk = self.queue.get()
-                if chunk is None:
-                    self.eof = True
-                    break
-                self.buffer += chunk
-            
-            # Return what we have, up to size
-            available = min(len(self.buffer), size)
-            result = self.buffer[:available]
-            self.buffer = self.buffer[available:]
-            return result
-
 def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress_tracker=None):
     """Validate an S3 file."""
     process = None
-    main_thread_id = threading.get_ident()
+    
+    if progress_tracker:
+        progress_tracker.init_file(s3_path)
+        progress_tracker.update_progress(s3_path, status="Starting validation")
     
     try:
-        if progress_tracker:
-            progress_tracker.init_file(s3_path)
-            progress_tracker.update_progress(s3_path, status=f"Starting validation (main thread: {main_thread_id % 1000:03d})")
-        
         if validator is None:
             validator = initialize_validator(file_format)
             if progress_tracker:
@@ -333,13 +295,13 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
             cmd = f"aws s3 cp {s3_path_escaped} -"
             track_validation_progress(s3_path, progress_tracker, "Setting up direct stream")
         
-        # Start the subprocess
+        # Start the subprocess with a smaller buffer to prevent memory issues
         process = subprocess.Popen(
             cmd,
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            bufsize=1048576  # 1MB buffer
+            bufsize=262144  # 256KB buffer
         )
         
         # Check if process started successfully
@@ -348,131 +310,68 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
             raise RuntimeError(f"Failed to start S3 stream: {stderr}")
         
         if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Stream established, setting up parallel processing")
-        
-        # Create queues for parallel processing
-        hash_queue = queue.Queue(maxsize=50)
-        valid_queue = queue.Queue(maxsize=50)
-        
-        # Function to read from stream and add to both queues
-        def reader_thread():
-            reader_id = threading.get_ident()
-            try:
-                total_bytes = 0
-                if progress_tracker:
-                    progress_tracker.update_progress(
-                        s3_path, 
-                        status=f"Reader thread {reader_id % 1000:03d} started"
-                    )
-                
-                while True:
-                    chunk = process.stdout.read(65536)  # 64KB chunks
-                    if not chunk:
-                        # Signal EOF to both queues
-                        hash_queue.put(None)
-                        valid_queue.put(None)
-                        break
-                    
-                    total_bytes += len(chunk)
-                    hash_queue.put(chunk)
-                    valid_queue.put(chunk)
-                    
-                    # Update progress occasionally
-                    if progress_tracker and total_bytes % (1024*1024*100) == 0:  # Every ~100MB
-                        progress_tracker.update_progress(
-                            s3_path, 
-                            status=f"Reader {reader_id % 1000:03d}: {total_bytes/1024/1024:.1f} MB read"
-                        )
-                
-                logger.debug(f"Reader thread {reader_id % 1000:03d} complete for {s3_path}, {total_bytes} bytes read")
-            except Exception as e:
-                logger.error(f"Error in reader thread {reader_id % 1000:03d}: {str(e)}")
-                # Signal error to queues
-                hash_queue.put(None)
-                valid_queue.put(None)
-        
-        # Start reader thread
-        reader = threading.Thread(target=reader_thread, daemon=True, name=f"Reader-{main_thread_id % 1000:03d}")
-        reader.start()
-        
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Starting hash calculation")
+            progress_tracker.update_progress(s3_path, status="Stream established")
         
         # Initialize hash objects
         md5_hash = hashlib.md5()
         sha256_hash = hashlib.sha256()
         crc32c_func = crcmod.predefined.Crc('crc-32c')
         
-        # Compute hashes in a separate thread
-        def hash_thread():
-            hash_id = threading.get_ident()
+        # Create a temporary file for validation
+        with tempfile.TemporaryFile() as temp_file:
             total_bytes = 0
-            try:
-                if progress_tracker:
+            chunk_size = 262144  # 256KB chunks for better memory management
+            
+            # Read and process data in chunks
+            while True:
+                chunk = process.stdout.read(chunk_size)
+                if not chunk:
+                    break
+                
+                # Update hashes
+                md5_hash.update(chunk)
+                sha256_hash.update(chunk)
+                crc32c_func.update(chunk)
+                
+                # Write to temp file
+                temp_file.write(chunk)
+                
+                total_bytes += len(chunk)
+                if progress_tracker and total_bytes % (1024*1024) == 0:  # Update every 1MB
                     progress_tracker.update_progress(
                         s3_path, 
-                        status=f"Hash thread {hash_id % 1000:03d} started"
+                        status=f"Processed {total_bytes/1024/1024:.1f} MB"
                     )
-                
-                while True:
-                    chunk = hash_queue.get()
-                    if chunk is None:
-                        break
-                    
-                    md5_hash.update(chunk)
-                    sha256_hash.update(chunk)
-                    crc32c_func.update(chunk)
-                    
-                    total_bytes += len(chunk)
-                    # Update occasionally
-                    if progress_tracker and total_bytes % (1024*1024*100) == 0:  # Every ~100MB
-                        progress_tracker.update_progress(
-                            s3_path, 
-                            status=f"Hash {hash_id % 1000:03d}: {total_bytes/1024/1024:.1f} MB processed"
-                        )
-                
-                logger.debug(f"Hash thread {hash_id % 1000:03d} complete for {s3_path}, {total_bytes} bytes processed")
-            except Exception as e:
-                logger.error(f"Error in hash thread {hash_id % 1000:03d}: {str(e)}")
-        
-        hash_worker = threading.Thread(target=hash_thread, daemon=True, name=f"Hash-{main_thread_id % 1000:03d}")
-        hash_worker.start()
-        
-        # Create validation stream
-        validation_stream = QueueStream(valid_queue)
-        
-        # Run validation with proper progress tracking
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Running FASTQ validation")
-        
-        results = validator.validate_stream(validation_stream)
-        
-        if progress_tracker:
-            progress_tracker.update_progress(s3_path, status="Validation complete, finalizing hashes")
-        
-        # Wait for hash calculation to complete
-        hash_worker.join()
-        
-        # Check subprocess for errors
-        if process.poll() is not None and process.returncode != 0:
-            stderr = process.stderr.read().decode('utf-8')
-            raise RuntimeError(f"S3 stream failed with error: {stderr}")
-        
-        # Add hash results
-        results['md5sum'] = md5_hash.hexdigest()
-        results['sha256'] = sha256_hash.hexdigest()
-        results['crc32c'] = format(crc32c_func.crcValue, '08x')
-        
-        # Wait for reader thread to finish
-        reader.join(timeout=5)
+            
+            # Check if process ended successfully
+            if process.poll() is not None and process.returncode != 0:
+                stderr = process.stderr.read().decode('utf-8')
+                raise RuntimeError(f"S3 stream failed: {stderr}")
+            
+            # Rewind temp file for validation
+            temp_file.seek(0)
+            
+            # Run validation
+            logger.debug("Starting FASTQ validation")
+            results = validator.validate_stream(temp_file)
+            logger.debug("FASTQ validation completed")
+            
+            # Add hash results
+            results['md5sum'] = md5_hash.hexdigest()
+            results['sha256'] = sha256_hash.hexdigest()
+            results['crc32c'] = format(crc32c_func.crcValue, '08x')
         
         # Clean up process
         if process and process.poll() is None:
-            process.terminate()
-            
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except Exception as term_error:
+                logger.error(f"Error terminating process: {str(term_error)}")
+        
         if progress_tracker:
             progress_tracker.complete_file(s3_path, True, results)
-            
+        
         return {
             "file_path": s3_path,
             "results": results,
@@ -482,18 +381,17 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
     except Exception as e:
         error_msg = f"Error validating {s3_path}: {str(e)}"
         logger.error(error_msg)
-        print(error_msg)
         
-        # Clean up process if still running
+        # Clean up
         if process and process.poll() is None:
             try:
                 process.terminate()
-            except:
-                pass
+            except Exception as term_error:
+                logger.error(f"Error terminating process: {str(term_error)}")
         
         if progress_tracker:
             progress_tracker.complete_file(s3_path, False, {"error": str(e)})
-            
+        
         return {
             "file_path": s3_path,
             "error": error_msg,
@@ -617,13 +515,13 @@ def main():
     if not args.quiet:
         progress_tracker = SimpleActivityTracker(total_files)
     
-    # Set a more reasonable thread count based on file count and system resources
-    thread_count = min(args.threads, total_files, min(32, multiprocessing.cpu_count() * 2))
+    # Set a reasonable thread count based on file count and system resources
+    # Use min(CPU cores * 2, files, 32) but at least 1
+    thread_count = max(1, min(args.threads, total_files, min(32, multiprocessing.cpu_count() * 2)))
     print(f"Using {thread_count} threads for parallel file processing")
     
-    # In main() before the ThreadPoolExecutor
+    # Pre-validate gzip files before starting threads
     if local_files:
-        # Pre-validate gzip files before starting threads
         validated_local_files = []
         for file_path in local_files:
             if has_gz_extension(file_path):
@@ -634,7 +532,7 @@ def main():
             validated_local_files.append(file_path)
         local_files = validated_local_files
     
-    # Process files in parallel
+    # Process files in parallel with controlled concurrency
     with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
         futures = []
         
@@ -642,10 +540,15 @@ def main():
         if local_files:
             print(f"Processing {len(local_files)} local files...")
             for file_path in local_files:
-                # Name the threads for better tracking
                 futures.append(
-                    executor.submit(validate_local_file, file_path, args.file_format, 
-                                    args.debug, None, progress_tracker)
+                    executor.submit(
+                        validate_local_file,
+                        file_path,
+                        args.file_format,
+                        args.debug,
+                        validator,  # Pass the validator instance
+                        progress_tracker
+                    )
                 )
                 
         # Process S3 files
@@ -653,15 +556,29 @@ def main():
             print(f"Processing {len(s3_files)} S3 files...")
             for s3_path in s3_files:
                 futures.append(
-                    executor.submit(validate_s3_file, s3_path, args.file_format, 
-                                    args.debug, None, progress_tracker)
+                    executor.submit(
+                        validate_s3_file,
+                        s3_path,
+                        args.file_format,
+                        args.debug,
+                        validator,  # Pass the validator instance
+                        progress_tracker
+                    )
                 )
         
-        # Collect results
+        # Collect results as they complete
         all_results = []
         for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            all_results.append(result)
+            try:
+                result = future.result()
+                all_results.append(result)
+            except Exception as e:
+                logger.error(f"Error processing file: {str(e)}")
+                all_results.append({
+                    "file_path": "unknown",
+                    "error": str(e),
+                    "success": False
+                })
     
     # Close progress tracker
     if progress_tracker:
