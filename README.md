@@ -176,3 +176,14 @@ For support, please:
 - [ ] Additional file format support
 - [ ] Performance optimizations
 - [ ] Extended test coverage
+
+## Supported File Formats
+
+Checkfiles can validate various file formats including:
+
+- FASTQ (DNA/RNA sequence reads)
+- BAM (Binary Alignment Map)
+- CRAM (Compressed Reference-oriented Alignment Map)
+- And more...
+
+Each file type has specific validators that check for format compliance, data integrity, and other format-specific requirements.

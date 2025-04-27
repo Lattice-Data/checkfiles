@@ -1,0 +1,447 @@
+"""
+Core FASTQ validator implementation.
+"""
+
+import os
+import re
+import logging
+import io
+from typing import Dict, Any, BinaryIO, Optional
+
+from src.validators.base import BaseValidator
+from src.validators.fastq.parser import FastqHeaderParser
+from src.validators.fastq.statistics import FastqStatistics
+
+logger = logging.getLogger(__name__)
+
+# Define regex patterns for FASTQ format validation
+SEQ_REGEX = re.compile(r'^[A-Za-z.~]+$')
+QUAL_REGEX = re.compile(r'^[\x21-\x7E]+$')  # ASCII 33-126, from '!' to '~'
+
+class FastqValidationResult:
+    """Result of FASTQ validation with detailed error information."""
+    
+    def __init__(self, valid: bool, error_message: Optional[str] = None, line_number: Optional[int] = None):
+        self.valid = valid
+        self.error_message = error_message
+        self.line_number = line_number
+
+    @classmethod
+    def valid(cls):
+        """Create a valid result."""
+        return cls(True)
+        
+    @classmethod
+    def invalid(cls, error_message: str, line_number: int):
+        """Create an invalid result with error details."""
+        return cls(False, error_message, line_number)
+
+class FastqValidator(BaseValidator):
+    """
+    Validator for FASTQ format files and streams.
+    
+    This validator uses pure Python implementation for validation.
+    It supports both file-based and streaming validation.
+    """
+    
+    def __init__(self):
+        """Initialize the FASTQ validator."""
+        super().__init__()
+        self.header_parser = FastqHeaderParser()
+        self.statistics = FastqStatistics()
+        self.mismatched_ids = {}
+    
+    def validate_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        Validate a FASTQ file.
+        
+        Args:
+            file_path: Path to the FASTQ file to validate
+            
+        Returns:
+            Dictionary with validation results including:
+            - valid (bool): Whether the file is valid
+            - errors (dict): Any validation errors
+            - warnings (dict): Any validation warnings
+            - stats (dict): File statistics
+        """
+        if not os.path.exists(file_path):
+            return self.format_validation_result(
+                valid=False,
+                errors={"file_not_found": f"File not found: {file_path}"}
+            )
+        
+        # Check for empty file
+        if os.path.getsize(file_path) == 0:
+            return self.format_validation_result(
+                valid=False,
+                errors={"empty_file": "FASTQ file is empty"}
+            )
+        
+        errors = {}
+        warnings = {}
+        stats = {}
+        
+        file_handle = None
+        try:
+            # Reset collectors
+            self.header_parser.reset()
+            self.statistics.reset()
+            self.mismatched_ids = {}
+            
+            # Open file for validation
+            file_handle = open(file_path, 'rb')
+            
+            # First validate the format
+            validation_result = self.validate_fastq_stream(file_handle)
+            
+            if not validation_result.valid:
+                error_detail = validation_result.error_message
+                if validation_result.line_number is not None:
+                    error_detail += f" at line {validation_result.line_number}"
+                return self.format_validation_result(
+                    valid=False,
+                    errors={"invalid_format": error_detail}
+                )
+            
+            # Reset file pointer for statistics collection
+            file_handle.seek(0)
+            
+            # Collect statistics and metadata
+            self._process_fastq_content(file_handle)
+            
+            logger.debug(f"Validated FASTQ file: {file_path}")
+            
+        except Exception as e:
+            errors["validation_error"] = f"Validation error: {str(e)}"
+            logger.error(f"Validation failed: {str(e)}")
+            return self.format_validation_result(valid=False, errors=errors)
+        finally:
+            if file_handle:
+                try:
+                    file_handle.close()
+                except:
+                    pass
+        
+        # Get statistics
+        stats = self.statistics.get_statistics()
+        
+        # Add metadata from header parser
+        stats.update(self.header_parser.get_formatted_metadata())
+        
+        # Additional validations and quality checks based on stats
+        validation_result = self.statistics.validate_statistics()
+        errors.update(validation_result.get("errors", {}))
+        warnings.update(validation_result.get("warnings", {}))
+        
+        # Add mismatched IDs to warnings
+        if self.mismatched_ids:
+            warnings["mismatched_ids"] = f"Found {len(self.mismatched_ids)} records with mismatched IDs in header and description lines"
+        
+        # Determine if valid (no errors, even if there are warnings)
+        valid = len(errors) == 0
+        
+        return self.format_validation_result(
+            valid=valid,
+            errors=errors,
+            warnings=warnings,
+            stats=stats
+        )
+    
+    def validate_stream(self, input_stream: BinaryIO) -> Dict[str, Any]:
+        """
+        Validate a FASTQ data stream.
+        
+        Args:
+            input_stream: Binary stream containing FASTQ data
+            
+        Returns:
+            Dictionary with validation results including:
+            - valid (bool): Whether the stream data is valid
+            - errors (dict): Any validation errors
+            - warnings (dict): Any validation warnings
+            - stats (dict): Data statistics
+        """
+        errors = {}
+        warnings = {}
+        
+        try:
+            # Reset collectors
+            self.header_parser.reset()
+            self.statistics.reset()
+            self.mismatched_ids = {}
+            
+            # Since we need to read the stream twice and not all streams support seek,
+            # we'll buffer the first ~10MB to check format validity
+            validation_buffer = io.BytesIO()
+            max_validation_size = 10 * 1024 * 1024  # 10MB limit for format validation
+            validation_bytes = 0
+            
+            # Read the first part of the stream for validation only
+            while validation_bytes < max_validation_size:
+                chunk = input_stream.read(65536)  # 64KB chunks
+                if not chunk:
+                    break
+                    
+                validation_buffer.write(chunk)
+                validation_bytes += len(chunk)
+                
+            logger.debug(f"Read {validation_bytes} bytes for initial validation")
+            
+            # If we couldn't read anything, return empty file error
+            if validation_bytes == 0:
+                return self.format_validation_result(
+                    valid=False,
+                    errors={"empty_file": "Stream contained no data"}
+                )
+                
+            # Reset buffer for validation
+            validation_buffer.seek(0)
+            
+            # First validate the format using the buffer
+            validation_result = self.validate_fastq_stream(validation_buffer)
+            
+            if not validation_result.valid:
+                error_detail = validation_result.error_message
+                if validation_result.line_number is not None:
+                    error_detail += f" at line {validation_result.line_number}"
+                return self.format_validation_result(
+                    valid=False,
+                    errors={"invalid_format": error_detail}
+                )
+            
+            # Now we need to read the rest of the stream to get full stats
+            # We'll read the stream from the beginning if possible, otherwise
+            # we'll use what we already read and continue from there
+            try:
+                input_stream.seek(0)
+                # If seek successful, we can use the original stream
+                self._process_fastq_content(input_stream)
+            except (AttributeError, IOError) as e:
+                warnings["stream_warning"] = "Unable to reset stream position; statistics may be incomplete"
+                logger.warning(f"Stream is not seekable: {str(e)}")
+                
+                # Continue with partial validation using buffer and remaining stream
+                validation_buffer.seek(0)
+                
+                # Create a composite stream from buffer + remaining input
+                composite_stream = CompositeStream(validation_buffer, input_stream)
+                self._process_fastq_content(composite_stream)
+            
+            # Get statistics
+            stats = self.statistics.get_statistics()
+            
+            # Add metadata from header parser
+            stats.update(self.header_parser.get_formatted_metadata())
+            
+            # Additional validations
+            validation_result = self.statistics.validate_statistics()
+            errors.update(validation_result.get("errors", {}))
+            warnings.update(validation_result.get("warnings", {}))
+            
+            # Add mismatched IDs to warnings
+            if self.mismatched_ids:
+                warnings["mismatched_ids"] = f"Found {len(self.mismatched_ids)} records with mismatched IDs in header and description lines"
+            
+            # Determine if valid
+            valid = len(errors) == 0
+            
+            # Try to reset stream one more time for the caller if possible
+            try:
+                input_stream.seek(0)
+            except (AttributeError, IOError) as e:
+                warnings["stream_warning"] = f"Unable to reset stream position after validation: {str(e)}"
+            
+            return self.format_validation_result(
+                valid=valid,
+                errors=errors,
+                warnings=warnings,
+                stats=stats
+            )
+            
+        except Exception as e:
+            logger.error(f"Stream validation error: {str(e)}")
+            return self.format_validation_result(
+                valid=False, 
+                errors={"stream_error": f"Stream validation error: {str(e)}"}
+            )
+
+    def validate_fastq_stream(self, stream: BinaryIO) -> FastqValidationResult:
+        """
+        Validate a FASTQ input stream for correct format.
+        
+        This function checks:
+        1. Every block starts with @ (header)
+        2. Sequence line contains only valid sequence characters
+        3. + line follows the sequence, with optional matching seqname
+        4. Quality line contains valid quality characters
+        5. Sequence and quality lines have equal length
+        
+        Args:
+            stream: Binary stream to validate
+            
+        Returns:
+            FastqValidationResult with validation result and error details if invalid
+        """
+        line_count = 0
+        current_block = []
+        
+        for line in stream:
+            line_count += 1
+            line = line.rstrip(b'\r\n')
+            
+            # Add line to current block
+            current_block.append(line)
+            
+            # Process complete blocks (4 lines per FASTQ record)
+            if len(current_block) == 4:
+                # 1. Check header line starts with @
+                if not current_block[0].startswith(b'@'):
+                    return FastqValidationResult.invalid(
+                        f"Header line must start with @: '{current_block[0].decode('utf-8', errors='replace')}'",
+                        line_count - 3
+                    )
+                
+                # 2. Validate sequence characters
+                seq_line = current_block[1].decode('utf-8', errors='replace')
+                if not SEQ_REGEX.match(seq_line):
+                    return FastqValidationResult.invalid(
+                        f"Invalid sequence characters: '{seq_line}'",
+                        line_count - 2
+                    )
+                
+                # 3. Check + line format
+                plus_line = current_block[2].decode('utf-8', errors='replace')
+                if not plus_line.startswith('+'):
+                    return FastqValidationResult.invalid(
+                        f"Quality header must start with +: '{plus_line}'",
+                        line_count - 1
+                    )
+                
+                # If + is followed by a seqname, check it matches the header seqname exactly
+                if len(plus_line) > 1:
+                    plus_seqname = plus_line[1:].split(' ')[0]  # Everything after + before first space
+                    header_line = current_block[0].decode('utf-8', errors='replace')
+                    header_seqname = header_line[1:].split(' ')[0]  # Everything after @ before first space
+                    
+                    # Instead of returning an error, we'll store this as metadata to create a warning later
+                    if plus_seqname != header_seqname:
+                        # Store the mismatch info for later warning creation
+                        if not hasattr(self, 'mismatched_ids'):
+                            self.mismatched_ids = {}
+                        self.mismatched_ids[line_count - 1] = {
+                            'header_id': header_seqname,
+                            'plus_id': plus_seqname
+                        }
+                
+                # 4. Validate quality characters
+                qual_line = current_block[3].decode('utf-8', errors='replace')
+                if not QUAL_REGEX.match(qual_line):
+                    return FastqValidationResult.invalid(
+                        f"Invalid quality characters: '{qual_line}'",
+                        line_count
+                    )
+                
+                # 5. Check sequence and quality line lengths match
+                if len(seq_line) != len(qual_line):
+                    return FastqValidationResult.invalid(
+                        f"Sequence length ({len(seq_line)}) and quality length ({len(qual_line)}) don't match",
+                        line_count
+                    )
+                
+                # 6. Check for valid quality values (ASCII 33-126)
+                for i, c in enumerate(qual_line):
+                    ascii_val = ord(c)
+                    if ascii_val < 33 or ascii_val > 126:
+                        return FastqValidationResult.invalid(
+                            f"Invalid quality value at position {i + 1}: ASCII {ascii_val}",
+                            line_count
+                        )
+                
+                # Reset for next block
+                current_block = []
+        
+        # A valid FASTQ file should have at least one block
+        if line_count == 0:
+            return FastqValidationResult.invalid(
+                "Empty FASTQ file",
+                0
+            )
+        
+        # Check if file has a complete number of blocks
+        if len(current_block) != 0:
+            return FastqValidationResult.invalid(
+                f"Incomplete FASTQ block. Line count ({line_count}) is not a multiple of 4",
+                line_count
+            )
+        
+        return FastqValidationResult.valid()
+
+    def _process_fastq_content(self, stream: BinaryIO) -> None:
+        """
+        Process FASTQ content to extract statistics and metadata.
+        
+        This method reads through a FASTQ file, updating statistics and
+        extracting metadata from headers.
+        
+        Args:
+            stream: Binary stream containing FASTQ data
+        """
+        current_block = []
+        
+        for line in stream:
+            line = line.rstrip(b'\r\n')
+            
+            # Add line to current block
+            current_block.append(line)
+            
+            # Process complete blocks (4 lines per FASTQ record)
+            if len(current_block) == 4:
+                # Process header for metadata
+                header = current_block[0].decode('utf-8', errors='replace')
+                self.header_parser.parse_header(header)
+                
+                # Process sequence and quality for statistics
+                sequence = current_block[1].decode('utf-8', errors='replace')
+                quality = current_block[3].decode('utf-8', errors='replace')
+                self.statistics.update_sequence_stats(sequence, quality)
+                
+                # Reset block
+                current_block = []
+
+    def get_last_machine_ids(self) -> str:
+        """Get machine IDs from the last validation as a pipe-separated string."""
+        return "|".join(self.header_parser.machine_ids)
+
+    def get_last_flowcells(self) -> str:
+        """Get flowcells from the last validation as a pipe-separated string."""
+        return "|".join(self.header_parser.flowcells)
+
+    def get_last_lanes(self) -> str:
+        """Get lanes from the last validation as a pipe-separated string."""
+        return "|".join(str(lane) for lane in self.header_parser.lanes)
+
+    def get_last_instrument_types(self) -> str:
+        """Get instrument types from the last validation as a pipe-separated string."""
+        return "|".join(self.header_parser.instrument_types)
+
+# Helper class for concatenating streams
+class CompositeStream:
+    """A stream that concatenates multiple streams."""
+    
+    def __init__(self, *streams):
+        self.streams = list(streams)
+        self.current_stream_index = 0
+    
+    def read(self, size=-1):
+        if self.current_stream_index >= len(self.streams):
+            return b''
+            
+        data = self.streams[self.current_stream_index].read(size)
+        
+        # If we've reached the end of the current stream, move to the next one
+        if not data and self.current_stream_index < len(self.streams) - 1:
+            self.current_stream_index += 1
+            return self.read(size)
+            
+        return data 

@@ -22,6 +22,17 @@ packer plugins install github.com/hashicorp/amazon
    - `aws_profile_name`: The name of your AWS profile (should match the profile name in `~/.aws/credentials`)
    - Review and adjust other variables as needed for your environment
 
+## Installed Components
+
+The AMI includes the following main components:
+
+- Ubuntu 22.04 LTS (Jammy Jellyfish)
+- Python 3.x and required Python packages
+- AWS CLI
+- Goofys for S3 file mounting
+- Samtools for BAM/CRAM file validation
+- Additional system dependencies
+
 ## Building the AMI
 
 1. Navigate to the `templates` directory:

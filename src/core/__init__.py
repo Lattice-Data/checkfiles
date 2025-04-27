@@ -1,0 +1,1 @@
+"""Core validation and file processing functionality.""" 
