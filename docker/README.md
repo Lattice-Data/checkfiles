@@ -5,7 +5,7 @@ This directory contains Docker configuration for running the Checkfiles validati
 ## Prerequisites
 
 - Docker Engine
-- Docker Compose V2
+- Docker Compose V2 (version 2.10.0+)
 - AWS credentials (if using S3 functionality)
 
 ## Quick Start
@@ -32,9 +32,21 @@ By default, this will show the help message. To validate files, see the Usage Ex
 ## Features
 
 - Single container with all dependencies pre-installed
-- Python environment configured with required packages
+- Python 3.11 environment with type hints and proper documentation
 - Support for both local file and S3 file validation
 - No need to install dependencies locally
+- Health checks to ensure service availability
+- Volume mapping for easy file access
+
+## Environment Variables
+
+| Variable | Description | Default | Required for S3 |
+|----------|-------------|---------|-----------------|
+| AWS_ACCESS_KEY_ID | AWS access key | None | Yes |
+| AWS_SECRET_ACCESS_KEY | AWS secret key | None | Yes |
+| AWS_DEFAULT_REGION | AWS region | us-west-2 | Yes |
+| LOG_LEVEL | Python logging level | INFO | No |
+| PYTHONUNBUFFERED | Enables unbuffered Python output | 1 | No |
 
 ## Usage Examples
 
@@ -86,27 +98,33 @@ docker compose -f docker/docker-compose.yml run --entrypoint bash checkfiles
 ## Development
 
 The Docker setup mounts your local `src` and `test_data` directories:
-- `src`: Contains the Python source code
-- `test_data`: Contains test files for validation
+- `src`: Contains the Python source code (mounted read-only)
+- `test_data`: Contains test files for validation (mounted read-only)
+- `logs`: Directory for log output (mounted read-write)
 
 To apply changes to dependencies:
 ```bash
 docker compose -f docker/docker-compose.yml build --no-cache
 ```
 
-## Environment Variables
+### Testing
 
-| Variable | Description | Required for S3 |
-|----------|-------------|-----------------|
-| AWS_ACCESS_KEY_ID | AWS access key | Yes |
-| AWS_SECRET_ACCESS_KEY | AWS secret key | Yes |
-| AWS_DEFAULT_REGION | AWS region | Yes |
+When writing tests for the application, ensure:
+- Unit tests cover at least 80% of the code
+- All tests follow the Google Python Style Guide
+- Tests are properly documented with docstrings
+- Test fixtures are reusable and well-named
 
 ## Container Management
 
 ### View running containers
 ```bash
 docker ps
+```
+
+### Inspect container health
+```bash
+docker inspect --format='{{json .State.Health}}' $(docker ps -q --filter name=checkfiles)
 ```
 
 ### Stop and remove containers
@@ -144,6 +162,12 @@ sudo chown -R $(id -u):$(id -g) .
    - Check if ports are already in use
    - Verify Docker service is running
    - Check system resources (memory/disk space)
+   - Review logs: `docker compose -f docker/docker-compose.yml logs`
+
+4. **Health check failures**
+   - Check if Python modules are properly installed
+   - Verify the application code is properly mounted
+   - Inspect logs for initialization errors
 
 ## Script Arguments
 

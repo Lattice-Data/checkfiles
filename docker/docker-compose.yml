@@ -1,17 +1,31 @@
+version: '3.8'
+
 services:
   checkfiles:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     volumes:
-      - ../src:/app/src
-      - ../test_data:/app/test_data
+      - ../src:/app/src:ro
+      - ../test_data:/app/test_data:ro
       - ../logs:/app/logs:rw
       - ~/.aws:/root/.aws:ro
     environment:
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-west-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if __import__('importlib').util.find_spec('src') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
     command: ["-f", "fastq", "-s3", "s3://submissions-czi114liv/macparland_2024/HCA_Ped_data/C115/C115_bamtofastq_S1_L007_I1_004.fastq.gz", "-d"]
+    labels:
+      - "app=checkfiles"
+      - "component=validator"
 
   awstest:
     build:
@@ -21,5 +35,14 @@ services:
       - ~/.aws:/root/.aws:ro
     environment:
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-west-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
     command: ["aws", "sts", "get-caller-identity"]
     entrypoint: ["aws"]
+    labels:
+      - "app=checkfiles"
+      - "component=awstest"
+
+volumes:
+  logs:
+    driver: local

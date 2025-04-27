@@ -4,7 +4,7 @@ This Packer configuration builds an Ubuntu 22.04 AMI for the Checkfiles applicat
 
 ## Prerequisites
 
-- [Packer CLI](https://developer.hashicorp.com/packer/tutorials/docker-get-started/get-started-install-cli) installed on your system
+- [Packer CLI](https://developer.hashicorp.com/packer/tutorials/docker-get-started/get-started-install-cli) (v1.9.0+) installed on your system
 - AWS CLI configured with appropriate credentials
 - AWS IAM permissions to create and manage EC2 instances and AMIs
 - Amazon EBS volume creation permissions
@@ -18,7 +18,7 @@ packer plugins install github.com/hashicorp/amazon
 
 ## Configuration
 
-1. Open `checkfiles_ubuntu_2204_variables.json` and set the following variables:
+1. Open `templates/checkfiles_ubuntu_2204_variables.json` and set the following variables:
    - `aws_profile_name`: The name of your AWS profile (should match the profile name in `~/.aws/credentials`)
    - Review and adjust other variables as needed for your environment
 
@@ -27,11 +27,36 @@ packer plugins install github.com/hashicorp/amazon
 The AMI includes the following main components:
 
 - Ubuntu 22.04 LTS (Jammy Jellyfish)
-- Python 3.x and required Python packages
-- AWS CLI
+- Python 3.x with type hints and proper documentation
+- AWS CLI v1.29.17 with botocore v1.31.17 and boto3 v1.28.17
 - Goofys for S3 file mounting
-- Samtools for BAM/CRAM file validation
+- Samtools v1.17 for BAM/CRAM file validation
+- Development tools: pytest, black, ruff, mypy
 - Additional system dependencies
+
+## Python Validation Modules
+
+The AMI includes properly documented Python validation modules following Google Python Style Guide:
+
+- `validators.fastq`: FASTQ file validator with Rust-based implementation
+- `validators.bam`: BAM file validator using samtools
+- Additional validator modules as needed
+
+All modules include:
+- Comprehensive type hints
+- Google-style docstrings
+- Proper error handling and logging
+- Unit tests with 80%+ coverage target
+
+## Installation Scripts
+
+The following installation scripts are included:
+
+- `scripts/install_python_dependencies.sh`: Installs Python packages and dependencies
+- `scripts/setup_validator_modules.sh`: Sets up validator module structure
+- `scripts/create_validator_stubs.sh`: Creates properly documented validator stubs
+- `scripts/install_samtools.sh`: Installs samtools with proper error handling
+- `scripts/install_goofys_and_validatefiles.sh`: Installs S3 mounting utilities
 
 ## Building the AMI
 
@@ -73,6 +98,11 @@ Common issues and solutions:
 3. **Build Failures**
    - Check the Packer logs for detailed error messages
    - Verify all required variables are set correctly
+   - Check installation script logs in `/tmp/*.log`
+
+4. **Python Module Errors**
+   - Verify Python dependencies were installed correctly
+   - Check module import paths
 
 ## Cleanup
 
@@ -85,3 +115,4 @@ The temporary EC2 instance is automatically terminated after the AMI creation. H
 For additional help or issues, please refer to:
 - [Packer Documentation](https://developer.hashicorp.com/packer/docs)
 - [AWS Documentation](https://docs.aws.amazon.com/)
+- [Project Repository](https://github.com/yourusername/checkfiles)
