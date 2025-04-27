@@ -38,34 +38,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def ensure_test_data():
-    """
-    Ensure test data is available by running the download script.
-    
-    Returns:
-        bool: True if test data is available and ready for testing
-    """
-    download_script = os.path.join(TEST_DATA_DIR, "download_test_data.sh")
-    
-    # Check if download script exists
-    if not os.path.exists(download_script):
-        pytest.skip("Test data download script not found")
-    
-    # Run the download script if test data doesn't exist
-    if not os.path.exists(os.path.join(BAM_VALID_DIR, "small.bam")):
-        try:
-            subprocess.run(["bash", download_script], check=True)
-        except subprocess.SubprocessError:
-            pytest.skip("Failed to download test data")
-    
-    # Verify test files exist
-    if not os.path.exists(os.path.join(BAM_VALID_DIR, "small.bam")):
-        pytest.skip("Test data is missing")
-        
-    return True
-
-
 @pytest.fixture
 def validator():
     """
@@ -77,27 +49,42 @@ def validator():
     return BamValidator()
 
 
-def test_validate_valid_bam(validator, ensure_test_data):
-    """Test validating a valid BAM file."""
-    valid_bam = os.path.join(BAM_VALID_DIR, "small.bam")
-    
-    # Skip if test file doesn't exist
-    if not os.path.exists(valid_bam):
-        pytest.skip(f"Test file not found: {valid_bam}")
-    
-    result = validator.validate_file(valid_bam)
-    
-    assert result["valid"] is True
-    assert len(result["errors"]) == 0
+def test_validate_valid_bam(validator):
+    """Test validating valid BAM files."""
+    # Test for each valid BAM file in the directory
+    for bam_file in os.listdir(BAM_VALID_DIR):
+        if bam_file.endswith('.bam'):
+            valid_bam = os.path.join(BAM_VALID_DIR, bam_file)
+            
+            result = validator.validate_file(valid_bam)
+            
+            assert result["valid"] is True, f"File {bam_file} should be valid"
+            assert len(result["errors"]) == 0
 
 
-def test_validate_corrupted_header_bam(validator, ensure_test_data):
+def test_validate_invalid_bam_files(validator):
+    """Test validating invalid BAM files."""
+    # Test for each invalid BAM file in the directory
+    for bam_file in os.listdir(BAM_INVALID_DIR):
+        if bam_file.endswith('.bam'):
+            invalid_bam = os.path.join(BAM_INVALID_DIR, bam_file)
+            
+            result = validator.validate_file(invalid_bam)
+            
+            assert result["valid"] is False, f"File {bam_file} should be invalid"
+            assert "invalid_format" in result["errors"]
+
+
+def test_validate_corrupted_header_bam(validator):
     """Test validating a BAM file with corrupted header."""
-    corrupted_bam = os.path.join(BAM_INVALID_DIR, "corrupted_header.bam")
+    # Look for a file with 'badheader' in the name
+    corrupted_header_files = [f for f in os.listdir(BAM_INVALID_DIR) 
+                             if 'badheader' in f.lower() and f.endswith('.bam')]
     
-    # Skip if test file doesn't exist
-    if not os.path.exists(corrupted_bam):
-        pytest.skip(f"Test file not found: {corrupted_bam}")
+    if not corrupted_header_files:
+        pytest.skip("No corrupted header BAM file found")
+    
+    corrupted_bam = os.path.join(BAM_INVALID_DIR, corrupted_header_files[0])
     
     result = validator.validate_file(corrupted_bam)
     
@@ -105,13 +92,16 @@ def test_validate_corrupted_header_bam(validator, ensure_test_data):
     assert "invalid_format" in result["errors"]
 
 
-def test_validate_truncated_bam(validator, ensure_test_data):
+def test_validate_truncated_bam(validator):
     """Test validating a truncated BAM file."""
-    truncated_bam = os.path.join(BAM_INVALID_DIR, "truncated.bam")
+    # Look for a file with 'badeof' in the name (bad end of file/truncated)
+    truncated_files = [f for f in os.listdir(BAM_INVALID_DIR) 
+                      if 'badeof' in f.lower() and f.endswith('.bam')]
     
-    # Skip if test file doesn't exist
-    if not os.path.exists(truncated_bam):
-        pytest.skip(f"Test file not found: {truncated_bam}")
+    if not truncated_files:
+        pytest.skip("No truncated BAM file found")
+    
+    truncated_bam = os.path.join(BAM_INVALID_DIR, truncated_files[0])
     
     result = validator.validate_file(truncated_bam)
     
@@ -119,13 +109,47 @@ def test_validate_truncated_bam(validator, ensure_test_data):
     assert "invalid_format" in result["errors"]
 
 
-def test_validate_valid_bam_stream(validator, ensure_test_data):
-    """Test validating a valid BAM stream."""
-    valid_bam = os.path.join(BAM_VALID_DIR, "small.bam")
+def test_validate_notargets_bam(validator):
+    """Test validating a BAM file with no targets."""
+    # Look for a file with 'notargets' in the name
+    notargets_files = [f for f in os.listdir(BAM_INVALID_DIR) 
+                       if 'notargets' in f.lower() and f.endswith('.bam')]
     
-    # Skip if test file doesn't exist
-    if not os.path.exists(valid_bam):
-        pytest.skip(f"Test file not found: {valid_bam}")
+    if not notargets_files:
+        pytest.skip("No notargets BAM file found")
+    
+    notargets_bam = os.path.join(BAM_INVALID_DIR, notargets_files[0])
+    
+    result = validator.validate_file(notargets_bam)
+    
+    assert result["valid"] is False
+    assert "invalid_format" in result["errors"]
+
+
+def test_validate_specific_ok_bams(validator):
+    """Test validating specific known good BAM files."""
+    ok_files = ['3.quickcheck.ok.bam', '4.quickcheck.ok.bam']
+    
+    for ok_file in ok_files:
+        file_path = os.path.join(BAM_VALID_DIR, ok_file)
+        if not os.path.exists(file_path):
+            continue
+            
+        result = validator.validate_file(file_path)
+        
+        assert result["valid"] is True, f"Known good file {ok_file} should validate"
+        assert len(result["errors"]) == 0
+
+
+def test_validate_valid_bam_stream(validator):
+    """Test validating a valid BAM stream."""
+    # Get the first valid BAM file
+    valid_files = [f for f in os.listdir(BAM_VALID_DIR) if f.endswith('.bam')]
+    
+    if not valid_files:
+        pytest.skip("No valid BAM files found")
+    
+    valid_bam = os.path.join(BAM_VALID_DIR, valid_files[0])
     
     with open(valid_bam, "rb") as f:
         bam_content = f.read()
