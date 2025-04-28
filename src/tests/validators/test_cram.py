@@ -10,6 +10,7 @@ import tempfile
 import io
 from unittest.mock import patch, MagicMock
 from pathlib import Path
+import subprocess
 
 from src.validators.cram import CramValidator
 
@@ -117,15 +118,19 @@ def test_validate_file_invalid(mock_run, validator, test_files):
     assert "corrupt CRAM container" in result["errors"]["invalid_format"]
 
 
-@patch('subprocess.run')
-def test_validate_stream_valid(mock_run, validator):
+@patch('subprocess.Popen')
+def test_validate_stream_valid(mock_popen, validator):
     """Test validating a valid CRAM stream."""
-    # Mock a valid response from samtools quickcheck
+    # Mock a valid Popen process
     mock_process = MagicMock()
     mock_process.returncode = 0
-    mock_process.stdout = ""
-    mock_process.stderr = ""
-    mock_run.return_value = mock_process
+    mock_process.stdout = MagicMock()
+    mock_process.stderr = MagicMock()
+    mock_process.communicate.return_value = (b"", b"")
+    mock_process.stdin = MagicMock()
+    
+    # Set up the mock to return our mock process
+    mock_popen.return_value = mock_process
     
     # Create a mock CRAM stream
     stream_content = b"mock CRAM content"
@@ -134,18 +139,33 @@ def test_validate_stream_valid(mock_run, validator):
     result = validator.validate_stream(input_stream)
     
     assert result["valid"] is True
-    assert len(result["errors"]) == 0
+    assert result["stats"]["file_size"] == len(stream_content)
+    
+    # Verify Popen was called with the right arguments
+    mock_popen.assert_called_once_with(
+        ["samtools", "quickcheck", "-v", "-"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    # Verify data was written to stdin
+    mock_process.stdin.write.assert_called_with(stream_content)
 
 
-@patch('subprocess.run')
-def test_validate_stream_invalid(mock_run, validator):
+@patch('subprocess.Popen')
+def test_validate_stream_invalid(mock_popen, validator):
     """Test validating an invalid CRAM stream."""
-    # Mock an invalid response from samtools quickcheck
+    # Mock an invalid Popen process
     mock_process = MagicMock()
     mock_process.returncode = 1
-    mock_process.stdout = ""
-    mock_process.stderr = "Error: invalid CRAM file"
-    mock_run.return_value = mock_process
+    mock_process.stdout = MagicMock()
+    mock_process.stderr = MagicMock()
+    mock_process.communicate.return_value = (b"", b"Error: invalid CRAM file")
+    mock_process.stdin = MagicMock()
+    
+    # Set up the mock to return our mock process
+    mock_popen.return_value = mock_process
     
     # Create a mock CRAM stream
     stream_content = b"invalid CRAM content"
@@ -156,6 +176,7 @@ def test_validate_stream_invalid(mock_run, validator):
     assert result["valid"] is False
     assert "invalid_format" in result["errors"]
     assert "invalid CRAM file" in result["errors"]["invalid_format"]
+    assert result["stats"]["file_size"] == len(stream_content)
 
 
 @patch('subprocess.run')

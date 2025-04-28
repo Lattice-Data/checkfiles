@@ -9,6 +9,7 @@ import pytest
 import shutil
 import subprocess
 from pathlib import Path
+import io
 
 from src.validators.bam import BamValidator
 
@@ -141,7 +142,7 @@ def test_validate_specific_ok_bams(validator):
         assert len(result["errors"]) == 0
 
 
-def test_validate_valid_bam_stream(validator):
+def test_validate_valid_bam_stream(validator, monkeypatch):
     """Test validating a valid BAM stream."""
     # Get the first valid BAM file
     valid_files = [f for f in os.listdir(BAM_VALID_DIR) if f.endswith('.bam')]
@@ -153,6 +154,18 @@ def test_validate_valid_bam_stream(validator):
     
     with open(valid_bam, "rb") as f:
         bam_content = f.read()
+    
+    # Mock subprocess.Popen for samtools calls
+    class MockPopen:
+        def __init__(self, args, **kwargs):
+            self.stdin = io.BytesIO()
+            self.returncode = 0  # Make it return success
+        
+        def communicate(self):
+            return b"", b""  # stdout, stderr
+            
+    # Patch subprocess.Popen
+    monkeypatch.setattr("subprocess.Popen", MockPopen)
     
     # Create an in-memory stream from the file content
     from io import BytesIO

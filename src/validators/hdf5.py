@@ -86,12 +86,13 @@ class Hdf5Validator(BaseValidator):
             stats=stats
         )
     
-    def validate_stream(self, input_stream: BinaryIO) -> Dict[str, Any]:
+    def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
         Validate an HDF5 data stream.
         
         Args:
             input_stream: Binary stream containing HDF5 data
+            is_gzipped: Whether the stream contains gzipped data
             
         Returns:
             Dictionary with validation results including:
@@ -100,10 +101,73 @@ class Hdf5Validator(BaseValidator):
             - warnings (dict): Any validation warnings
             - stats (dict): Data statistics
         """
-        # HDF5 files cannot typically be validated from streams without writing to disk
+        import io
+        import tempfile
+        import hashlib
+        
+        errors = {}
+        warnings = {}
+        stats = {}
+        
+        # Set up hash calculators for data
+        md5_hash = hashlib.md5()
+        sha256_hash = hashlib.sha256()
+        
+        # Create an in-memory buffer to store the data
+        buffer = io.BytesIO()
+        
+        try:
+            # Read the stream in chunks and update hash calculators
+            total_bytes = 0
+            chunk_size = 262144  # 256KB chunks
+            
+            while True:
+                chunk = input_stream.read(chunk_size)
+                if not chunk:
+                    break
+                
+                # Update hash calculators
+                md5_hash.update(chunk)
+                sha256_hash.update(chunk)
+                
+                # Write to in-memory buffer
+                buffer.write(chunk)
+                total_bytes += len(chunk)
+            
+            # Add hash values to stats
+            stats["md5sum"] = md5_hash.hexdigest()
+            stats["sha256"] = sha256_hash.hexdigest()
+            stats["file_size"] = total_bytes
+            
+            # Rewind buffer for reading
+            buffer.seek(0)
+            
+            # Save to a temporary in-memory file handle that h5py can work with
+            try:
+                # Try to validate the HDF5 data
+                with h5py.File(buffer, 'r') as f:
+                    # Collect basic statistics
+                    stats["groups"] = self._count_groups(f)
+                    stats["datasets"] = self._count_datasets(f)
+                    stats["attributes"] = self._count_attributes(f)
+            except Exception as e:
+                errors["validation_error"] = f"Invalid HDF5 data: {str(e)}"
+                logger.error(f"HDF5 validation failed: {str(e)}")
+                return self.format_validation_result(valid=False, errors=errors, stats=stats)
+            
+        except Exception as e:
+            errors["validation_error"] = f"Stream validation error: {str(e)}"
+            logger.error(f"Stream validation failed: {str(e)}")
+            return self.format_validation_result(valid=False, errors=errors)
+        
+        # Determine if valid (no errors, even if there are warnings)
+        valid = len(errors) == 0
+        
         return self.format_validation_result(
-            valid=False,
-            errors={"unsupported_operation": "Stream validation is not supported for HDF5 files"}
+            valid=valid,
+            errors=errors,
+            warnings=warnings,
+            stats=stats
         )
     
     def _count_groups(self, h5file) -> int:

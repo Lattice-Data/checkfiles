@@ -100,12 +100,13 @@ class CramValidator:
         
         return result
     
-    def validate_stream(self, stream: IO[bytes]) -> Dict[str, Any]:
+    def validate_stream(self, input_stream: IO[bytes], is_gzipped: bool = False) -> Dict[str, Any]:
         """
         Validate a CRAM stream directly using samtools without creating temporary files.
         
         Args:
-            stream: Binary stream containing CRAM data.
+            input_stream: Binary stream containing CRAM data.
+            is_gzipped: Whether the stream contains gzipped data (not used for CRAM)
             
         Returns:
             dict: Validation result containing:
@@ -121,37 +122,31 @@ class CramValidator:
             "stats": {"file_size": 0}
         }
         
-        # Start a samtools process that reads from stdin
-        process = subprocess.Popen(
-            ["samtools", "quickcheck", "-v", "-"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        # Set up a counter to track stream size
-        total_bytes = 0
-        
+        # Read the entire content into memory
+        # This ensures we can send the full data to samtools in one operation
         try:
-            # Read from the stream in chunks and pipe to samtools
-            chunk_size = 262144  # 256KB chunks
-            while True:
-                chunk = stream.read(chunk_size)
-                if not chunk:
-                    break
-                    
-                # Write to samtools process
-                process.stdin.write(chunk)
-                total_bytes += len(chunk)
+            content = input_stream.read()
+            total_bytes = len(content)
+            result["stats"]["file_size"] = total_bytes
+        except Exception as e:
+            result["errors"]["stream_error"] = f"Error reading from stream: {str(e)}"
+            return result
+        
+        # Start a samtools process that reads from stdin
+        try:
+            process = subprocess.Popen(
+                ["samtools", "quickcheck", "-v", "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
             
-            # Close stdin to signal EOF to samtools
+            # Write all data to the process at once
+            process.stdin.write(content)
             process.stdin.close()
             
             # Get the output
             stdout, stderr = process.communicate()
-            
-            # Update stats
-            result["stats"]["file_size"] = total_bytes
             
             # Check return code
             if process.returncode == 0:
@@ -165,7 +160,8 @@ class CramValidator:
             result["errors"]["validation_error"] = f"Error during validation: {str(e)}"
             # Try to kill the process if it's still running
             try:
-                process.kill()
+                if 'process' in locals() and process.poll() is None:
+                    process.kill()
             except:
                 pass
         

@@ -129,10 +129,17 @@ def test_validate_invalid_file(validator):
 
 def test_validate_stream(validator):
     """Test validating an HDF5 stream."""
-    # HDF5 validator should not support stream validation
+    # Create a test stream with invalid HDF5 data
     stream = io.BytesIO(b"Test data")
     
     result = validator.validate_stream(stream)
     
     assert result["valid"] is False
-    assert "unsupported_operation" in result["errors"] 
+    assert "validation_error" in result["errors"]
+    assert "Invalid HDF5 data" in result["errors"]["validation_error"]
+    
+    # Check that basic stats were calculated despite failure
+    assert "file_size" in result["stats"]
+    assert result["stats"]["file_size"] == len(b"Test data")
+    assert "md5sum" in result["stats"]
+    assert "sha256" in result["stats"] 

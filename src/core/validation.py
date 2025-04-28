@@ -107,12 +107,14 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         track_validation_progress(file_path, progress_tracker, "Reading file")
         
         # Check if local file is gzipped
-        if has_gz_extension(file_path):
+        is_gzipped = has_gz_extension(file_path)
+        
+        if is_gzipped:
             track_validation_progress(file_path, progress_tracker, "Decompressing")
                 
             with gzip.open(file_path, 'rb') as f:
                 track_validation_progress(file_path, progress_tracker, "Running validation")
-                results = validator.validate_stream(f)
+                results = validator.validate_stream(f, is_gzipped=True)
         else:
             track_validation_progress(file_path, progress_tracker, "Running validation")
             results = validator.validate_file(file_path)
@@ -168,8 +170,11 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         
         track_validation_progress(s3_path, progress_tracker, "Setting up stream")
         
+        # Determine if file is gzipped
+        is_gzipped = has_gz_extension(s3_path)
+        
         # Stream from S3
-        stream = stream_s3_file(s3_path, decompress=has_gz_extension(s3_path))
+        stream = stream_s3_file(s3_path, decompress=is_gzipped)
         
         track_validation_progress(s3_path, progress_tracker, "Stream established")
         
@@ -181,11 +186,8 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         
         # Run validation directly on the streaming data
         logger.debug("Starting validation")
-        results = validator.validate_stream(tracking_stream)
+        results = validator.validate_stream(tracking_stream, is_gzipped=is_gzipped)
         logger.debug("Validation completed")
-        
-        # We don't calculate hashes in streaming mode to avoid reading the file twice
-        # If hash values are needed, they should be calculated separately
         
         if progress_tracker:
             progress_tracker.complete_file(s3_path, True, results)
