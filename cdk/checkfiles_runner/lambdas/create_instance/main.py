@@ -64,17 +64,55 @@ def create_checkfiles_instance(event, context):
     instance_profile_arn = get_instance_profile_arn()
     security_group = get_security_group()
     tag = get_checkfiles_tag()
-    # clone checkfiles code and build the virtual environment
+    
+    # Enhanced installation script with better debugging and proper Python path setup
     user_data = f'''#!/bin/bash
+    set -ex  # Enable debugging and exit on error
+    
+    echo "==== Starting checkfiles setup ===="
     cd /home/ubuntu
+    
+    # Clone repository with specific tag
+    echo "==== Cloning checkfiles repository ===="
     git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
     cd checkfiles
+    
+    # Create and configure virtual environment
+    echo "==== Setting up Python environment ===="
     python3 -m venv venv
     source venv/bin/activate
-    pip install -r src/requirements.txt
-    pip install -e .
-    cd ..
+    
+    # Install dependencies with verbose output
+    echo "==== Installing dependencies ===="
+    pip install --upgrade pip
+    pip install -r src/requirements.txt -v
+    
+    # Install package in development mode to ensure proper module paths
+    echo "==== Installing checkfiles package ===="
+    pip install -e . -v
+    
+    # Create .env file with PYTHONPATH
+    echo "==== Configuring PYTHONPATH ===="
+    echo 'export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH' > /home/ubuntu/.env_checkfiles
+    echo 'source /home/ubuntu/.env_checkfiles' >> /home/ubuntu/.bashrc
+    
+    # Verify installation
+    echo "==== Verifying installation ===="
+    cd /home/ubuntu/checkfiles
+    source venv/bin/activate
+    python -c "import sys; print('Python path:'); print('\\n'.join(sys.path))"
+    
+    # Debug module structure
+    echo "==== Checking module structure ===="
+    find /home/ubuntu/checkfiles -name "*.py" | grep -i validators
+    
+    # Set proper permissions
+    echo "==== Setting permissions ===="
+    cd /home/ubuntu
     chown -R ubuntu:ubuntu checkfiles/
+    chown ubuntu:ubuntu /home/ubuntu/.env_checkfiles
+    
+    echo "==== Setup complete ===="
     '''
 
     ec2 = boto3.resource('ec2')

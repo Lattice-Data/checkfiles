@@ -18,7 +18,7 @@ class SimpleActivityTracker:
         self.lock = threading.Lock()
         self.file_status: Dict[str, Dict[str, Any]] = {}
         self.start_time = datetime.now()
-        print(f"Starting validation of {total_files} files at {self.start_time.strftime('%H:%M:%S')}")
+        print(f"Starting validation of {total_files} files at {self.start_time}")
     
     def init_file(self, file_path: str) -> None:
         """Initialize tracking for a new file.
@@ -36,7 +36,7 @@ class SimpleActivityTracker:
                 'thread_id': thread_id,
                 'thread_name': f"Thread-{thread_id % 1000:03d}"  # Last 3 digits of thread ID for readability
             }
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] [T-{thread_id % 1000:03d}] Started: {file_path}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} [T-{thread_id % 1000:03d}] Started: {file_path}")
     
     def update_progress(self, file_path: str, status: Optional[str] = None) -> None:
         """Update the status for a specific file.
@@ -54,16 +54,10 @@ class SimpleActivityTracker:
                 self.file_status[file_path]['updates'] += 1
                 thread_name = self.file_status[file_path]['thread_name']
                 
-                # Only print every 10th update to reduce output for large files
-                # Always print the first update and updates that don't contain "Processed" 
-                # to ensure important status changes are shown
-                is_progress_update = status.startswith("Processed")
-                is_first_update = self.file_status[file_path]['updates'] == 1
-                
-                if is_first_update or not is_progress_update or self.file_status[file_path]['updates'] % 10 == 0:
-                    now = datetime.now()
-                    elapsed = (now - self.file_status[file_path]['start_time']).total_seconds()
-                    print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] {file_path}: {status} (elapsed: {elapsed:.1f}s)")
+                # Print every single update without filtering
+                now = datetime.now()
+                elapsed = (now - self.file_status[file_path]['start_time']).total_seconds()
+                print(f"{now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} [{thread_name}] {file_path}: {status} (elapsed: {elapsed:.1f}s, updates: {self.file_status[file_path]['updates']})")
     
     def complete_file(self, file_path: str, success: bool, result_summary: Dict[str, Any]) -> None:
         """Mark a file as completed.
@@ -86,16 +80,17 @@ class SimpleActivityTracker:
                 
                 # Calculate elapsed time
                 elapsed = (now - self.file_status[file_path]['start_time']).total_seconds()
+                total_updates = self.file_status[file_path]['updates']
                 
                 # Print completion message with validity status and thread info
                 if success:
                     valid_status = "Valid" if result_summary.get('valid', False) else "Invalid"
-                    print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] Completed {file_path}: {valid_status} (took {elapsed:.1f}s)")
+                    print(f"{now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} [{thread_name}] Completed {file_path}: {valid_status} (took {elapsed:.1f}s, total updates: {total_updates})")
                 else:
-                    print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] Failed to process {file_path} (took {elapsed:.1f}s)")
+                    print(f"{now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} [{thread_name}] Failed to process {file_path} (took {elapsed:.1f}s, total updates: {total_updates})")
             
             # Print overall progress
-            print(f"Progress: {self.completed}/{self.total_files} files processed")
+            print(f"Progress: {self.completed}/{self.total_files} ({self.completed/self.total_files*100:.1f}%)")
     
     def close(self) -> None:
         """Display final summary."""
@@ -128,6 +123,8 @@ class ProgressTrackingStream:
         self.file_path = None  # Will be set by the caller if needed
         self.total_bytes = 0
         self.last_update = 0
+        self.update_count = 0
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} Created tracking stream for file: {self.file_path}")
         
     def __iter__(self):
         """Make this stream iterable for line-by-line processing."""
@@ -168,14 +165,16 @@ class ProgressTrackingStream:
         if not self.tracker:
             return
             
-        # Update progress every 100MB to avoid too frequent output
-        if self.total_bytes - self.last_update >= 100*1024*1024:
+        # Update progress every 1MB for much more frequent updates
+        if self.total_bytes - self.last_update >= 1*1024*1024:
+            self.update_count += 1
             if self.file_path:
                 self.tracker.update_progress(
                     self.file_path,
-                    status=f"Processed {self.total_bytes/1024/1024:.1f} MB"
+                    status=f"Processed {self.total_bytes/1024/1024:.1f} MB (update #{self.update_count})"
                 )
             else:
                 # No file path available, so no update possible with SimpleActivityTracker
                 pass
-            self.last_update = self.total_bytes 
+            self.last_update = self.total_bytes
+        

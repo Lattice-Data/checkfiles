@@ -6,6 +6,6 @@ and streams. Import and usage remains the same for backward compatibility,
 but implementation has been refactored into separate modules.
 """
 
-from src.validators.fastq.validator import FastqValidator
+from .fastq.validator import FastqValidator
 
 __all__ = ["FastqValidator"]

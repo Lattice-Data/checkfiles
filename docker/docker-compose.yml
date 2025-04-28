@@ -17,6 +17,12 @@ services:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - HOST_HOME=${HOME}
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0 if __import__('importlib').util.find_spec('src') else 1)"]
       interval: 30s
