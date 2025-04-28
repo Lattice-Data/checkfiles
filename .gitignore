@@ -36,6 +36,9 @@ MANIFEST
 *.spec
 
 logs/
+.cursor/rules/*
+.cursor/rules/
+.cursor/*
 
 # Installer logs
 pip-log.txt

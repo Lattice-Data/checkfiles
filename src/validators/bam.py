@@ -102,7 +102,7 @@ class BamValidator:
     
     def validate_stream(self, stream: IO[bytes]) -> Dict[str, Any]:
         """
-        Validate a BAM stream using a temporary file and samtools quickcheck.
+        Validate a BAM stream directly using samtools without creating temporary files.
         
         Args:
             stream: Binary stream containing BAM data.
@@ -114,8 +114,6 @@ class BamValidator:
                 - warnings (dict): Any warnings generated
                 - stats (dict): Statistics about the stream
         """
-        import tempfile
-        
         result = {
             "valid": False,
             "errors": {},
@@ -123,24 +121,52 @@ class BamValidator:
             "stats": {"file_size": 0}
         }
         
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(suffix=".bam", delete=False) as temp_file:
-            temp_path = temp_file.name
-            
-            # Write stream content to temp file
-            stream.seek(0)
-            content = stream.read()
-            temp_file.write(content)
-            temp_file.flush()
-            
-            result["stats"]["file_size"] = len(content)
-            
+        # Start a samtools process that reads from stdin
+        process = subprocess.Popen(
+            ["samtools", "quickcheck", "-v", "-"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # Set up a counter to track stream size
+        total_bytes = 0
+        
         try:
-            # Validate the temporary file
-            result = self.validate_file(temp_path)
-        finally:
-            # Clean up the temporary file
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            # Read from the stream in chunks and pipe to samtools
+            chunk_size = 262144  # 256KB chunks
+            while True:
+                chunk = stream.read(chunk_size)
+                if not chunk:
+                    break
+                    
+                # Write to samtools process
+                process.stdin.write(chunk)
+                total_bytes += len(chunk)
+            
+            # Close stdin to signal EOF to samtools
+            process.stdin.close()
+            
+            # Get the output
+            stdout, stderr = process.communicate()
+            
+            # Update stats
+            result["stats"]["file_size"] = total_bytes
+            
+            # Check return code
+            if process.returncode == 0:
+                result["valid"] = True
+            else:
+                result["valid"] = False
+                stderr_text = stderr.decode('utf-8', errors='replace').strip()
+                result["errors"]["invalid_format"] = stderr_text or "BAM file failed validation"
+                
+        except Exception as e:
+            result["errors"]["validation_error"] = f"Error during validation: {str(e)}"
+            # Try to kill the process if it's still running
+            try:
+                process.kill()
+            except:
+                pass
         
         return result

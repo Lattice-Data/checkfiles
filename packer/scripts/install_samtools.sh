@@ -1,16 +1,14 @@
 #!/bin/bash
-"""
-Samtools installation script for Checkfiles.
+# Samtools installation script for Checkfiles.
+#
+# This script installs samtools for BAM/CRAM file validation.
+# It handles dependency installation, compilation from source,
+# and verification of successful installation.
+#
+# Usage:
+#   sudo ./install_samtools.sh
 
-This script installs samtools for BAM/CRAM file validation.
-It handles dependency installation, compilation from source,
-and verification of successful installation.
-
-Usage:
-  sudo ./install_samtools.sh
-"""
-
-set -e
+set -euo pipefail
 
 # Configuration
 SAMTOOLS_VERSION="1.21"
@@ -18,10 +16,16 @@ INSTALL_PREFIX="/usr/local"
 BUILD_DIR="/tmp/samtools_build"
 LOG_FILE="/tmp/samtools_install.log"
 
+# Ensure we're running as root
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root" >&2
+    exit 1
+fi
+
 echo "Installing samtools ${SAMTOOLS_VERSION}..."
 
 # Create log file
-touch $LOG_FILE
+touch "$LOG_FILE"
 exec &> >(tee -a "$LOG_FILE")
 
 # Error handling function
@@ -51,7 +55,9 @@ apt-get install -y \
     libbz2-dev \
     liblzma-dev \
     libcurl4-gnutls-dev \
-    libssl-dev
+    libssl-dev \
+    libncurses5-dev \
+    libncursesw5-dev
 
 echo "Downloading samtools ${SAMTOOLS_VERSION}..."
 cd "$BUILD_DIR"

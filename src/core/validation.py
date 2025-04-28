@@ -10,7 +10,7 @@ import tempfile
 import subprocess
 from typing import Dict, Any, Optional, BinaryIO
 
-from src.tracking.progress import SimpleActivityTracker
+from src.tracking.progress import SimpleActivityTracker, ProgressTrackingStream
 from src.utils.helpers import has_gz_extension, stream_s3_file
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
 def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
                    validator: Optional[Any] = None, 
                    progress_tracker: Optional[SimpleActivityTracker] = None) -> Dict[str, Any]:
-    """Validate an S3 file.
+    """Validate an S3 file using streaming without downloading to disk.
     
     Args:
         s3_path: Path to the S3 file (s3://bucket/key)
@@ -168,54 +168,24 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         
         track_validation_progress(s3_path, progress_tracker, "Setting up stream")
         
-        # Create a temporary file for validation
-        with tempfile.TemporaryFile() as temp_file:
-            # Initialize hash objects
-            md5_hash = hashlib.md5()
-            sha256_hash = hashlib.sha256()
-            crc32c_func = crcmod.predefined.Crc('crc-32c')
-            
-            # Stream from S3
-            stream = stream_s3_file(s3_path, decompress=has_gz_extension(s3_path))
-            
-            track_validation_progress(s3_path, progress_tracker, "Stream established")
-            
-            total_bytes = 0
-            chunk_size = 262144  # 256KB chunks for better memory management
-            
-            # Read and process data in chunks
-            while True:
-                chunk = stream.read(chunk_size)
-                if not chunk:
-                    break
-                
-                # Update hashes
-                md5_hash.update(chunk)
-                sha256_hash.update(chunk)
-                crc32c_func.update(chunk)
-                
-                # Write to temp file
-                temp_file.write(chunk)
-                
-                total_bytes += len(chunk)
-                if progress_tracker and total_bytes % (1024*1024) == 0:  # Update every 1MB
-                    progress_tracker.update_progress(
-                        s3_path, 
-                        status=f"Processed {total_bytes/1024/1024:.1f} MB"
-                    )
-            
-            # Rewind temp file for validation
-            temp_file.seek(0)
-            
-            # Run validation
-            logger.debug("Starting FASTQ validation")
-            results = validator.validate_stream(temp_file)
-            logger.debug("FASTQ validation completed")
-            
-            # Add hash results
-            results['md5sum'] = md5_hash.hexdigest()
-            results['sha256'] = sha256_hash.hexdigest()
-            results['crc32c'] = format(crc32c_func.crcValue, '08x')
+        # Stream from S3
+        stream = stream_s3_file(s3_path, decompress=has_gz_extension(s3_path))
+        
+        track_validation_progress(s3_path, progress_tracker, "Stream established")
+        
+        # Wrap the stream with progress tracking
+        tracking_stream = ProgressTrackingStream(stream, progress_tracker)
+        # Store the file path for progress updates
+        if progress_tracker:
+            tracking_stream.file_path = s3_path
+        
+        # Run validation directly on the streaming data
+        logger.debug("Starting validation")
+        results = validator.validate_stream(tracking_stream)
+        logger.debug("Validation completed")
+        
+        # We don't calculate hashes in streaming mode to avoid reading the file twice
+        # If hash values are needed, they should be calculated separately
         
         if progress_tracker:
             progress_tracker.complete_file(s3_path, True, results)

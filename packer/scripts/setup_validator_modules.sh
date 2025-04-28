@@ -1,63 +1,73 @@
 #!/bin/bash
-"""
-Validator modules setup script for Checkfiles.
+set -euo pipefail
 
-This script sets up the validator modules for the Checkfiles application.
-It copies validator modules from the build directory to the appropriate
-Python site-packages location and creates necessary symbolic links.
+echo "Validator modules setup script for Checkfiles."
+echo ""
+echo "This script sets up the validator modules by:"
+echo "1. Installing the Python package in development mode"
+echo "2. Creating necessary directories"
+echo "3. Creating validator stubs"
+echo "4. Verifying the installation"
+echo ""
 
-Usage:
-  sudo ./setup_validator_modules.sh
-"""
+# Create and set up /opt/checkfiles directory
+sudo mkdir -p /opt/checkfiles
+sudo chmod -R 777 /opt/checkfiles
 
-set -ex
-
-# Determine Python site-packages directory
-PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-SITE_PACKAGES="/usr/local/lib/python${PYTHON_VERSION}/dist-packages"
-SRC_DIR="${SITE_PACKAGES}/src"
-VALIDATORS_DIR="${SITE_PACKAGES}/validators"
-
-# Print the content of build directory for debugging
-echo "Contents of /tmp/build:"
-ls -la /tmp/build
-echo "Contents of /tmp/build/src:"
-ls -la /tmp/build/src || echo "src directory not found"
-
-# Ensure validators directory exists and has proper permissions
-sudo mkdir -p /tmp/build/src/validators
-sudo chmod 777 /tmp/build/src/validators
-
-# Create base validators.__init__.py file if needed
-if [ ! -f "/tmp/build/src/validators/__init__.py" ]; then
-    sudo touch /tmp/build/src/validators/__init__.py
-fi
-
-# Copy all validators files from build to site-packages
-echo "Copying validators files"
-sudo cp -r /tmp/build/src/validators/* $VALIDATORS_DIR/ || echo "No files in validators directory to copy"
-
-# Create symbolic links to connect src.validators with validators
-echo "Creating symbolic links for validator modules"
-for file in $(find ${VALIDATORS_DIR} -type f -name "*.py" 2>/dev/null || echo ""); do
-    base_file=$(basename "$file")
-    sudo ln -sf "$file" "${SRC_DIR}/validators/${base_file}"
-    echo "Created link for $base_file"
-done
-
-# Handle checkfiles.py main script if it exists
-if [ -f "/tmp/build/src/checkfiles.py" ]; then
-    echo "Setting up checkfiles.py main script"
-    sudo cp /tmp/build/src/checkfiles.py "${SITE_PACKAGES}/checkfiles.py"
-    sudo chmod 755 "${SITE_PACKAGES}/checkfiles.py"
-    sudo ln -sf "${SITE_PACKAGES}/checkfiles.py" "${SRC_DIR}/checkfiles.py"
-    echo "checkfiles.py installed successfully"
+# Copy files from /tmp/build to /opt/checkfiles
+if [ -d /tmp/build ]; then
+    echo "Copying files from /tmp/build to /opt/checkfiles..."
+    sudo cp -r /tmp/build/* /opt/checkfiles/
+    sudo chmod -R 777 /opt/checkfiles
 else
-    echo "Warning: checkfiles.py not found in build directory"
+    echo "ERROR: /tmp/build directory not found"
+    exit 1
 fi
 
-# Verify the installation with basic import test
-echo "Verifying installation with basic import test"
-python3 -c "import src; import validators; print('Modules imported successfully')" || echo "Basic import test failed but continuing"
+# List directory contents for debugging
+echo "Checking /opt/checkfiles contents:"
+ls -la /opt/checkfiles
+
+# Set up environment
+PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+SITE_PACKAGES="/usr/local/lib/python${PYTHON_VERSION}/dist-packages"
+
+# Create necessary directories
+echo "Setting up package directories..."
+sudo mkdir -p "${SITE_PACKAGES}/checkfiles"
+sudo mkdir -p "${SITE_PACKAGES}/checkfiles/validators"
+sudo chmod -R 777 "${SITE_PACKAGES}/checkfiles"
+
+# Create __init__.py files
+sudo touch "${SITE_PACKAGES}/checkfiles/__init__.py"
+sudo touch "${SITE_PACKAGES}/checkfiles/validators/__init__.py"
+
+# Install the package in development mode
+echo "Installing package in development mode..."
+cd /opt/checkfiles || { echo "ERROR: Cannot change to /opt/checkfiles directory"; exit 1; }
+
+# Verify Python setup files exist
+if [ ! -f setup.py ] && [ ! -f pyproject.toml ]; then
+    echo "ERROR: Neither setup.py nor pyproject.toml found in /opt/checkfiles"
+    exit 1
+fi
+
+sudo pip3 install -e .
+
+# Verify installation
+echo "Verifying installation..."
+python3 -c "import checkfiles; import checkfiles.validators; print('Package installed successfully')" || {
+    echo "ERROR: Failed to import checkfiles package"
+    exit 1
+}
+
+# Run tests only if tests directory exists
+echo "Running tests..."
+if [ -d "tests" ]; then
+    cd /opt/checkfiles || exit 1
+    python3 -m pytest tests/
+else
+    echo "NOTICE: No tests directory found, skipping tests"
+fi
 
 echo "Validator modules setup completed." 

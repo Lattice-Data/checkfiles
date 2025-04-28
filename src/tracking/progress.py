@@ -54,8 +54,13 @@ class SimpleActivityTracker:
                 self.file_status[file_path]['updates'] += 1
                 thread_name = self.file_status[file_path]['thread_name']
                 
-                # Only print every other update to reduce output noise
-                if self.file_status[file_path]['updates'] % 2 == 0:
+                # Only print every 10th update to reduce output for large files
+                # Always print the first update and updates that don't contain "Processed" 
+                # to ensure important status changes are shown
+                is_progress_update = status.startswith("Processed")
+                is_first_update = self.file_status[file_path]['updates'] == 1
+                
+                if is_first_update or not is_progress_update or self.file_status[file_path]['updates'] % 10 == 0:
                     now = datetime.now()
                     elapsed = (now - self.file_status[file_path]['start_time']).total_seconds()
                     print(f"[{now.strftime('%H:%M:%S')}] [{thread_name}] {file_path}: {status} (elapsed: {elapsed:.1f}s)")
@@ -106,4 +111,71 @@ class SimpleActivityTracker:
         
         print("\nThread distribution:")
         for thread, count in thread_counts.items():
-            print(f"  {thread}: {count} file(s)") 
+            print(f"  {thread}: {count} file(s)")
+
+class ProgressTrackingStream:
+    """Stream wrapper that tracks reading progress for large file processing."""
+    
+    def __init__(self, stream, tracker=None):
+        """Initialize a tracking stream.
+        
+        Args:
+            stream: The underlying stream to read from
+            tracker: Optional progress tracker to update
+        """
+        self.stream = stream
+        self.tracker = tracker
+        self.file_path = None  # Will be set by the caller if needed
+        self.total_bytes = 0
+        self.last_update = 0
+        
+    def __iter__(self):
+        """Make this stream iterable for line-by-line processing."""
+        return self
+        
+    def __next__(self):
+        """Get the next line from the stream."""
+        data = self.stream.readline()
+        if not data:
+            raise StopIteration
+        
+        # Track progress
+        self.total_bytes += len(data)
+        self._update_progress(len(data))
+        return data
+        
+    def read(self, size=-1):
+        """Read data from the stream and track progress.
+        
+        Args:
+            size: Number of bytes to read, -1 for all
+            
+        Returns:
+            Binary data read from the stream
+        """
+        data = self.stream.read(size)
+        if data:
+            self.total_bytes += len(data)
+            self._update_progress(len(data))
+        return data
+        
+    def _update_progress(self, bytes_read):
+        """Update progress tracking.
+        
+        Args:
+            bytes_read: Number of bytes just read
+        """
+        if not self.tracker:
+            return
+            
+        # Update progress every 100MB to avoid too frequent output
+        if self.total_bytes - self.last_update >= 100*1024*1024:
+            if self.file_path:
+                self.tracker.update_progress(
+                    self.file_path,
+                    status=f"Processed {self.total_bytes/1024/1024:.1f} MB"
+                )
+            else:
+                # No file path available, so no update possible with SimpleActivityTracker
+                pass
+            self.last_update = self.total_bytes 

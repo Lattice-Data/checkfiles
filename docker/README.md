@@ -48,6 +48,61 @@ By default, this will show the help message. To validate files, see the Usage Ex
 | LOG_LEVEL | Python logging level | INFO | No |
 | PYTHONUNBUFFERED | Enables unbuffered Python output | 1 | No |
 
+## Recent Updates
+
+### Path Handling Improvements
+- Added ability to use both host file paths and container paths
+- Files can now be specified with absolute paths from the host system
+- Automatic path translation between host and container filesystems
+- S3 URIs continue to work as before
+
+### Validation Improvements
+- Fixed validation for FASTQ files with mismatched IDs in header and quality lines
+- Mismatched IDs are now correctly treated as errors instead of warnings
+- Test service added to verify validation behavior
+
+## Usage
+
+### Building the Container
+
+```bash
+docker compose -f docker/docker-compose.yml build
+```
+
+### Running Validation on S3 Files
+
+```bash
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -s3 s3://your-bucket/path/to/file.fastq.gz
+```
+
+### Running Validation on Local Files
+
+```bash
+# Using container path
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/src/tests/data/fastq/invalid/mismatched_ids.fastq
+
+# Using host path (will be automatically translated)
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /Users/yourusername/path/to/file.fastq
+```
+
+### Testing FASTQ Validation with Mismatched IDs
+
+```bash
+docker compose -f docker/docker-compose.yml run test-mismatched-ids
+```
+
+This will run the validator on a test file with mismatched IDs in the header and quality lines, which should be reported as invalid.
+
+## File Format Validation
+
+The container supports validation of the following file formats:
+
+- FASTQ (with or without gzip compression)
+- BAM
+- CRAM
+
+Each format has specific validation criteria. See the individual validator documentation for details.
+
 ## Usage Examples
 
 ### Run validation on local files

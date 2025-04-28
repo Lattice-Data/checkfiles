@@ -263,13 +263,8 @@ def test_all_invalid_files(validator):
         file_path = os.path.join(INVALID_FILES_DIR, filename)
         result = validator.validate_file(file_path)
         
-        # Handle special case: mismatched_ids.fastq is now considered valid with warnings
-        if filename == "mismatched_ids.fastq":
-            assert result["valid"], f"File should be valid with warnings: {filename}"
-            assert len(result["warnings"]) > 0, f"Warnings should be present for: {filename}"
-        else:
-            assert not result["valid"], f"File should be invalid: {filename}"
-            assert len(result["errors"]) > 0, f"Errors should be present for: {filename}"
+        assert not result["valid"], f"File should be invalid: {filename}"
+        assert len(result["errors"]) > 0, f"Errors should be present for: {filename}"
 
 
 def test_mismatched_lengths(validator):
@@ -350,8 +345,9 @@ def test_mismatched_ids(validator):
     try:
         result = validator.validate_file(f.name)
         
-        # According to FASTQ format, mismatched IDs are allowed but should trigger a warning
-        assert "mismatched_ids" in result["warnings"]
+        # Mismatched IDs should now be treated as errors, not warnings
+        assert result["valid"] is False
+        assert "mismatched_ids" in result["errors"]
     finally:
         # Clean up
         try:

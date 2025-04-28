@@ -82,7 +82,7 @@ build {
   provisioner "shell" {
     inline = [
       "echo 'Preparing Python source directories...'",
-      "sudo mkdir -p /tmp/build/src/validators",
+      "sudo mkdir -p /tmp/build/src",
       "sudo chmod -R 777 /tmp/build/src"
     ]
   }
@@ -113,9 +113,11 @@ build {
     ]
   }
 
+  # Execute installation scripts with proper permissions
   provisioner "shell" {
     pause_before = "60s"
     scripts = "${var.installation_scripts}"
+    execute_command = "chmod +x {{.Path}}; sudo -E {{.Path}}"
     max_retries = 5
   }
 

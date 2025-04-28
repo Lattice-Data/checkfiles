@@ -48,6 +48,7 @@ from src.cli.parser import parse_arguments
 from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
 from src.tracking.progress import SimpleActivityTracker
 from src.utils.helpers import has_gz_extension, validate_gzip_format
+from src.path_translator import resolve_path, is_s3_uri
 
 def main():
     """Main entry point for checkfiles utility."""
@@ -63,6 +64,7 @@ def main():
             filename=args.log_file,
             filemode='w'
         )
+        global logger
         logger = logging.getLogger(__name__)
         logger.debug(f"Logging redirected to: {args.log_file}")
     
@@ -86,10 +88,19 @@ def main():
     s3_files = []
     
     if args.local_file:
-        local_files = [f.strip() for f in args.local_file.split(',')]
+        raw_local_files = [f.strip() for f in args.local_file.split(',')]
+        
+        # Process each local file path through the path translator
+        for file_path in raw_local_files:
+            if is_s3_uri(file_path):
+                s3_files.append(file_path)
+            else:
+                resolved_path = resolve_path(file_path)
+                logger.debug(f"Resolved path '{file_path}' to '{resolved_path}'")
+                local_files.append(resolved_path)
         
     if args.s3_file:
-        s3_files = [f.strip() for f in args.s3_file.split(',')]
+        s3_files += [f.strip() for f in args.s3_file.split(',')]
     
     total_files = len(local_files) + len(s3_files)
     

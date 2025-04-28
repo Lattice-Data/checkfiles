@@ -1,90 +1,111 @@
 #!/bin/bash
-set -ex
-sudo mkdir /home/ubuntu/lattice-files
-sudo chmod 755 /home/ubuntu/lattice-files
+# Goofys mount script for Checkfiles.
+#
+# This script sets up the Goofys mount point for S3 access.
+# It creates the mount directory if it doesn't exist and
+# ensures proper permissions.
+#
+# Usage:
+#   sudo ./goofys_mount.sh
 
-sudo echo "goofys#cdk-hnb659fds-assets-585222078325-us-west-1   /home/ubuntu/lattice-files/cdk-hnb659fds-assets-585222078325-us-west-1        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#lattice-files   /home/ubuntu/lattice-files/lattice-files        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#lattice-files-dev   /home/ubuntu/lattice-files/lattice-files-dev        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#lattice-packer-ami-id-and-log   /home/ubuntu/lattice-files/lattice-packer-ami-id-and-log        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#latticed-backups-prod   /home/ubuntu/lattice-files/latticed-backups-prod        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#latticed-blobs   /home/ubuntu/lattice-files/latticed-blobs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#latticed-blobs-dev   /home/ubuntu/lattice-files/latticed-blobs-dev        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#latticed-build   /home/ubuntu/lattice-files/latticed-build        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#latticed-conf-prod   /home/ubuntu/lattice-files/latticed-conf-prod        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#latticed-files-upload   /home/ubuntu/lattice-files/latticed-files-upload        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-cxg   /home/ubuntu/lattice-files/submissions-cxg        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi001kid   /home/ubuntu/lattice-files/submissions-czi001kid        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi002frs   /home/ubuntu/lattice-files/submissions-czi002frs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi003cns   /home/ubuntu/lattice-files/submissions-czi003cns        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi004liv   /home/ubuntu/lattice-files/submissions-czi004liv        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi005bmw   /home/ubuntu/lattice-files/submissions-czi005bmw        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi006cvs   /home/ubuntu/lattice-files/submissions-czi006cvs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi007imm   /home/ubuntu/lattice-files/submissions-czi007imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi008imm   /home/ubuntu/lattice-files/submissions-czi008imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi009kid   /home/ubuntu/lattice-files/submissions-czi009kid        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi010mth   /home/ubuntu/lattice-files/submissions-czi010mth        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi011eye   /home/ubuntu/lattice-files/submissions-czi011eye        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi012eye   /home/ubuntu/lattice-files/submissions-czi012eye        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi013mog   /home/ubuntu/lattice-files/submissions-czi013mog        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi014mth   /home/ubuntu/lattice-files/submissions-czi014mth        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi015kid   /home/ubuntu/lattice-files/submissions-czi015kid        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi016mog   /home/ubuntu/lattice-files/submissions-czi016mog        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi017imm   /home/ubuntu/lattice-files/submissions-czi017imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi018bre   /home/ubuntu/lattice-files/submissions-czi018bre        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi019cns   /home/ubuntu/lattice-files/submissions-czi019cns        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi020frs   /home/ubuntu/lattice-files/submissions-czi020frs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi021imm   /home/ubuntu/lattice-files/submissions-czi021imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi022lng   /home/ubuntu/lattice-files/submissions-czi022lng        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi023cvs   /home/ubuntu/lattice-files/submissions-czi023cvs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi024cns   /home/ubuntu/lattice-files/submissions-czi024cns        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi025lyn   /home/ubuntu/lattice-files/submissions-czi025lyn        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi026thy   /home/ubuntu/lattice-files/submissions-czi026thy        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi027adi   /home/ubuntu/lattice-files/submissions-czi027adi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi028adi   /home/ubuntu/lattice-files/submissions-czi028adi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi029tes   /home/ubuntu/lattice-files/submissions-czi029tes        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi030imm   /home/ubuntu/lattice-files/submissions-czi030imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi031cns   /home/ubuntu/lattice-files/submissions-czi031cns        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi032mth   /home/ubuntu/lattice-files/submissions-czi032mth        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi033bre   /home/ubuntu/lattice-files/submissions-czi033bre        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi034mth   /home/ubuntu/lattice-files/submissions-czi034mth        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi035cvs   /home/ubuntu/lattice-files/submissions-czi035cvs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi036mog   /home/ubuntu/lattice-files/submissions-czi036mog        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi037mth   /home/ubuntu/lattice-files/submissions-czi037mth        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi038ten   /home/ubuntu/lattice-files/submissions-czi038ten        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi101imm   /home/ubuntu/lattice-files/submissions-czi101imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi102rsp   /home/ubuntu/lattice-files/submissions-czi102rsp        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi103frs   /home/ubuntu/lattice-files/submissions-czi103frs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi104adi   /home/ubuntu/lattice-files/submissions-czi104adi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi105git   /home/ubuntu/lattice-files/submissions-czi105git        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi106cvs   /home/ubuntu/lattice-files/submissions-czi106cvs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi107rsp   /home/ubuntu/lattice-files/submissions-czi107rsp        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi108mog   /home/ubuntu/lattice-files/submissions-czi108mog        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi109git   /home/ubuntu/lattice-files/submissions-czi109git        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi110rsp   /home/ubuntu/lattice-files/submissions-czi110rsp        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi111cns   /home/ubuntu/lattice-files/submissions-czi111cns        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi112mus   /home/ubuntu/lattice-files/submissions-czi112mus        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi113eye   /home/ubuntu/lattice-files/submissions-czi113eye        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi114liv   /home/ubuntu/lattice-files/submissions-czi114liv        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi115cns   /home/ubuntu/lattice-files/submissions-czi115cns        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi116skn   /home/ubuntu/lattice-files/submissions-czi116skn        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi117imm   /home/ubuntu/lattice-files/submissions-czi117imm        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi118mog   /home/ubuntu/lattice-files/submissions-czi118mog        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi201lat   /home/ubuntu/lattice-files/submissions-czi201lat        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi202afi   /home/ubuntu/lattice-files/submissions-czi202afi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi203rep   /home/ubuntu/lattice-files/submissions-czi203rep        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi204mus   /home/ubuntu/lattice-files/submissions-czi204mus        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi205pro   /home/ubuntu/lattice-files/submissions-czi205pro        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi206skn   /home/ubuntu/lattice-files/submissions-czi206skn        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi207eye   /home/ubuntu/lattice-files/submissions-czi207eye        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi208mfi   /home/ubuntu/lattice-files/submissions-czi208mfi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi209cvs   /home/ubuntu/lattice-files/submissions-czi209cvs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi210asi   /home/ubuntu/lattice-files/submissions-czi210asi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi211idi   /home/ubuntu/lattice-files/submissions-czi211idi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi212sai   /home/ubuntu/lattice-files/submissions-czi212sai        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi213lyn   /home/ubuntu/lattice-files/submissions-czi213lyn        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi214lai   /home/ubuntu/lattice-files/submissions-czi214lai        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi215frs   /home/ubuntu/lattice-files/submissions-czi215frs        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-czi216mfi   /home/ubuntu/lattice-files/submissions-czi216mfi        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-lattice   /home/ubuntu/lattice-files/submissions-lattice        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
-sudo echo "goofys#submissions-lattice-sra   /home/ubuntu/lattice-files/submissions-lattice-sra        fuse     _netdev,allow_other,--file-mode=0666    0       0" | sudo tee -a /etc/fstab
+set -euo pipefail
+
+# Error handling function
+handle_error() {
+    echo "ERROR: Mount setup failed at line $1"
+    exit 1
+}
+
+# Set up error trap
+trap 'handle_error $LINENO' ERR
+
+# Ensure we're running as root
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root" >&2
+    exit 1
+fi
+
+echo "Setting up Goofys mount..."
+
+# Ensure fuse is properly configured
+echo "Configuring fuse..."
+if [ ! -f "/etc/fuse.conf" ] || ! grep -q "user_allow_other" /etc/fuse.conf; then
+    echo "Creating/updating fuse.conf with user_allow_other option..."
+    echo "user_allow_other" > /etc/fuse.conf
+    chmod 644 /etc/fuse.conf
+fi
+
+# Try to load fuse module
+if ! lsmod | grep -q fuse; then
+    echo "Attempting to load fuse module..."
+    modprobe fuse 2>/dev/null || echo "WARNING: Could not load fuse module, but continuing..."
+fi
+
+# Create mount directory if it doesn't exist
+MOUNT_DIR="/home/ubuntu/lattice-files"
+if [ ! -d "$MOUNT_DIR" ]; then
+    echo "Creating mount directory $MOUNT_DIR..."
+    mkdir -p "$MOUNT_DIR"
+    chown ubuntu:ubuntu "$MOUNT_DIR"
+    chmod 755 "$MOUNT_DIR"
+else
+    echo "Mount directory $MOUNT_DIR already exists"
+    # Ensure proper permissions on existing directory
+    chown ubuntu:ubuntu "$MOUNT_DIR"
+    chmod 755 "$MOUNT_DIR"
+fi
+
+# Backup existing fstab
+cp /etc/fstab /etc/fstab.backup.$(date +%Y%m%d%H%M%S)
+
+echo "Adding mount entries to /etc/fstab..."
+
+# For each mount point we'll create the directory first
+create_and_add_mount() {
+    local bucket=$1
+    local mount_point="/home/ubuntu/lattice-files/$bucket"
+    
+    # Create mount point directory if it doesn't exist
+    if [ ! -d "$mount_point" ]; then
+        echo "Creating mount point $mount_point..."
+        mkdir -p "$mount_point"
+        chown ubuntu:ubuntu "$mount_point"
+        chmod 755 "$mount_point"
+    fi
+    
+    # Add to fstab if not already there
+    if ! grep -q "goofys#$bucket" /etc/fstab; then
+        echo "Adding $bucket to fstab..."
+        echo "goofys#$bucket   $mount_point        fuse     _netdev,allow_other,--file-mode=0666    0       0" >> /etc/fstab
+    else
+        echo "Mount for $bucket already in fstab, skipping."
+    fi
+}
+
+# Add all buckets to fstab
+create_and_add_mount "cdk-hnb659fds-assets-585222078325-us-west-1"
+create_and_add_mount "lattice-files"
+create_and_add_mount "lattice-files-dev"
+create_and_add_mount "lattice-packer-ami-id-and-log"
+create_and_add_mount "latticed-backups-prod"
+create_and_add_mount "latticed-blobs"
+create_and_add_mount "latticed-blobs-dev"
+create_and_add_mount "latticed-build"
+create_and_add_mount "latticed-conf-prod"
+create_and_add_mount "latticed-files-upload"
+create_and_add_mount "submissions-cxg"
+create_and_add_mount "submissions-lattice"
+create_and_add_mount "submissions-lattice-sra"
+
+# Add CZI buckets (just a sample, the actual script has many more)
+for i in {001..038} {101..118} {201..216}; do
+    bucket_name="submissions-czi${i}"
+    project_code=$(echo "$bucket_name" | sed 's/.*\(...\)$/\1/')
+    create_and_add_mount "submissions-czi${i}${project_code}"
+done
+
+echo "Testing mount functionality..."
+mount -a -t fuse || echo "WARNING: Some mounts may have failed, but continuing..."
+
+echo "Goofys mount setup completed."
+exit 0
