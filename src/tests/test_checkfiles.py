@@ -12,6 +12,7 @@ import gzip
 import hashlib
 import pytest
 import subprocess
+import shutil
 from pathlib import Path
 
 # Add the parent directory to path to make imports work
@@ -21,6 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.utils.helpers import has_gz_extension, validate_gzip_format, stream_s3_file
 from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
 from src.tracking.progress import SimpleActivityTracker
+from src.checkfiles import write_result_to_progress_log
 
 
 @pytest.fixture
@@ -423,3 +425,58 @@ def test_validate_gzip_format_s3_error(monkeypatch):
     result = validate_gzip_format("s3://bucket/error.gz")
     assert 'gzip_error' in result
     assert "S3 access error" in result['gzip_error']
+
+
+def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
+    """Test that write_result_to_progress_log writes exactly all stats fields to the log file."""
+    import re
+
+    temp_dir = tempfile.mkdtemp()
+    monkeypatch.setenv("CHECKFILES_LOG_DIR", temp_dir)
+    log_path = os.path.join(temp_dir, "validation_progress.log")
+
+    stats = {
+        "file_size": 12345,
+        "content_size": 12000,
+        "md5sum": "abc123",
+        "sha256": "def456",
+        "crc32c": "7890",
+        "content_md5sum": "fedcba",
+        "read_count": 42
+    }
+    result = {
+        "file_path": "/tmp/test.fastq.gz",
+        "success": True,
+        "results": {
+            "valid": True,
+            "errors": {},
+            "warnings": {},
+            "stats": stats
+        }
+    }
+
+    write_result_to_progress_log(result)
+
+    with open(log_path, "r") as f:
+        lines = f.readlines()
+    last_line = lines[-1]
+
+    # Extract key=value pairs from the log line (after the first two columns)
+    log_fields = last_line.strip().split('\t')[2:]
+    log_stats = {}
+    for field in log_fields:
+        if field.startswith("Errors:") or field.startswith("Warnings:"):
+            continue
+        if '=' in field:
+            k, v = field.split('=', 1)
+            log_stats[k] = v
+
+    # Compare sets of keys
+    assert set(log_stats.keys()) == set(stats.keys()), (
+        f"Log stats keys {set(log_stats.keys())} do not match input stats keys {set(stats.keys())}"
+    )
+    # Compare values
+    for k, v in stats.items():
+        assert str(log_stats[k]) == str(v), f"Value for {k} does not match: {log_stats[k]} != {v}"
+
+    shutil.rmtree(temp_dir)

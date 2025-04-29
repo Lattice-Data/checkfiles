@@ -60,13 +60,11 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
     Args:
         result: The validation result dictionary
     """
-    # Get log directory from environment variable or use current directory
     log_dir = os.getenv('CHECKFILES_LOG_DIR', os.getcwd())
     os.makedirs(log_dir, exist_ok=True)
     progress_log_path = os.path.join(log_dir, 'validation_progress.log')
     print(f"Writing result to {progress_log_path}")
     
-    # Format the result for the log
     file_path = result.get('file_path', 'unknown')
     if result.get('success', False):
         validity = "Valid" if result.get('results', {}).get('valid', False) else "Invalid"
@@ -74,16 +72,8 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         warnings = result.get('results', {}).get('warnings', {})
         stats = result.get('results', {}).get('stats', {})
         
-        # Format file details
-        details = []
-        if stats:
-            if 'file_size' in stats:
-                details.append(f"size={stats['file_size']}")
-            if 'md5sum' in stats:
-                details.append(f"md5={stats['md5sum']}")
-            if 'sha256' in stats:
-                details.append(f"sha256={stats['sha256']}")
-        
+        # Include all stats, not just a subset
+        details = [f"{k}={v}" for k, v in stats.items()] if stats else []
         details_str = "\t".join(details)
         error_str = "\t".join([f"{k}={v}" for k, v in errors.items()]) if errors else ""
         warning_str = "\t".join([f"{k}={v}" for k, v in warnings.items()]) if warnings else ""
@@ -97,7 +87,6 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         error = result.get('error', 'Unknown error')
         log_line = f"{file_path}\tFailed\tError: {error}"
     
-    # Write to the progress log in a thread-safe manner
     with validation_log_lock:
         with open(progress_log_path, 'a') as f:
             f.write(f"{log_line}\n")

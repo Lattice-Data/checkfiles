@@ -17,6 +17,7 @@ services:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - HOST_HOME=${HOME}
+      - CHECKFILES_LOG_DIR=/app/logs
     deploy:
       resources:
         limits:
