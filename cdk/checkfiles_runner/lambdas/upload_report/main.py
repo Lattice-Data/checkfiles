@@ -37,12 +37,14 @@ def upload_report_to_slack(event, context):
             DocumentName='AWS-RunShellScript',
             Parameters={
                 'commands': [
-                    '#!/bin/bash',  # Ensure we're using bash
-                    '. /etc/profile.d/checkfiles.sh',  # Use . instead of source
-                    'echo "CHECKFILES_LOG_DIR is set to: $CHECKFILES_LOG_DIR"',  # Debug output
-                    'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',  # Add error handling
-                    'if [ ! -f "validation_progress.log" ]; then echo "No validation results available" > validation_progress.log; fi',
-                    'base64 -w 0 validation_progress.log'
+                    '#!/bin/bash',
+                    '. /etc/profile.d/checkfiles.sh',
+                    'echo "CHECKFILES_LOG_DIR is set to: $CHECKFILES_LOG_DIR"',
+                    'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
+                    'if [ ! -f "validation_progress.log" ]; then',
+                    '  echo "No validation results available" > validation_progress.log',
+                    'fi',
+                    'cat validation_progress.log | base64 -w 0'  # Use cat to ensure proper input to base64
                 ]
             }
         )
