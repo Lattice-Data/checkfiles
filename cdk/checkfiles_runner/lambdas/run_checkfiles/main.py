@@ -226,6 +226,48 @@ def run_checkfiles_command(event, context):
             "    \"\"\"",
             "    return filename.endswith('.gz')",
             "",
+            "def stream_local_file(file_path: str, decompress: bool = False) -> BinaryIO:",
+            "    \"\"\"",
+            "    Create a stream from a local file.",
+            "    ",
+            "    Args:",
+            "        file_path: Path to the local file",
+            "        decompress: Whether to decompress the file",
+            "        ",
+            "    Returns:",
+            "        Binary IO stream of the file contents",
+            "    \"\"\"",
+            "    # Check if file exists",
+            "    if not os.path.exists(file_path):",
+            "        raise FileNotFoundError(f\"File not found: {file_path}\")",
+            "    ",
+            "    # Open file in binary mode",
+            "    with open(file_path, 'rb') as f:",
+            "        # Read all data into memory",
+            "        data = f.read()",
+            "    ",
+            "    # Create BytesIO object",
+            "    stream = io.BytesIO(data)",
+            "    ",
+            "    # Decompress if needed",
+            "    if decompress:",
+            "        try:",
+            "            # Reset stream position",
+            "            stream.seek(0)",
+            "            # Create gzip stream",
+            "            gzip_stream = gzip.GzipFile(fileobj=stream, mode='rb')",
+            "            # Read all data from gzip stream",
+            "            decompressed = io.BytesIO(gzip_stream.read())",
+            "            # Reset position and return",
+            "            decompressed.seek(0)",
+            "            return decompressed",
+            "        except Exception as e:",
+            "            raise ValueError(f\"Error decompressing file: {e}\")",
+            "    ",
+            "    # Reset stream position and return",
+            "    stream.seek(0)",
+            "    return stream",
+            "",
             "def stream_s3_file(s3_path: str, decompress: bool = False) -> BinaryIO:",
             "    \"\"\"",
             "    Stream a file from S3 as a binary stream.",
@@ -308,6 +350,48 @@ def run_checkfiles_command(event, context):
             "        Empty dict indicating successful validation",
             "    \"\"\"",
             "    return {}", 
+            "",
+            "def stream_local_file(file_path: str, decompress: bool = False) -> BinaryIO:",
+            "    \"\"\"",
+            "    Create a stream from a local file.",
+            "    ",
+            "    Args:",
+            "        file_path: Path to the local file",
+            "        decompress: Whether to decompress the file",
+            "        ",
+            "    Returns:",
+            "        Binary IO stream of the file contents",
+            "    \"\"\"",
+            "    # Check if file exists",
+            "    if not os.path.exists(file_path):",
+            "        raise FileNotFoundError(f\"File not found: {file_path}\")",
+            "    ",
+            "    # Open file in binary mode",
+            "    with open(file_path, 'rb') as f:",
+            "        # Read all data into memory",
+            "        data = f.read()",
+            "    ",
+            "    # Create BytesIO object",
+            "    stream = io.BytesIO(data)",
+            "    ",
+            "    # Decompress if needed",
+            "    if decompress:",
+            "        try:",
+            "            # Reset stream position",
+            "            stream.seek(0)",
+            "            # Create gzip stream",
+            "            gzip_stream = gzip.GzipFile(fileobj=stream, mode='rb')",
+            "            # Read all data from gzip stream",
+            "            decompressed = io.BytesIO(gzip_stream.read())",
+            "            # Reset position and return",
+            "            decompressed.seek(0)",
+            "            return decompressed",
+            "        except Exception as e:",
+            "            raise ValueError(f\"Error decompressing file: {e}\")",
+            "    ",
+            "    # Reset stream position and return",
+            "    stream.seek(0)",
+            "    return stream",
             "",
             "def stream_s3_file(s3_path: str, decompress: bool = False) -> BinaryIO:",
             "    \"\"\"",
@@ -451,13 +535,15 @@ def run_checkfiles_command(event, context):
     {put_secret_key_to_env_cmd}
     export DEBUG=1
     
-    # Print Python version and debug import paths
+    # Use absolute paths for Python and avoid source
     cd /home/ubuntu/checkfiles
-    source venv/bin/activate
-    python -c "import sys; print('Python sys.path:'); print('\\n'.join(sys.path)); print('\\nChecking imports:'); print('helpers module location:'); import importlib.util; print(importlib.util.find_spec('src.utils.helpers')); print('\\nTesting stream_s3_file import:'); try: from src.utils.helpers import stream_s3_file; print('stream_s3_file successfully imported'); except ImportError as e: print(f'Error importing stream_s3_file: {{e}}');"
+    export PATH=/home/ubuntu/checkfiles/venv/bin:$PATH
     
-    # Run the actual command
-    {run_checkfiles_cmd}
+    # Debug Python imports directly without using source
+    /home/ubuntu/checkfiles/venv/bin/python -c "import sys; print('Python sys.path:'); print('\\n'.join(sys.path)); print('\\nChecking imports:'); print('helpers module location:'); import importlib.util; print(importlib.util.find_spec('src.utils.helpers')); print('\\nTesting stream_s3_file import:'); try: from src.utils.helpers import stream_s3_file, stream_local_file; print('stream_s3_file and stream_local_file successfully imported'); except ImportError as e: print(f'Error importing helpers: {{e}}');"
+    
+    # Run the actual command with absolute Python path
+    /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
     """
     
     ssm = boto3.client('ssm')
