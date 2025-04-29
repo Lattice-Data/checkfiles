@@ -83,6 +83,9 @@ def create_checkfiles_instance(event, context):
     echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
     echo 'source /home/ubuntu/.env_checkfiles' >> /home/ubuntu/.bashrc
     
+    # Source the environment variables for the current session
+    source /home/ubuntu/.env_checkfiles
+    
     # Set proper permissions
     echo "==== Setting permissions ===="
     cd /home/ubuntu

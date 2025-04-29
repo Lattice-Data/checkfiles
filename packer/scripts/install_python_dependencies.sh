@@ -74,4 +74,9 @@ sudo mkdir -p "${SRC_DIR}/validators"
 sudo chmod 777 "${SRC_DIR}/validators"
 sudo touch "${SRC_DIR}/validators/__init__.py"
 
+# Set up CHECKFILES_LOG_DIR environment variable
+echo "Setting up CHECKFILES_LOG_DIR environment variable..."
+echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' | sudo tee -a /etc/profile.d/checkfiles.sh
+sudo chmod 644 /etc/profile.d/checkfiles.sh
+
 echo "Python dependencies installation completed successfully." 
