@@ -32,15 +32,28 @@ ls -la /opt/checkfiles
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 SITE_PACKAGES="/usr/local/lib/python${PYTHON_VERSION}/dist-packages"
 
-# Create necessary directories
-echo "Setting up package directories..."
-sudo mkdir -p "${SITE_PACKAGES}/checkfiles"
-sudo mkdir -p "${SITE_PACKAGES}/checkfiles/validators"
-sudo chmod -R 777 "${SITE_PACKAGES}/checkfiles"
+# Create necessary directories in site-packages
+echo "Setting up package directories in site-packages..."
+sudo mkdir -p "${SITE_PACKAGES}/src"
+sudo mkdir -p "${SITE_PACKAGES}/src/validators"
+sudo mkdir -p "${SITE_PACKAGES}/src/validators/fastq"
+sudo chmod -R 777 "${SITE_PACKAGES}/src"
 
-# Create __init__.py files
-sudo touch "${SITE_PACKAGES}/checkfiles/__init__.py"
-sudo touch "${SITE_PACKAGES}/checkfiles/validators/__init__.py"
+# Create necessary directories in /opt/checkfiles
+echo "Setting up package directories in /opt/checkfiles..."
+sudo mkdir -p "/opt/checkfiles/src/validators"
+sudo mkdir -p "/opt/checkfiles/src/validators/fastq"
+sudo chmod -R 777 "/opt/checkfiles/src"
+
+# Create __init__.py files in site-packages
+sudo touch "${SITE_PACKAGES}/src/__init__.py"
+sudo touch "${SITE_PACKAGES}/src/validators/__init__.py"
+sudo touch "${SITE_PACKAGES}/src/validators/fastq/__init__.py"
+
+# Create __init__.py files in /opt/checkfiles
+sudo touch "/opt/checkfiles/src/__init__.py"
+sudo touch "/opt/checkfiles/src/validators/__init__.py"
+sudo touch "/opt/checkfiles/src/validators/fastq/__init__.py"
 
 # Install the package in development mode
 echo "Installing package in development mode..."
@@ -54,10 +67,39 @@ fi
 
 sudo pip3 install -e .
 
-# Verify installation
+# Create proper imports in fastq.py
+echo "Creating fastq.py for proper imports..."
+cat > /opt/checkfiles/src/validators/fastq.py << 'EOF'
+"""
+FASTQ file and stream validator with pure Python implementation.
+
+This module provides the FastqValidator class for validating FASTQ files 
+and streams. Import and usage remains the same for backward compatibility,
+but implementation has been refactored into separate modules.
+"""
+
+from .fastq.validator import FastqValidator
+
+__all__ = ["FastqValidator"]
+EOF
+
+# Copy fastq.py to site-packages as well
+sudo cp /opt/checkfiles/src/validators/fastq.py "${SITE_PACKAGES}/src/validators/fastq.py"
+
+# Ensure correct permissions
+sudo chmod -R 777 "${SITE_PACKAGES}/src"
+sudo chmod -R 777 "/opt/checkfiles/src"
+
+# Verify installation by trying to import from src.validators
 echo "Verifying installation..."
-python3 -c "import checkfiles; import checkfiles.validators; print('Package installed successfully')" || {
-    echo "ERROR: Failed to import checkfiles package"
+python3 -c "import src.validators; print('src.validators package imported successfully')" || {
+    echo "ERROR: Failed to import src.validators package"
+    exit 1
+}
+
+python3 -c "from src.validators.fastq import FastqValidator; print('FastqValidator imported successfully')" || {
+    echo "ERROR: Failed to import FastqValidator from src.validators.fastq"
+    echo "This is critical for the operation of the checkfiles software."
     exit 1
 }
 

@@ -116,3 +116,101 @@ For additional help or issues, please refer to:
 - [Packer Documentation](https://developer.hashicorp.com/packer/docs)
 - [AWS Documentation](https://docs.aws.amazon.com/)
 - [Project Repository](https://github.com/yourusername/checkfiles)
+
+# Checkfiles AMI Builder
+
+This directory contains Packer templates and scripts to build the AWS AMI used by the checkfiles application.
+
+## Updates (Important)
+
+**April 2025 Update**: Fixed critical module path structure issues in the AMI. The scripts now correctly set up the validators modules in the expected `src/validators/fastq` structure rather than just `validators/fastq`, resolving import errors in the runtime environment.
+
+## Requirements
+
+- [Packer](https://www.packer.io/downloads)
+- AWS CLI configured with appropriate permissions
+- Python 3.10+
+
+## Directory Structure
+
+```
+.
+├── README.md
+├── scripts/                  # Scripts for setting up the AMI
+│   ├── create_validator_stubs.sh
+│   ├── debug_fuse.sh
+│   ├── goofys_mount.sh
+│   ├── install_python_dependencies.sh
+│   ├── install_samtools.sh
+│   ├── setup_validator_modules.sh
+│   └── validate_ami.sh
+└── templates/                # Packer templates
+    ├── build_AMI.pkr.hcl
+    └── checkfiles_ubuntu_2204_variables.json
+```
+
+## Building the AMI
+
+1. Ensure all code changes are committed to the repository
+2. Navigate to the packer directory
+3. Run the build command:
+
+```bash
+cd packer
+packer build -var-file=templates/checkfiles_ubuntu_2204_variables.json templates/build_AMI.pkr.hcl
+```
+
+## Deploying the New AMI
+
+After building the new AMI, you'll need to update the CDK deployment to use the new AMI ID:
+
+1. Update the AMI ID in the CDK configuration file:
+
+```bash
+# Navigate to the CDK directory
+cd ../cdk
+
+# Update the AMI ID in the appropriate configuration file
+# The file location might vary depending on your setup
+```
+
+2. Deploy the updated CDK stack:
+
+```bash
+cdk deploy checkfiles-runner-stack
+```
+
+## Troubleshooting
+
+### Common Issues
+
+#### Import Error: `No module named 'src.validators.fastq'`
+
+This indicates a mismatch between the code's import expectations and the module structure in the AMI. The recent update should fix this issue by creating the correct directory structure. If you're still experiencing this issue:
+
+1. Verify that the scripts in the `packer/scripts` directory are correctly setting up the module structure
+2. Ensure the AMI is being built with the latest scripts
+3. Verify that the CDK stack is using the new AMI ID
+
+#### Validator Methods Missing
+
+If you encounter errors about missing methods (like `validate_stream`), make sure the validator stubs in `create_validator_stubs.sh` include all required methods with the correct signatures.
+
+## Testing the AMI
+
+You can test the AMI functionality directly before deploying:
+
+1. Launch an EC2 instance using the new AMI
+2. Connect to the instance using SSH
+3. Run the verification script:
+
+```bash
+cd /opt/checkfiles
+python -c "from src.validators.fastq import FastqValidator; print('Import successful')"
+validator = FastqValidator()
+print(hasattr(validator, 'validate_stream'))
+```
+
+## Contact
+
+For questions or issues, please contact the checkfiles team.

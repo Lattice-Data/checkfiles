@@ -63,7 +63,7 @@ def upload_report_to_slack(event, context):
         if padding_needed:
             base64_content += '=' * (4 - padding_needed)
         
-        file_content = base64.b64decode(base64_content)
+        file_content = base64.b64decode(base64_content).decode('utf-8')
         timestamp = time.strftime('%Y%m%d-%H%M%S')
         filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv'
         print('file_content')
