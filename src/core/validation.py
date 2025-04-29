@@ -11,7 +11,7 @@ import subprocess
 from typing import Dict, Any, Optional, BinaryIO
 
 from src.tracking.progress import SimpleActivityTracker, ProgressTrackingStream
-from src.utils.helpers import has_gz_extension, stream_s3_file
+from src.utils.helpers import has_gz_extension, stream_s3_file, stream_local_file
 
 logger = logging.getLogger(__name__)
 
@@ -111,10 +111,27 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         
         if is_gzipped:
             track_validation_progress(file_path, progress_tracker, "Decompressing")
+            
+            # Use streaming decompression to avoid loading entire file into memory
+            try:
+                # Stream the file with the new function that handles decompression
+                stream = stream_local_file(file_path, decompress=True)
                 
-            with gzip.open(file_path, 'rb') as f:
+                # Wrap the stream with progress tracking if needed
+                if progress_tracker:
+                    tracking_stream = ProgressTrackingStream(stream, progress_tracker)
+                    tracking_stream.file_path = file_path
+                    stream = tracking_stream
+                
                 track_validation_progress(file_path, progress_tracker, "Running validation")
-                results = validator.validate_stream(f, is_gzipped=True)
+                results = validator.validate_stream(stream, is_gzipped=True)
+                
+                # Make sure to close the stream if it has a close method
+                if hasattr(stream, 'close'):
+                    stream.close()
+            except Exception as e:
+                logger.error(f"Error streaming gzipped file {file_path}: {e}")
+                raise RuntimeError(f"Failed to process gzipped file: {str(e)}")
         else:
             track_validation_progress(file_path, progress_tracker, "Running validation")
             results = validator.validate_file(file_path)

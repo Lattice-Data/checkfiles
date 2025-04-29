@@ -193,56 +193,56 @@ class FastqValidator(BaseValidator):
             self.statistics.reset()
             self.mismatched_ids = {}
             
-            # Always read the entire content into memory
-            # This ensures we can use it for both validation and hash calculation
-            if hasattr(input_stream, 'read'):
-                content = input_stream.read()
-            else:
-                content = input_stream
-            
-            # Create two copies of the data
-            hash_stream_source = io.BytesIO(content)
-            
-            # Create hash calculating stream wrapper for hashes of compressed data
-            hash_stream, metadata = self.create_hash_calculating_stream(hash_stream_source, is_gzipped)
-            
-            # Read the hash stream to calculate hash values
-            while hash_stream.read(8192):
-                pass
+            # Check if the stream is readable/valid
+            if input_stream is None:
+                return self.format_validation_result(
+                    valid=False,
+                    errors={"stream_error": "Input stream is None"}
+                )
                 
-            # Get hash values from the stream
-            hash_stats = self.get_hash_values(hash_stream, metadata)
+            if not hasattr(input_stream, 'read'):
+                return self.format_validation_result(
+                    valid=False,
+                    errors={"stream_error": "Input stream does not have a read method"}
+                )
             
-            # If content is gzipped, we need to decompress it for validation
-            if is_gzipped:
-                try:
-                    # Decompress the content
-                    decompressed_content = gzip.decompress(content)
-                    validation_stream = io.BytesIO(decompressed_content)
-                except Exception as e:
-                    logger.error(f"Error decompressing content: {e}")
-                    return self.format_validation_result(
-                        valid=False,
-                        errors={"decompression_error": f"Failed to decompress gzipped content: {str(e)}"}
-                    )
-            else:
-                validation_stream = io.BytesIO(content)
+            # Directly validate the FASTQ format from the input stream without seeking
+            logger.debug("Starting FASTQ stream validation")
+            fastq_validation_result = self.validate_fastq_stream(input_stream, collect_stats=True)
+            logger.debug(f"FASTQ validation result: {fastq_validation_result.valid}")
             
-            # Use the separate validation stream for format validation
-            # Always collect statistics during validation
-            validation_result = self.validate_fastq_stream(validation_stream, collect_stats=True)
-            
-            if not validation_result.valid:
-                error_detail = validation_result.error_message
-                if validation_result.line_number is not None:
-                    error_detail += f" at line {validation_result.line_number}"
+            if not fastq_validation_result.valid:
+                error_detail = fastq_validation_result.error_message
+                if fastq_validation_result.line_number is not None:
+                    error_detail += f" at line {fastq_validation_result.line_number}"
                 return self.format_validation_result(
                     valid=False,
                     errors={"invalid_format": error_detail}
                 )
             
-            # Get statistics and metadata
+            # Get statistics collected during validation
             stats = self.statistics.get_statistics()
+            
+            # For streaming validation, especially with gzipped content,
+            # we can't calculate hashes of the original file without reading it twice
+            # So we'll note this limitation
+            if is_gzipped:
+                warnings["hash_calculation"] = "Hash values not available for streaming validation of gzipped content"
+                hash_stats = {
+                    "md5sum": "unavailable_for_streaming",
+                    "sha256": "unavailable_for_streaming",
+                    "crc32c": "unavailable_for_streaming",
+                    "file_size": -1
+                }
+            else:
+                # For uncompressed files, we could add hash calculation in the future
+                warnings["hash_calculation"] = "Hash values not calculated for streaming validation"
+                hash_stats = {
+                    "md5sum": "not_calculated",
+                    "sha256": "not_calculated", 
+                    "crc32c": "not_calculated",
+                    "file_size": stats.get("total_bytes", -1)
+                }
             
             # Add hash values to stats
             stats.update(hash_stats)
