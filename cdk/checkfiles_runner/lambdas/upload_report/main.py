@@ -38,9 +38,7 @@ def upload_report_to_slack(event, context):
             Parameters={
                 'commands': [
                     'cd /home/ubuntu/checkfiles',
-                    'echo "DEBUG: Checking for validation log file"',
-                    'ls -la /home/ubuntu/checkfiles',
-                    'if [ ! -f "validation_progress.log" ]; then echo "Log file not found, creating empty one"; echo "No validation results available" > validation_progress.log; fi',
+                    'if [ ! -f "validation_progress.log" ]; then echo "No validation results available" > validation_progress.log; fi',
                     'base64 -w 0 validation_progress.log'
                 ]
             }
