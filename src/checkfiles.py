@@ -11,6 +11,8 @@ import multiprocessing
 import logging
 import threading
 from typing import List, Dict, Any
+from urllib.parse import urljoin
+import requests
 
 # Configure logging
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -93,6 +95,75 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
             f.flush()
             os.fsync(f.fileno())  # Ensure data is written to disk
 
+def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any]]:
+    """Fetch files from backend using query and backend_uri.
+    
+    Args:
+        backend_uri: Base URI of the backend service
+        query: Query string for filtering files
+        
+    Returns:
+        List of file objects to validate
+    """
+    logger.info(f"Fetching files from backend using query: {query}")
+    
+    # Get authentication credentials from environment variables
+    portal_key = os.getenv('PORTAL_KEY')
+    portal_secret_key = os.getenv('PORTAL_SECRET_KEY')
+    
+    if not portal_key or not portal_secret_key:
+        logger.error("Missing authentication credentials. Please set PORTAL_KEY and PORTAL_SECRET_KEY environment variables.")
+        return []
+    
+    # Set up authentication
+    auth = (portal_key, portal_secret_key)
+    
+    # Construct the full query URL
+    query_url = urljoin(backend_uri, query.replace('report', 'search') + '&format=json&limit=all&field=accession')
+    
+    try:
+        # Make the request to the backend
+        response = requests.get(query_url, auth=auth)
+        response.raise_for_status()
+        
+        # Extract accessions from the response
+        accessions = [x['accession'] for x in response.json()['@graph']]
+        logger.info(f"Found {len(accessions)} files to validate")
+        
+        # Fetch full file objects for each accession
+        files_to_validate = []
+        for acc in accessions:
+            item_url = urljoin(backend_uri, acc + '/?frame=object')
+            file_response = requests.get(item_url, auth=auth)
+            
+            if not file_response.ok:
+                logger.error(f"Failed to fetch file object for {acc}")
+                continue
+                
+            file_json = file_response.json()
+            
+            # Check if file should be validated
+            if file_json.get('no_file_available'):
+                logger.info(f"Skipping {acc}: marked as no_file_available")
+                continue
+                
+            if not file_json.get('s3_uri'):
+                logger.info(f"Skipping {acc}: no URI available")
+                continue
+                
+            files_to_validate.append(file_json)
+            
+        return files_to_validate
+        
+    except requests.HTTPError as e:
+        logger.error(f"HTTP error while fetching files: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Error fetching files from backend: {e}")
+        return []
+
+
+
 def main():
     """Main entry point for checkfiles utility."""
     args = parse_arguments()
@@ -137,6 +208,15 @@ def main():
     # Get list of files to process
     local_files = []
     s3_files = []
+    backend_files = []
+    
+    # If backend_uri and query are provided, fetch files from backend
+    if args.backend_uri and args.query:
+        backend_files = fetch_files_from_backend(args.backend_uri, args.query)
+        for file_obj in backend_files:
+            if file_obj.get('s3_uri'):
+                s3_files.append(file_obj['s3_uri'])
+
     
     if args.local_file:
         raw_local_files = [f.strip() for f in args.local_file.split(',')]
