@@ -158,6 +158,21 @@ class ProgressTrackingStream:
             self._update_progress(len(data))
         return data
         
+    def readline(self, size=-1):
+        """Read a line from the stream and track progress.
+        
+        Args:
+            size: Maximum number of bytes to read, -1 for no limit
+            
+        Returns:
+            Binary data for the next line
+        """
+        data = self.stream.readline(size)
+        if data:
+            self.total_bytes += len(data)
+            self._update_progress(len(data))
+        return data
+        
     def _update_progress(self, bytes_read):
         """Update progress tracking.
         

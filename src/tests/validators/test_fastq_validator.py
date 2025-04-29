@@ -147,9 +147,11 @@ def test_validate_non_seekable_stream(valid_fastq_data):
                 
             return chunk
             
-        def readline(self):
+        def readline(self, size=-1):
             start = self.position
             while self.position < len(self.data):
+                if size != -1 and self.position - start >= size:
+                    break
                 if self.data[self.position:self.position+1] == b'\n':
                     self.position += 1
                     break
