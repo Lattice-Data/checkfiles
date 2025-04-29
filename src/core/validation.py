@@ -119,7 +119,7 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                 
                 # Wrap the stream with progress tracking if needed
                 if progress_tracker:
-                    tracking_stream = ProgressTrackingStream(stream, progress_tracker)
+                    tracking_stream = ProgressTrackingStream(stream, progress_tracker, update_interval_mb=100)
                     tracking_stream.file_path = file_path
                     stream = tracking_stream
                 
@@ -196,7 +196,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         track_validation_progress(s3_path, progress_tracker, "Stream established")
         
         # Wrap the stream with progress tracking
-        tracking_stream = ProgressTrackingStream(stream, progress_tracker)
+        tracking_stream = ProgressTrackingStream(stream, progress_tracker, update_interval_mb=100)
         # Store the file path for progress updates
         if progress_tracker:
             tracking_stream.file_path = s3_path

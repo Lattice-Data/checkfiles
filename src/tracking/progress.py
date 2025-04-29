@@ -111,12 +111,13 @@ class SimpleActivityTracker:
 class ProgressTrackingStream:
     """Stream wrapper that tracks reading progress for large file processing."""
     
-    def __init__(self, stream, tracker=None):
+    def __init__(self, stream, tracker=None, update_interval_mb=5):
         """Initialize a tracking stream.
         
         Args:
             stream: The underlying stream to read from
             tracker: Optional progress tracker to update
+            update_interval_mb: Progress update interval in megabytes (default: 5)
         """
         self.stream = stream
         self.tracker = tracker
@@ -124,6 +125,7 @@ class ProgressTrackingStream:
         self.total_bytes = 0
         self.last_update = 0
         self.update_count = 0
+        self.update_interval_bytes = update_interval_mb * 1024 * 1024  # Convert MB to bytes
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} Created tracking stream for file: {self.file_path}")
         
     def __iter__(self):
@@ -165,8 +167,8 @@ class ProgressTrackingStream:
         if not self.tracker:
             return
             
-        # Update progress every 1MB for much more frequent updates
-        if self.total_bytes - self.last_update >= 1*1024*1024:
+        # Update progress based on configured interval
+        if self.total_bytes - self.last_update >= self.update_interval_bytes:
             self.update_count += 1
             if self.file_path:
                 self.tracker.update_progress(
