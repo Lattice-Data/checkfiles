@@ -9,6 +9,7 @@ import os
 import concurrent.futures
 import multiprocessing
 import logging
+import threading
 from typing import List, Dict, Any
 
 # Configure logging
@@ -50,6 +51,55 @@ from src.tracking.progress import SimpleActivityTracker
 from src.utils.helpers import has_gz_extension, validate_gzip_format
 from src.path_translator import resolve_path, is_s3_uri
 
+# Create a lock for thread-safe writing to validation_progress.log
+validation_log_lock = threading.Lock()
+
+def write_result_to_progress_log(result: Dict[str, Any]) -> None:
+    """Write a validation result to the validation_progress.log file.
+    
+    Args:
+        result: The validation result dictionary
+    """
+    progress_log_path = os.path.join(os.getcwd(), 'validation_progress.log')
+    
+    # Format the result for the log
+    file_path = result.get('file_path', 'unknown')
+    if result.get('success', False):
+        validity = "Valid" if result.get('results', {}).get('valid', False) else "Invalid"
+        errors = result.get('results', {}).get('errors', {})
+        warnings = result.get('results', {}).get('warnings', {})
+        stats = result.get('results', {}).get('stats', {})
+        
+        # Format file details
+        details = []
+        if stats:
+            if 'file_size' in stats:
+                details.append(f"size={stats['file_size']}")
+            if 'md5sum' in stats:
+                details.append(f"md5={stats['md5sum']}")
+            if 'sha256' in stats:
+                details.append(f"sha256={stats['sha256']}")
+        
+        details_str = "\t".join(details)
+        error_str = "\t".join([f"{k}={v}" for k, v in errors.items()]) if errors else ""
+        warning_str = "\t".join([f"{k}={v}" for k, v in warnings.items()]) if warnings else ""
+        
+        log_line = f"{file_path}\t{validity}\t{details_str}"
+        if error_str:
+            log_line += f"\tErrors: {error_str}"
+        if warning_str:
+            log_line += f"\tWarnings: {warning_str}"
+    else:
+        error = result.get('error', 'Unknown error')
+        log_line = f"{file_path}\tFailed\tError: {error}"
+    
+    # Write to the progress log in a thread-safe manner
+    with validation_log_lock:
+        with open(progress_log_path, 'a') as f:
+            f.write(f"{log_line}\n")
+            f.flush()
+            os.fsync(f.fileno())  # Ensure data is written to disk
+
 def main():
     """Main entry point for checkfiles utility."""
     args = parse_arguments()
@@ -67,6 +117,12 @@ def main():
         global logger
         logger = logging.getLogger(__name__)
         logger.debug(f"Logging redirected to: {args.log_file}")
+    
+    # Initialize the validation_progress.log file with a header
+    progress_log_path = os.path.join(os.getcwd(), 'validation_progress.log')
+    with open(progress_log_path, 'w') as f:
+        f.write("# Validation Progress Log\n")
+        f.write("# File\tStatus\tDetails\n")
     
     # Check if file format is supported
     if not args.file_format:
@@ -206,13 +262,18 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
             try:
                 result = future.result()
                 all_results.append(result)
+                # Write each result to validation_progress.log as it completes
+                write_result_to_progress_log(result)
             except Exception as e:
                 logger.error(f"Error processing file: {str(e)}")
-                all_results.append({
+                error_result = {
                     "file_path": "unknown",
                     "error": str(e),
                     "success": False
-                })
+                }
+                all_results.append(error_result)
+                # Write error to validation_progress.log
+                write_result_to_progress_log(error_result)
     
     return all_results
 
