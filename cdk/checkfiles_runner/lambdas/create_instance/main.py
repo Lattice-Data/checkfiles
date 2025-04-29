@@ -69,7 +69,7 @@ def create_checkfiles_instance(event, context):
     user_data = f'''#!/bin/bash
     set -ex  # Enable debugging and exit on error
     
-    echo "==== Starting checkfiles setup ===="
+    echo "==== Starting checkfiles runtime setup ===="
     cd /home/ubuntu
     
     # Clone repository with specific tag
@@ -77,35 +77,11 @@ def create_checkfiles_instance(event, context):
     git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
     cd checkfiles
     
-    # Create and configure virtual environment
-    echo "==== Setting up Python environment ===="
-    python3 -m venv venv
-    source venv/bin/activate
-    
-    # Install dependencies with verbose output
-    echo "==== Installing dependencies ===="
-    pip install --upgrade pip
-    pip install -r src/requirements.txt -v
-    
-    # Install package in development mode to ensure proper module paths
-    echo "==== Installing checkfiles package ===="
-    pip install -e . -v
-    
     # Create .env file with environment variables
     echo "==== Configuring environment variables ===="
     echo 'export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH' > /home/ubuntu/.env_checkfiles
     echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
     echo 'source /home/ubuntu/.env_checkfiles' >> /home/ubuntu/.bashrc
-    
-    # Verify installation
-    echo "==== Verifying installation ===="
-    cd /home/ubuntu/checkfiles
-    source venv/bin/activate
-    python -c "import sys; print('Python path:'); print('\\n'.join(sys.path))"
-    
-    # Debug module structure
-    echo "==== Checking module structure ===="
-    find /home/ubuntu/checkfiles -name "*.py" | grep -i validators
     
     # Set proper permissions
     echo "==== Setting permissions ===="
@@ -113,7 +89,7 @@ def create_checkfiles_instance(event, context):
     chown -R ubuntu:ubuntu checkfiles/
     chown ubuntu:ubuntu /home/ubuntu/.env_checkfiles
     
-    echo "==== Setup complete ===="
+    echo "==== Runtime setup complete ===="
     '''
 
     ec2 = boto3.resource('ec2')
