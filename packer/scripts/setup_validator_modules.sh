@@ -176,6 +176,19 @@ def calculate_file_hashes(file_path: str) -> Dict[str, str]:
             'sha256': ''
         }
 
+def has_gz_extension(file_path: str) -> bool:
+    """Check if a file has a gzip extension.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        True if the file has a gzip extension, False otherwise
+    """
+    extensions = ['.gz', '.gzip', '.bgz', '.bgzip']
+    lower_path = file_path.lower()
+    return any(lower_path.endswith(ext) for ext in extensions)
+
 def is_gzipped(file_path: str) -> bool:
     """Check if a file is gzipped by examining its header.
     
@@ -502,6 +515,9 @@ except ImportError as e:
                         'def calculate_file_hashes(path):\n'
                         '    """Calculate hashes."""\n'
                         '    return {"md5sum": "dummy", "sha256": "dummy"}\n\n'
+                        'def has_gz_extension(path):\n'
+                        '    """Check if file has a gzip extension."""\n'
+                        '    return path.lower().endswith(".gz")\n\n'
                         'def is_gzipped(path):\n'
                         '    """Check if gzipped."""\n'
                         '    return False\n\n'
