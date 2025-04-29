@@ -6,11 +6,18 @@ and conform to expected standards.
 """
 
 import os
-import h5py
 import logging
 from typing import Dict, Any, BinaryIO, Optional
 
 from src.validators.base import BaseValidator
+
+# Try to import h5py but handle if it's not available
+try:
+    import h5py
+    H5PY_AVAILABLE = True
+except (ImportError, ValueError):
+    H5PY_AVAILABLE = False
+    logging.warning("h5py module not available. HDF5 validation will be limited.")
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +32,9 @@ class Hdf5Validator(BaseValidator):
     def __init__(self):
         """Initialize the HDF5 validator."""
         super().__init__()
+        self.has_h5py = H5PY_AVAILABLE
+        if not self.has_h5py:
+            self.logger.warning("h5py not available, HDF5 validation capabilities will be limited")
     
     def validate_file(self, file_path: str) -> Dict[str, Any]:
         """
@@ -51,6 +61,19 @@ class Hdf5Validator(BaseValidator):
             return self.format_validation_result(
                 valid=False,
                 errors={"empty_file": "HDF5 file is empty"}
+            )
+        
+        # If h5py is not available, return basic file stats only
+        if not self.has_h5py:
+            warnings = {"h5py_missing": "h5py module not available for full validation"}
+            stats = {
+                "file_size": os.path.getsize(file_path),
+                "file_exists": True,
+            }
+            return self.format_validation_result(
+                valid=True,
+                warnings=warnings,
+                stats=stats
             )
         
         errors = {}
@@ -102,12 +125,50 @@ class Hdf5Validator(BaseValidator):
             - stats (dict): Data statistics
         """
         import io
-        import tempfile
         import hashlib
         
         errors = {}
         warnings = {}
         stats = {}
+        
+        # If h5py is not available, return basic stream stats only
+        if not self.has_h5py:
+            warnings = {"h5py_missing": "h5py module not available for full validation"}
+            
+            # Create an in-memory buffer to store the data
+            buffer = io.BytesIO()
+            
+            # Set up hash calculators for data
+            md5_hash = hashlib.md5()
+            sha256_hash = hashlib.sha256()
+            
+            # Read the stream in chunks and update hash calculators
+            total_bytes = 0
+            chunk_size = 262144  # 256KB chunks
+            
+            while True:
+                chunk = input_stream.read(chunk_size)
+                if not chunk:
+                    break
+                
+                # Update hash calculators
+                md5_hash.update(chunk)
+                sha256_hash.update(chunk)
+                
+                # Write to in-memory buffer
+                buffer.write(chunk)
+                total_bytes += len(chunk)
+            
+            # Add hash values to stats
+            stats["md5sum"] = md5_hash.hexdigest()
+            stats["sha256"] = sha256_hash.hexdigest()
+            stats["file_size"] = total_bytes
+            
+            return self.format_validation_result(
+                valid=True,
+                warnings=warnings,
+                stats=stats
+            )
         
         # Set up hash calculators for data
         md5_hash = hashlib.md5()
@@ -172,6 +233,9 @@ class Hdf5Validator(BaseValidator):
     
     def _count_groups(self, h5file) -> int:
         """Count the number of groups in an HDF5 file."""
+        if not self.has_h5py:
+            return 0
+            
         count = 0
         
         def visitor_func(name, obj):
@@ -184,6 +248,9 @@ class Hdf5Validator(BaseValidator):
     
     def _count_datasets(self, h5file) -> int:
         """Count the number of datasets in an HDF5 file."""
+        if not self.has_h5py:
+            return 0
+            
         count = 0
         
         def visitor_func(name, obj):
@@ -196,6 +263,9 @@ class Hdf5Validator(BaseValidator):
     
     def _count_attributes(self, h5file) -> int:
         """Count the total number of attributes in an HDF5 file."""
+        if not self.has_h5py:
+            return 0
+            
         count = len(h5file.attrs)
         
         def visitor_func(name, obj):

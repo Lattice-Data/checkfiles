@@ -1,9 +1,11 @@
 #!/bin/bash
 # Goofys mount script for Checkfiles.
 #
-# This script sets up the Goofys mount point for S3 access.
-# It creates the mount directory if it doesn't exist and
+# This script ONLY sets up the Goofys mount points for S3 access.
+# It creates the mount directories if they don't exist and
 # ensures proper permissions.
+# 
+# FUSE installation and configuration is handled by install_goofys_and_validatefiles.sh
 #
 # Usage:
 #   sudo ./goofys_mount.sh
@@ -25,20 +27,12 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-echo "Setting up Goofys mount..."
+echo "Setting up Goofys mount points..."
 
-# Ensure fuse is properly configured
-echo "Configuring fuse..."
-if [ ! -f "/etc/fuse.conf" ] || ! grep -q "user_allow_other" /etc/fuse.conf; then
-    echo "Creating/updating fuse.conf with user_allow_other option..."
-    echo "user_allow_other" > /etc/fuse.conf
-    chmod 644 /etc/fuse.conf
-fi
-
-# Try to load fuse module
-if ! lsmod | grep -q fuse; then
-    echo "Attempting to load fuse module..."
-    modprobe fuse 2>/dev/null || echo "WARNING: Could not load fuse module, but continuing..."
+# Verify goofys is installed
+if ! command -v goofys &> /dev/null; then
+    echo "ERROR: goofys not installed. Run install_goofys_and_validatefiles.sh first."
+    exit 1
 fi
 
 # Create mount directory if it doesn't exist
@@ -107,5 +101,5 @@ done
 echo "Testing mount functionality..."
 mount -a -t fuse || echo "WARNING: Some mounts may have failed, but continuing..."
 
-echo "Goofys mount setup completed."
+echo "Goofys mount points setup completed."
 exit 0

@@ -50,7 +50,9 @@ pip3 install --no-cache-dir \
     mypy==1.5.1 \
     types-requests==2.31.0 \
     types-boto3==1.0.2 \
-    crcmod==1.7
+    numpy==1.24.3 \
+    crcmod==1.7 \
+    h5py==3.10.0
 
 # Create src package directory if it doesn't exist
 echo "Setting up package directories..."

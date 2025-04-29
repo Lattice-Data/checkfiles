@@ -1,14 +1,29 @@
 #!/bin/bash
 set -ex
 
+# Consolidated FUSE configuration script for Checkfiles
+# This is now the central place for all FUSE-related setup
+echo "=== Installing and configuring FUSE components ==="
+
 # Install fuse package and dependencies
 echo "Installing fuse package and dependencies..."
 sudo apt-get update
-sudo apt-get install -y fuse libfuse2
+sudo apt-get install -y fuse libfuse2 libfuse-dev
 
 # Create fuse.conf file with user_allow_other option
 echo "Configuring fuse..."
 sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'
+sudo chmod 644 /etc/fuse.conf
+
+# Ensure fuse module is loaded
+if ! lsmod | grep -q fuse; then
+    echo "Loading fuse kernel module..."
+    sudo modprobe fuse
+    
+    if ! lsmod | grep -q fuse; then
+        echo "WARNING: Could not load fuse kernel module, but continuing..."
+    fi
+fi
 
 # Verify fuse installation using multiple methods
 echo "Verifying fuse installation..."
@@ -18,6 +33,13 @@ if ! dpkg -l | grep -q 'fuse\s'; then
         echo "ERROR: Failed to verify fuse installation"
         exit 1
     fi
+fi
+
+# Create necessary fuse directories
+echo "Creating necessary fuse directories..."
+if [ ! -d "/etc/checkfiles" ]; then
+    sudo mkdir -p /etc/checkfiles
+    sudo chmod 755 /etc/checkfiles
 fi
 
 # Install goofys
@@ -38,7 +60,4 @@ echo "Verifying installations..."
 which goofys || { echo "goofys installation failed"; exit 1; }
 which validatefiles || { echo "validatefiles installation failed"; exit 1; }
 
-echo "Testing goofys functionality..."
-modprobe fuse || echo "WARNING: Could not load fuse kernel module, but continuing..."
-
-echo "Installation completed successfully."
+echo "FUSE configuration and tool installation completed successfully."
