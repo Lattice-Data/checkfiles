@@ -49,7 +49,8 @@ pip3 install --no-cache-dir \
     ruff==0.0.282 \
     mypy==1.5.1 \
     types-requests==2.31.0 \
-    types-boto3==1.0.2
+    types-boto3==1.0.2 \
+    crcmod==1.7
 
 # Create src package directory if it doesn't exist
 echo "Setting up package directories..."
