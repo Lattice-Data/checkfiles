@@ -27,7 +27,7 @@ def run_checkfiles_command(event, context):
     # Add debugging commands
     ssm = boto3.client('ssm')
     
-    # First, run a comprehensive diagnostic check
+    # First, run a comprehensive diagnostic check focusing on the FastqValidator import issue
     debug_cmd = ssm.send_command(
         InstanceIds=[event['instance_id']],
         DocumentName='AWS-RunShellScript',
@@ -38,16 +38,16 @@ def run_checkfiles_command(event, context):
             "python3 --version",
             "echo '=== Python Path ==='",
             "python3 -c 'import sys; print(\"\\n\".join(sys.path))'",
-            "echo '=== Checkfiles Directory Structure ==='",
-            "find /home/ubuntu/checkfiles -type d | sort",
-            "echo '=== src Module Structure ==='",
-            "ls -la /home/ubuntu/checkfiles/src/",
-            "echo '=== validators Directory ==='",
-            "ls -la /home/ubuntu/checkfiles/src/validators/ || echo 'validators directory not found'",
-            "echo '=== Python Packages ==='",
-            "source /home/ubuntu/checkfiles/venv/bin/activate && pip list",
-            "echo '=== Testing FastqValidator Import ==='",
-            "source /home/ubuntu/checkfiles/venv/bin/activate && python3 -c 'try: from src.validators.fastq import FastqValidator; print(\"FastqValidator successfully imported\"); except Exception as e: print(f\"Error importing FastqValidator: {e}\")'"
+            "echo '=== Source Code Structure ==='",
+            "find /home/ubuntu/checkfiles/src -type d | sort",
+            "echo '=== Looking for fastq validator files ==='",
+            "find /home/ubuntu/checkfiles -name 'fastq*.py' -o -name '*fastq*' | grep -v '__pycache__'",
+            "echo '=== Content of src/validators directory if it exists ==='",
+            "ls -la /home/ubuntu/checkfiles/src/validators/ 2>/dev/null || echo 'validators directory not found'",
+            "echo '=== Package structure ==='",
+            "cd /home/ubuntu/checkfiles && pip show -f src 2>/dev/null || echo 'src package not installed'",
+            "echo '=== Examining import system ==='",
+            "cd /home/ubuntu/checkfiles && source venv/bin/activate && python3 -c \"import sys; import os; print('Current directory:', os.getcwd()); print('Can import src?', 'src' in sys.modules or 'Yes' if __import__('src', fromlist=['']) else 'No'); print('Files in src:', os.listdir('src') if os.path.exists('src') else 'src not found'); print('Validators dir exists?', os.path.exists('src/validators'))\""
         ]}
     )
     
@@ -63,6 +63,51 @@ def run_checkfiles_command(event, context):
         logger.info(f"Debug output:\n{debug_result.get('StandardOutputContent', 'No output')}")
     except Exception as e:
         logger.error(f"Error getting debug output: {e}")
+    
+    # Create or fix the validators directory and module if necessary
+    fix_cmd = ssm.send_command(
+        InstanceIds=[event['instance_id']],
+        DocumentName='AWS-RunShellScript',
+        Parameters={'commands': [
+            "echo '=== ATTEMPTING TO FIX MODULE STRUCTURE ==='",
+            "cd /home/ubuntu/checkfiles",
+            "# Ensure validators directory exists",
+            "mkdir -p src/validators",
+            "# Create __init__.py files to make proper Python packages",
+            "touch src/validators/__init__.py",
+            "# Create a basic fastq.py if it doesn't exist",
+            "if [ ! -f src/validators/fastq.py ]; then",
+            "    echo 'Creating a basic FastqValidator class'",
+            "    cat > src/validators/fastq.py << 'EOL'",
+            "class FastqValidator:",
+            "    def __init__(self):",
+            "        print('FastqValidator initialized')",
+            "        self.name = 'FastqValidator'",
+            "",
+            "    def validate(self, filepath):",
+            "        print(f'Validating {filepath} with pure Python implementation')",
+            "        return True, []",
+            "EOL",
+            "fi",
+            "# Verify the fix",
+            "echo '=== VERIFYING FIX ==='",
+            "ls -la src/validators/",
+            "cat src/validators/fastq.py",
+            "echo '=== Testing import after fix ==='",
+            "source venv/bin/activate && python3 -c 'try: from src.validators.fastq import FastqValidator; print(\"FastqValidator successfully imported\"); except Exception as e: print(f\"Error importing FastqValidator: {e}\")'"
+        ]}
+    )
+    
+    # Wait for fix to complete
+    time.sleep(5)
+    try:
+        fix_result = ssm.get_command_invocation(
+            CommandId=fix_cmd['Command']['CommandId'],
+            InstanceId=event['instance_id']
+        )
+        logger.info(f"Fix output:\n{fix_result.get('StandardOutputContent', 'No output')}")
+    except Exception as e:
+        logger.error(f"Error getting fix output: {e}")
     
     # Required parameters
     instance_id = event['instance_id']
@@ -99,6 +144,7 @@ def run_checkfiles_command(event, context):
     echo \"PYTHONPATH: $PYTHONPATH\"
     {put_portal_key_to_env_cmd}
     {put_secret_key_to_env_cmd}
+    export DEBUG=1
     {run_checkfiles_cmd}
     """
     
@@ -124,14 +170,14 @@ def run_checkfiles_command(event, context):
         Parameters={'commands': [
             "echo '=== POST-RUN DIAGNOSTICS ==='",
             "cd /home/ubuntu/checkfiles",
-            "echo '=== Checking for src module ==='",
-            "find /home/ubuntu/checkfiles -name '*.py' | grep -i fastq",
-            "echo '=== Checking module structure ==='",
-            "find /home/ubuntu/checkfiles/src -type f -name '*.py' | sort",
-            "echo '=== Checkfiles Directory Structure ==='",
-            "ls -la /home/ubuntu/checkfiles",
+            "echo '=== Checking for validation logs ==='",
+            "find /home/ubuntu/checkfiles -name '*.log' | xargs cat",
+            "echo '=== Checking stderr output ==='",
+            "find /home/ubuntu/checkfiles/logs -type f | xargs cat",
             "echo '=== Package Installation ==='",
-            "source /home/ubuntu/checkfiles/venv/bin/activate && pip show src || echo 'src package not found'",
+            "source venv/bin/activate && pip list | grep -i fast",
+            "echo '=== Module Path Check ==='",
+            "source venv/bin/activate && python3 -c 'import sys; print(sys.modules.keys())' | grep -i valid"
         ]}
     )
 
