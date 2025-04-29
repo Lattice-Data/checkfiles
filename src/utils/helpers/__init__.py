@@ -1,5 +1,8 @@
 """
-Utils helpers package.
+Helper utilities for file operations and S3 access.
+
+This module consolidates file operation helpers from various submodules
+to provide a consistent interface.
 """
 
 import os
@@ -9,7 +12,9 @@ import subprocess
 import shlex
 from typing import Optional, BinaryIO
 
-from .file_operations import has_gz_extension, validate_gzip_format
+# Import specific functions from submodules 
+from src.utils.helpers.file_operations import has_gz_extension, validate_gzip_format
+from src.utils.helpers.streams import stream_local_file, stream_s3_file
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +107,10 @@ def stream_s3_file(s3_path: str, decompress: Optional[bool] = None) -> BinaryIO:
     
     return process.stdout
 
+# Export all these functions at the module level
 __all__ = [
-    'has_gz_extension',
-    'validate_gzip_format',
-    'stream_s3_file',
-    'stream_local_file',
+    "has_gz_extension",
+    "validate_gzip_format", 
+    "stream_local_file",
+    "stream_s3_file"
 ] 
