@@ -37,7 +37,9 @@ def upload_report_to_slack(event, context):
             DocumentName='AWS-RunShellScript',
             Parameters={
                 'commands': [
-                    'cd /home/ubuntu/checkfiles',
+                    'source /etc/profile.d/checkfiles.sh',  # Source the environment variables
+                    'echo "CHECKFILES_LOG_DIR is set to: $CHECKFILES_LOG_DIR"',  # Debug output
+                    'cd $CHECKFILES_LOG_DIR',
                     'if [ ! -f "validation_progress.log" ]; then echo "No validation results available" > validation_progress.log; fi',
                     'base64 -w 0 validation_progress.log'
                 ]
