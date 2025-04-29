@@ -239,6 +239,26 @@ def display_summary(all_results: List[Dict[str, Any]]) -> None:
         if result["success"]:
             validity = "Valid" if result["results"]["valid"] else "Invalid"
             print(f"{result['file_path']}: {validity}")
+            
+            # Print hash values if they exist
+            if result["results"].get("stats"):
+                stats = result["results"]["stats"]
+                # Print file sizes
+                if "file_size" in stats:
+                    print(f"  File size: {stats['file_size']} bytes")
+                if "content_size" in stats:
+                    print(f"  Uncompressed size: {stats['content_size']} bytes")
+                
+                # Print hash values
+                if "md5sum" in stats:
+                    print(f"  MD5: {stats['md5sum']}")
+                if "sha256" in stats:
+                    print(f"  SHA256: {stats['sha256']}")
+                if "crc32c" in stats:
+                    print(f"  CRC32C: {stats['crc32c']}")
+                if "content_md5sum" in stats:
+                    print(f"  Content MD5: {stats['content_md5sum']}")
+            
             if not result["results"]["valid"]:
                 print(f"  Errors: {result['results'].get('errors', {})}")
             if result["results"].get("warnings"):

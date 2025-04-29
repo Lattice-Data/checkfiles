@@ -109,32 +109,26 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         # Check if local file is gzipped
         is_gzipped = has_gz_extension(file_path)
         
-        if is_gzipped:
-            track_validation_progress(file_path, progress_tracker, "Decompressing")
-            
-            # Use streaming decompression to avoid loading entire file into memory
-            try:
-                # Stream the file with the new function that handles decompression
-                stream = stream_local_file(file_path, decompress=True)
-                
+        try:
+            # For both compressed and uncompressed files, open the file directly
+            # The validator will handle decompression internally if needed
+            with open(file_path, 'rb') as file_stream:
                 # Wrap the stream with progress tracking if needed
                 if progress_tracker:
-                    tracking_stream = ProgressTrackingStream(stream, progress_tracker, update_interval_mb=100)
+                    tracking_stream = ProgressTrackingStream(file_stream, progress_tracker, update_interval_mb=100)
                     tracking_stream.file_path = file_path
                     stream = tracking_stream
+                else:
+                    stream = file_stream
                 
                 track_validation_progress(file_path, progress_tracker, "Running validation")
-                results = validator.validate_stream(stream, is_gzipped=True)
                 
-                # Make sure to close the stream if it has a close method
-                if hasattr(stream, 'close'):
-                    stream.close()
-            except Exception as e:
-                logger.error(f"Error streaming gzipped file {file_path}: {e}")
-                raise RuntimeError(f"Failed to process gzipped file: {str(e)}")
-        else:
-            track_validation_progress(file_path, progress_tracker, "Running validation")
-            results = validator.validate_file(file_path)
+                # Let the validator know if the file is gzipped
+                results = validator.validate_stream(stream, is_gzipped=is_gzipped)
+                
+        except Exception as e:
+            logger.error(f"Error processing file {file_path}: {e}")
+            raise RuntimeError(f"Failed to process file: {str(e)}")
             
         track_validation_progress(file_path, progress_tracker, "Validation complete", True, results)
             
@@ -190,8 +184,9 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         # Determine if file is gzipped
         is_gzipped = has_gz_extension(s3_path)
         
-        # Stream from S3
-        stream = stream_s3_file(s3_path, decompress=is_gzipped)
+        # Stream from S3 - but don't decompress, let the validator handle it
+        # This ensures our hash calculations work properly
+        stream = stream_s3_file(s3_path, decompress=False)  # Changed to false
         
         track_validation_progress(s3_path, progress_tracker, "Stream established")
         

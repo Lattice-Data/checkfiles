@@ -97,6 +97,96 @@ class HashCalculatingStream(io.BufferedReader):
         """
         return self.total_bytes
 
+class GzipHashCalculatingStream(HashCalculatingStream):
+    """
+    Stream wrapper that calculates hash digests for both compressed and uncompressed content.
+    For gzipped files, this calculates both regular file hashes and the content_md5sum hash
+    of the decompressed content in a single pass, without storing the entire decompressed file.
+    """
+    
+    def __init__(self, stream: BinaryIO, hash_calculators: List[Tuple[str, Callable]]):
+        """
+        Initialize gzip stream wrapper with hash calculators.
+        
+        Args:
+            stream: The input stream to read from
+            hash_calculators: List of tuples containing (name, calculator_object)
+                              where calculator_object has an update() method
+        """
+        super().__init__(stream, hash_calculators)
+        
+        # Initialize decompressor for streaming decompression
+        self.decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)  # This magic number enables gzip format
+        
+        # Initialize content MD5 calculator
+        self.content_md5_calc = hashlib.md5()
+        self.content_size = 0
+        
+        # Flag to track decompressor state
+        self.decompressor_finished = False
+    
+    def read(self, size=-1):
+        """
+        Read from stream, update all hash calculators, and decompress for content_md5sum.
+        
+        Args:
+            size: Number of bytes to read
+            
+        Returns:
+            Bytes read from the stream
+        """
+        data = super().read(size)
+        
+        if data:
+            try:
+                # Decompress data and update content MD5 hash
+                decompressed = self.decompressor.decompress(data)
+                if decompressed:
+                    self.content_md5_calc.update(decompressed)
+                    self.content_size += len(decompressed)
+            except Exception as e:
+                logger.error(f"Error decompressing data: {e}")
+        elif not self.decompressor_finished:
+            # End of stream but decompressor may have remaining data
+            self._flush_decompressor()
+            self.decompressor_finished = True
+        
+        return data
+    
+    def _flush_decompressor(self):
+        """Process any remaining data in the decompressor."""
+        try:
+            if hasattr(self.decompressor, 'flush'):
+                remaining = self.decompressor.flush()
+                if remaining:
+                    self.content_md5_calc.update(remaining)
+                    self.content_size += len(remaining)
+        except Exception as e:
+            logger.error(f"Error flushing decompressor: {e}")
+    
+    def get_content_md5sum(self) -> str:
+        """
+        Get the MD5 hash digest of the decompressed content.
+        
+        Returns:
+            Hexadecimal digest of content MD5
+        """
+        # Ensure we've processed any remaining decompressed data
+        if not self.decompressor_finished:
+            self._flush_decompressor()
+            self.decompressor_finished = True
+            
+        return self.content_md5_calc.hexdigest()
+    
+    def get_content_size(self) -> int:
+        """
+        Get the total uncompressed bytes.
+        
+        Returns:
+            Total uncompressed bytes read from the stream
+        """
+        return self.content_size
+
 class BaseValidator:
     """Base class for all file validators."""
     
@@ -159,15 +249,15 @@ class BaseValidator:
             ('crc32c', crc32c_func)
         ]
         
-        # Create hash calculating stream
-        hash_stream = HashCalculatingStream(stream, hash_calculators)
-        
-        # Initialize metadata
+        # Create appropriate hash calculating stream
         metadata = {}
-        
-        # If the file is gzipped, calculate content_md5sum
         if is_gzipped:
-            metadata['content_md5sum'] = self._calculate_content_md5sum(stream)
+            # Use the specialized GzipHashCalculatingStream for gzipped files
+            # This will calculate both compressed file hashes and content_md5sum
+            hash_stream = GzipHashCalculatingStream(stream, hash_calculators)
+        else:
+            # Use regular HashCalculatingStream for non-gzipped files
+            hash_stream = HashCalculatingStream(stream, hash_calculators)
         
         return hash_stream, metadata
     
@@ -175,8 +265,8 @@ class BaseValidator:
         """
         Calculate content_md5sum for a gzipped stream.
         
-        This function calculates the MD5 of the decompressed content without 
-        actually downloading the entire file.
+        This method is deprecated and kept for backward compatibility only.
+        Please use GzipHashCalculatingStream for efficient content_md5sum calculation.
         
         Args:
             stream: Binary stream containing gzipped data
@@ -184,6 +274,8 @@ class BaseValidator:
         Returns:
             The content_md5sum as a hexadecimal string
         """
+        logger.warning("_calculate_content_md5sum is deprecated, use GzipHashCalculatingStream instead")
+        
         try:
             # Store the current position
             if hasattr(stream, 'tell'):
@@ -274,6 +366,11 @@ class BaseValidator:
                 stats[hash_name] = digest.lower()
             else:
                 stats[hash_name] = digest
+        
+        # Add content_md5sum and content_size for gzipped files
+        if isinstance(hash_stream, GzipHashCalculatingStream):
+            stats['content_md5sum'] = hash_stream.get_content_md5sum()
+            stats['content_size'] = hash_stream.get_content_size()
         
         # Add additional metadata if provided
         if metadata:
