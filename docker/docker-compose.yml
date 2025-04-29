@@ -18,6 +18,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - HOST_HOME=${HOME}
       - CHECKFILES_LOG_DIR=/app/logs
+      - BACKEND_URI=${BACKEND_URI:-}
+      - QUERY=${QUERY:-}
     deploy:
       resources:
         limits:
@@ -30,7 +32,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
-    command: ["-f", "fastq", "-s3", "s3://submissions-czi114liv/macparland_2024/HCA_Ped_data/C115/C115_bamtofastq_S1_L007_I1_004.fastq.gz", "-d"]
+    command: ["-f", "fastq", "-s3", "s3://submissions-czi114liv/macparland_2024/HCA_Ped_data/C115/C115_bamtofastq_S1_L007_I1_004.fastq.gz", "-d", "--backend-uri", "${BACKEND_URI:-}", "--query", "${QUERY:-}"]
     labels:
       - "app=checkfiles"
       - "component=validator"
@@ -49,7 +51,9 @@ services:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - HOST_HOME=${HOME}
-    command: ["-f", "fastq", "-l", "/app/src/tests/data/fastq/invalid/mismatched_ids.fastq", "-d"]
+      - BACKEND_URI=${BACKEND_URI:-}
+      - QUERY=${QUERY:-}
+    command: ["-f", "fastq", "-l", "/app/src/tests/data/fastq/invalid/mismatched_ids.fastq", "-d", "--backend-uri", "${BACKEND_URI:-}", "--query", "${QUERY:-}"]
     labels:
       - "app=checkfiles"
       - "component=test"
@@ -64,6 +68,8 @@ services:
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-west-2}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - BACKEND_URI=${BACKEND_URI:-}
+      - QUERY=${QUERY:-}
     command: ["aws", "sts", "get-caller-identity"]
     entrypoint: ["aws"]
     labels:

@@ -43,5 +43,9 @@ def parse_arguments() -> argparse.Namespace:
                         help='Suppress progress indicators and only show final results')
     parser.add_argument('--log-file', 
                         help='Path to log file (default: ./logs/checkfiles_debug.log)')
+    parser.add_argument('--backend-uri',
+                        help='Backend URI for API calls')
+    parser.add_argument('--query',
+                        help='Query string for filtering files')
     
     return parser.parse_args() 
