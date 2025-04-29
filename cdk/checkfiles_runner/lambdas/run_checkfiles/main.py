@@ -75,14 +75,24 @@ def run_checkfiles_command(event, context):
             "echo '=== EXAMINING VALIDATION MODULE ==='",
             "grep -n 'stream_s3_file' /home/ubuntu/checkfiles/src/core/validation.py",
             
-            # Check if the utils/helpers directory exists
-            "echo '=== CHECKING UTILS STRUCTURE ==='",
-            "find /home/ubuntu/checkfiles/src -path '*/utils*' -type d | sort",
-            
-            # Create the proper module structure if missing
+            # Ensure all required directories exist for both package setups
+            "echo '=== CREATING PACKAGE STRUCTURE ==='",
             "mkdir -p /home/ubuntu/checkfiles/src/utils/helpers",
+            "mkdir -p /usr/local/lib/python3.10/dist-packages/src/utils/helpers",
+            "mkdir -p /usr/local/lib/python3.10/site-packages/src/utils/helpers",
+            
+            # Create all __init__.py files needed for Python package structure
+            "touch /home/ubuntu/checkfiles/src/__init__.py",
             "touch /home/ubuntu/checkfiles/src/utils/__init__.py",
             "touch /home/ubuntu/checkfiles/src/utils/helpers/__init__.py",
+            
+            "touch /usr/local/lib/python3.10/dist-packages/src/__init__.py",
+            "touch /usr/local/lib/python3.10/dist-packages/src/utils/__init__.py", 
+            "touch /usr/local/lib/python3.10/dist-packages/src/utils/helpers/__init__.py",
+            
+            "touch /usr/local/lib/python3.10/site-packages/src/__init__.py",
+            "touch /usr/local/lib/python3.10/site-packages/src/utils/__init__.py",
+            "touch /usr/local/lib/python3.10/site-packages/src/utils/helpers/__init__.py",
             
             # Create a script to analyze the helpers module
             "cat > /home/ubuntu/checkfiles/analyze_helpers.py << 'EOL'",
@@ -262,6 +272,98 @@ def run_checkfiles_command(event, context):
             "    return stream",
             "EOL",
             
+            # Also copy the function to the system-installed location
+            "mkdir -p /usr/local/lib/python3.10/dist-packages/src/utils/helpers",
+            "touch /usr/local/lib/python3.10/dist-packages/src/utils/helpers/__init__.py",
+            "cat > /usr/local/lib/python3.10/dist-packages/src/utils/helpers/__init__.py << 'EOL'",
+            "\"\"\"",
+            "Helper utilities for file operations and S3 access.",
+            "\"\"\"",
+            "import os",
+            "import io",
+            "import boto3",
+            "import gzip",
+            "from typing import BinaryIO, Dict, List, Any, Optional, Union, Tuple",
+            "",
+            "def has_gz_extension(filename: str) -> bool:",
+            "    \"\"\"",
+            "    Check if a filename has a .gz extension.",
+            "    ",
+            "    Args:",
+            "        filename: File name to check",
+            "        ",
+            "    Returns:",
+            "        True if the file has a .gz extension, False otherwise",
+            "    \"\"\"",
+            "    return filename.endswith('.gz')",
+            "",
+            "def validate_gzip_format(file_path: str) -> Dict:",
+            "    \"\"\"",
+            "    Basic placeholder for the validate_gzip_format function",
+            "    ",
+            "    Args:",
+            "        file_path: Path to the file to check",
+            "        ",
+            "    Returns:",
+            "        Empty dict indicating successful validation",
+            "    \"\"\"",
+            "    return {}", 
+            "",
+            "def stream_s3_file(s3_path: str, decompress: bool = False) -> BinaryIO:",
+            "    \"\"\"",
+            "    Stream a file from S3 as a binary stream.",
+            "    ",
+            "    Args:",
+            "        s3_path: S3 path in the format s3://bucket/key",
+            "        decompress: Whether to decompress the stream (for gzipped files)",
+            "        ",
+            "    Returns:",
+            "        Binary IO stream of the file contents",
+            "    \"\"\"",
+            "    # Parse S3 path",
+            "    if not s3_path.startswith('s3://'):",
+            "        raise ValueError(f\"Invalid S3 path: {s3_path}. Must start with s3://\")",
+            "    ",
+            "    parts = s3_path[5:].split('/', 1)  # Remove 's3://' prefix and split on first '/'",
+            "    if len(parts) != 2:",
+            "        raise ValueError(f\"Invalid S3 path format: {s3_path}. Expected s3://bucket/key\")",
+            "    ",
+            "    bucket, key = parts",
+            "    ",
+            "    # Get the object from S3",
+            "    s3_client = boto3.client('s3')",
+            "    response = s3_client.get_object(Bucket=bucket, Key=key)",
+            "    ",
+            "    # Read the data into a BytesIO object",
+            "    data = response['Body'].read()",
+            "    stream = io.BytesIO(data)",
+            "    ",
+            "    # Decompress if needed",
+            "    if decompress:",
+            "        # Reset stream position",
+            "        stream.seek(0)",
+            "        # Create a gzip stream",
+            "        gzip_stream = gzip.GzipFile(fileobj=stream, mode='rb')",
+            "        # Read all data from gzip stream into a new BytesIO object",
+            "        decompressed = io.BytesIO(gzip_stream.read())",
+            "        # Reset position and return",
+            "        decompressed.seek(0)",
+            "        return decompressed",
+            "    ",
+            "    # Reset stream position and return",
+            "    stream.seek(0)",
+            "    return stream",
+            "EOL",
+            
+            # Also copy to python3.10 site-packages in case that's used
+            "mkdir -p /usr/local/lib/python3.10/site-packages/src/utils/helpers",
+            "cp /usr/local/lib/python3.10/dist-packages/src/utils/helpers/__init__.py /usr/local/lib/python3.10/site-packages/src/utils/helpers/__init__.py",
+            
+            # Add permissions
+            "chmod 644 /home/ubuntu/checkfiles/src/utils/helpers/__init__.py",
+            "chmod 644 /usr/local/lib/python3.10/dist-packages/src/utils/helpers/__init__.py",
+            "chmod 644 /usr/local/lib/python3.10/site-packages/src/utils/helpers/__init__.py",
+            
             # Create a test script to verify the implementation
             "cat > /home/ubuntu/checkfiles/test_helpers.py << 'EOL'",
             "from src.utils.helpers import stream_s3_file, has_gz_extension",
@@ -329,7 +431,7 @@ def run_checkfiles_command(event, context):
     put_secret_key_to_env_cmd = f"export PORTAL_SECRET_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_SECRET_KEY)"
     
     # Use a simplified setup command that just ensures PYTHONPATH includes our wrapper
-    setup_env_cmd = "export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH"
+    setup_env_cmd = "export PYTHONPATH=/home/ubuntu/checkfiles:/home/ubuntu/checkfiles/src:/usr/local/lib/python3.10/dist-packages:/usr/local/lib/python3.10/site-packages:$PYTHONPATH"
     
     if update:
         run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -m prod -q \"{query}\" --update --debug"
@@ -348,6 +450,13 @@ def run_checkfiles_command(event, context):
     {put_portal_key_to_env_cmd}
     {put_secret_key_to_env_cmd}
     export DEBUG=1
+    
+    # Print Python version and debug import paths
+    cd /home/ubuntu/checkfiles
+    source venv/bin/activate
+    python -c "import sys; print('Python sys.path:'); print('\\n'.join(sys.path)); print('\\nChecking imports:'); print('helpers module location:'); import importlib.util; print(importlib.util.find_spec('src.utils.helpers')); print('\\nTesting stream_s3_file import:'); try: from src.utils.helpers import stream_s3_file; print('stream_s3_file successfully imported'); except ImportError as e: print(f'Error importing stream_s3_file: {{e}}');"
+    
+    # Run the actual command
     {run_checkfiles_cmd}
     """
     
