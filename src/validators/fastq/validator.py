@@ -206,10 +206,46 @@ class FastqValidator(BaseValidator):
                     errors={"stream_error": "Input stream does not have a read method"}
                 )
             
-            # Directly validate the FASTQ format from the input stream without seeking
-            logger.debug("Starting FASTQ stream validation")
-            fastq_validation_result = self.validate_fastq_stream(input_stream, collect_stats=True)
-            logger.debug(f"FASTQ validation result: {fastq_validation_result.valid}")
+            # Set up hash calculation for the stream if possible
+            try:
+                # Create a hash calculating stream wrapper
+                hash_stream, metadata = self.create_hash_calculating_stream(input_stream, is_gzipped)
+                
+                # Directly validate the FASTQ format using the hash_stream
+                logger.debug("Starting FASTQ stream validation with hash calculation")
+                fastq_validation_result = self.validate_fastq_stream(hash_stream, collect_stats=True)
+                logger.debug(f"FASTQ validation result: {fastq_validation_result.valid}")
+                
+                # Get the hash values calculated during validation
+                hash_stats = self.get_hash_values(hash_stream, metadata)
+                logger.debug(f"Hash calculation successful: {list(hash_stats.keys())}")
+                
+            except Exception as e:
+                # If hash calculation failed, fall back to direct validation
+                logger.warning(f"Failed to calculate hashes during streaming: {str(e)}")
+                warnings["hash_calculation"] = f"Hash calculation failed: {str(e)}"
+                
+                # Reset stream position if possible
+                if hasattr(input_stream, 'seek') and hasattr(input_stream, 'tell'):
+                    try:
+                        current_pos = input_stream.tell()
+                        input_stream.seek(0)
+                    except (OSError, IOError):
+                        # Create a fallback for hash values
+                        hash_stats = {
+                            "md5sum": "stream_not_seekable",
+                            "sha256": "stream_not_seekable",
+                            "crc32c": "stream_not_seekable",
+                            "file_size": -1
+                        }
+                        # Use original stream for validation
+                        fastq_validation_result = self.validate_fastq_stream(input_stream, collect_stats=True)
+                else:
+                    # Stream is not seekable and we've already consumed it
+                    return self.format_validation_result(
+                        valid=False,
+                        errors={"stream_error": "Stream is not seekable and has been partially consumed"}
+                    )
             
             if not fastq_validation_result.valid:
                 error_detail = fastq_validation_result.error_message
@@ -222,27 +258,6 @@ class FastqValidator(BaseValidator):
             
             # Get statistics collected during validation
             stats = self.statistics.get_statistics()
-            
-            # For streaming validation, especially with gzipped content,
-            # we can't calculate hashes of the original file without reading it twice
-            # So we'll note this limitation
-            if is_gzipped:
-                warnings["hash_calculation"] = "Hash values not available for streaming validation of gzipped content"
-                hash_stats = {
-                    "md5sum": "unavailable_for_streaming",
-                    "sha256": "unavailable_for_streaming",
-                    "crc32c": "unavailable_for_streaming",
-                    "file_size": -1
-                }
-            else:
-                # For uncompressed files, we could add hash calculation in the future
-                warnings["hash_calculation"] = "Hash values not calculated for streaming validation"
-                hash_stats = {
-                    "md5sum": "not_calculated",
-                    "sha256": "not_calculated", 
-                    "crc32c": "not_calculated",
-                    "file_size": stats.get("total_bytes", -1)
-                }
             
             # Add hash values to stats
             stats.update(hash_stats)
