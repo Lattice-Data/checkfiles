@@ -236,7 +236,7 @@ def test_validate_local_file_exception():
     
     assert result["success"] is False
     assert "error" in result
-    assert "Test error" in result["error"]
+    assert "Failed to process file: Test error" in result["error"]
 
 
 def test_validate_gzip_format_valid_local(test_files):

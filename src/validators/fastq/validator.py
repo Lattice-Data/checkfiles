@@ -363,7 +363,10 @@ class FastqValidator(BaseValidator):
         try:
             # Process the stream line by line
             logger.debug("Starting to process FASTQ stream line by line")
-            for line in actual_stream:
+            while True:
+                line = actual_stream.readline()
+                if not line:
+                    break
                 line_count += 1
                 line = line.rstrip(b'\r\n')
                 

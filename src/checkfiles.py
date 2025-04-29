@@ -60,8 +60,8 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
     Args:
         result: The validation result dictionary
     """
-    progress_log_path = os.path.join(os.getcwd(), 'validation_progress.log')
-    
+    progress_log_path = os.path.join(os.getcwd(), '../validation_progress.log')
+    print(f"Writing result to {progress_log_path}")
     # Format the result for the log
     file_path = result.get('file_path', 'unknown')
     if result.get('success', False):
