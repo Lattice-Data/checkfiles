@@ -38,7 +38,6 @@ def upload_report_to_slack(event, context):
             Parameters={
                 'commands': [
                     '#!/bin/bash',
-                    '. /etc/profile.d/checkfiles.sh',
                     'echo "CHECKFILES_LOG_DIR is set to: $CHECKFILES_LOG_DIR"',
                     'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
                     'if [ ! -f "validation_progress.log" ]; then',
