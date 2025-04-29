@@ -38,12 +38,14 @@ def upload_report_to_slack(event, context):
             Parameters={
                 'commands': [
                     '#!/bin/bash',
-                    'echo "CHECKFILES_LOG_DIR is set to: $CHECKFILES_LOG_DIR"',
+                    'echo "CHECKFILES_LOG_DIR is set to: $CHECKFILES_LOG_DIR" > /tmp/dir_check.txt',
                     'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
                     'if [ ! -f "validation_progress.log" ]; then',
                     '  echo "No validation results available" > validation_progress.log',
                     'fi',
-                    'cat validation_progress.log | base64 -w 0'  # Use cat to ensure proper input to base64
+                    'cat validation_progress.log | base64 -w 0 > /tmp/log_content.txt',
+                    'cat /tmp/dir_check.txt',
+                    'cat /tmp/log_content.txt'
                 ]
             }
         )
@@ -59,8 +61,17 @@ def upload_report_to_slack(event, context):
         if result['Status'] != 'Success':
             raise Exception(f"Command failed: {result.get('StandardErrorContent', 'No error message available')}")
 
+        # Split the output into directory check and log content
+        output_lines = result['StandardOutputContent'].strip().split('\n')
+        dir_check = output_lines[0]
+        base64_content = output_lines[1] if len(output_lines) > 1 else ''
+        
+        print('Directory check:', dir_check)
+        
         # Process base64 content
-        base64_content = result['StandardOutputContent'].strip()
+        if not base64_content:
+            raise Exception("No log content found")
+            
         padding_needed = len(base64_content) % 4
         if padding_needed:
             base64_content += '=' * (4 - padding_needed)
