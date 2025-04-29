@@ -44,10 +44,8 @@ def run_checkfiles_command(event, context):
             "find /home/ubuntu/checkfiles -name 'fastq*.py' -o -name '*fastq*' | grep -v '__pycache__'",
             "echo '=== Content of src/validators directory if it exists ==='",
             "ls -la /home/ubuntu/checkfiles/src/validators/ 2>/dev/null || echo 'validators directory not found'",
-            "echo '=== Package structure ==='",
-            "cd /home/ubuntu/checkfiles && pip show -f src 2>/dev/null || echo 'src package not installed'",
-            "echo '=== Examining import system ==='",
-            "cd /home/ubuntu/checkfiles && source venv/bin/activate && python3 -c \"import sys; import os; print('Current directory:', os.getcwd()); print('Can import src?', 'src' in sys.modules or 'Yes' if __import__('src', fromlist=['']) else 'No'); print('Files in src:', os.listdir('src') if os.path.exists('src') else 'src not found'); print('Validators dir exists?', os.path.exists('src/validators'))\""
+            "echo '=== Detailed import debugging ==='",
+            "cd /home/ubuntu/checkfiles && source venv/bin/activate && python3 -c \"import sys; print('sys.path:'); print('\\n'.join(sys.path)); print('\\nAttempting direct imports:'); try: import src.validators; print('src.validators imported successfully'); except Exception as e: print(f'Error importing src.validators: {e}'); try: from src.validators import fastq; print('src.validators.fastq imported successfully'); except Exception as e: print(f'Error importing src.validators.fastq: {e}'); try: from src.validators.fastq.validator import FastqValidator as Validator1; print('FastqValidator from validator.py imported successfully'); except Exception as e: print(f'Error importing from validator.py: {e}'); try: from src.validators.fastq import FastqValidator as Validator2; print('FastqValidator from fastq/__init__.py imported successfully'); except Exception as e: print(f'Error importing from fastq/__init__.py: {e}'); try: from src.validators import FastqValidator as Validator3; print('FastqValidator from validators/__init__.py imported successfully'); except Exception as e: print(f'Error importing from validators/__init__.py: {e}')\""
         ]}
     )
     
@@ -64,37 +62,142 @@ def run_checkfiles_command(event, context):
     except Exception as e:
         logger.error(f"Error getting debug output: {e}")
     
-    # Create or fix the validators directory and module if necessary
+    # Fix the import issues by ensuring correct module imports
     fix_cmd = ssm.send_command(
         InstanceIds=[event['instance_id']],
         DocumentName='AWS-RunShellScript',
         Parameters={'commands': [
-            "echo '=== ATTEMPTING TO FIX MODULE STRUCTURE ==='",
+            "echo '=== FIXING PYTHON PATH AND IMPORT ISSUES ==='",
             "cd /home/ubuntu/checkfiles",
-            "# Ensure validators directory exists",
-            "mkdir -p src/validators",
-            "# Create __init__.py files to make proper Python packages",
-            "touch src/validators/__init__.py",
-            "# Create a basic fastq.py if it doesn't exist",
-            "if [ ! -f src/validators/fastq.py ]; then",
-            "    echo 'Creating a basic FastqValidator class'",
-            "    cat > src/validators/fastq.py << 'EOL'",
-            "class FastqValidator:",
-            "    def __init__(self):",
-            "        print('FastqValidator initialized')",
-            "        self.name = 'FastqValidator'",
-            "",
-            "    def validate(self, filepath):",
-            "        print(f'Validating {filepath} with pure Python implementation')",
-            "        return True, []",
+            
+            # Create/Update the .env_checkfiles file to set proper PYTHONPATH
+            "echo 'Creating/updating environment file'",
+            "cat > /home/ubuntu/.env_checkfiles << 'EOL'",
+            "export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH",
             "EOL",
-            "fi",
-            "# Verify the fix",
-            "echo '=== VERIFYING FIX ==='",
-            "ls -la src/validators/",
-            "cat src/validators/fastq.py",
-            "echo '=== Testing import after fix ==='",
-            "source venv/bin/activate && python3 -c 'try: from src.validators.fastq import FastqValidator; print(\"FastqValidator successfully imported\"); except Exception as e: print(f\"Error importing FastqValidator: {e}\")'"
+            
+            # Ensure the checkfiles package directory is in the Python path
+            "echo 'Fixing the Python path'",
+            "source /home/ubuntu/.env_checkfiles",
+            
+            # Verify the core/validation.py file has the correct imports
+            "echo 'Checking core/validation.py'",
+            "grep -n 'import.*FastqValidator' src/core/validation.py || echo 'FastqValidator import not found'",
+            
+            # Create a test script to verify imports work correctly
+            "echo 'Creating test script to verify imports'",
+            "cat > /home/ubuntu/checkfiles/test_imports.py << 'EOL'",
+            "import sys",
+            "import os",
+            "print('PYTHONPATH:', os.environ.get('PYTHONPATH', 'Not set'))",
+            "print('sys.path:', sys.path)",
+            "print('Working directory:', os.getcwd())",
+            "print('\\nTrying imports:')",
+            "try:",
+            "    from src.validators.fastq import FastqValidator",
+            "    print('Successfully imported FastqValidator from src.validators.fastq')",
+            "    validator = FastqValidator()",
+            "    print('Created FastqValidator instance:', validator)",
+            "    print('Has validate method:', hasattr(validator, 'validate'))",
+            "    print('Has validate_stream method:', hasattr(validator, 'validate_stream'))",
+            "    if hasattr(validator, 'validate_stream'):",
+            "        print('Signature:', validator.validate_stream.__code__.co_varnames)",
+            "except Exception as e:",
+            "    print(f'Error importing FastqValidator from src.validators.fastq: {e}')",
+            "    try:",
+            "        # Try adding the current directory to the path",
+            "        sys.path.insert(0, os.getcwd())",
+            "        from validators.fastq import FastqValidator",
+            "        print('Successfully imported FastqValidator from validators.fastq')",
+            "        validator = FastqValidator()",
+            "        print('Created FastqValidator instance:', validator)",
+            "        print('Has validate method:', hasattr(validator, 'validate'))",
+            "        print('Has validate_stream method:', hasattr(validator, 'validate_stream'))",
+            "        if hasattr(validator, 'validate_stream'):",
+            "            print('Signature:', validator.validate_stream.__code__.co_varnames)",
+            "    except Exception as e2:",
+            "        print(f'Error importing FastqValidator from validators.fastq: {e2}')",
+            "EOL",
+            
+            # Run the test script
+            "echo '=== Running import test ==='",
+            "source venv/bin/activate && source /home/ubuntu/.env_checkfiles && python /home/ubuntu/checkfiles/test_imports.py",
+            
+            # Update the validation.py file to ensure correct imports
+            "echo 'Updating validation.py import structure'",
+            "cat > /tmp/validation_import_fix.py << 'EOL'",
+            "import os",
+            "import sys",
+            "import re",
+            "",
+            "# Path to the validation.py file",
+            "validation_file = '/home/ubuntu/checkfiles/src/core/validation.py'",
+            "",
+            "# Read the file",
+            "with open(validation_file, 'r') as f:",
+            "    content = f.read()",
+            "",
+            "# Fix the FastqValidator import code",
+            "import_pattern = r'try:\\s+from src\\.validators\\.fastq import FastqValidator[^\\n]+\\s+except ImportError[^\\n]+\\s+[^\\n]+\\s+[^\\n]+\\s+[^\\n]+\\s+[^\\n]+\\s+from validators\\.fastq import FastqValidator'",
+            "fixed_import = '''try:",
+            "            # First, try importing with the full path",
+            "            from src.validators.fastq import FastqValidator",
+            "            logger.debug(\"Successfully imported FastqValidator\")",
+            "        except ImportError as e:",
+            "            logger.error(f\"Error importing FastqValidator: {e}\")",
+            "            # As a fallback, modify sys.path and try alternative import",
+            "            try:",
+            "                import sys",
+            "                current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))",
+            "                # Add parent directory to path to allow import from validators",
+            "                if current_dir not in sys.path:",
+            "                    sys.path.insert(0, current_dir)",
+            "                from validators.fastq import FastqValidator",
+            "                logger.debug(\"Successfully imported FastqValidator using alternative path\")",
+            "            except ImportError as e2:",
+            "                logger.error(f\"Error importing FastqValidator from alternative path: {e2}\")",
+            "                raise ImportError(f\"Error importing FastqValidator from all paths: {e}, {e2}\")'''",
+            "",
+            "# Use re.sub with re.DOTALL to match across multiple lines",
+            "updated_content = re.sub(import_pattern, fixed_import, content, flags=re.DOTALL)",
+            "",
+            "# Write the updated content back to the file",
+            "with open(validation_file, 'w') as f:",
+            "    f.write(updated_content)",
+            "",
+            "print(f\"Updated {validation_file} successfully\")",
+            "EOL",
+            
+            # Run the update script
+            "source venv/bin/activate && python /tmp/validation_import_fix.py",
+            
+            # Test that validation works
+            "echo '=== Testing validation function ==='",
+            "source venv/bin/activate && source /home/ubuntu/.env_checkfiles && python -c 'from src.core.validation import initialize_validator; validator = initialize_validator(\"fastq\"); print(f\"Validator initialized: {validator}\")'",
+            
+            # Create a small test to ensure validate_stream works
+            "echo 'Testing validate_stream works correctly'",
+            "cat > /tmp/test_validate_stream.py << 'EOL'",
+            "from src.core.validation import initialize_validator",
+            "import io",
+            "",
+            "# Create a simple FASTQ content",
+            "fastq_content = b'''@SEQ_ID",
+            "GATTTGGGGTTCAAAGCAGTATCGATCAAATAGTAAATCCATTTGTTCAACTCACAGTTT",
+            "+",
+            "!''*((((***+))%%%++)(%%%%).1***-+*''))**55CCF>>>>>>CCCCCCC65'''",
+            "",
+            "# Initialize validator",
+            "validator = initialize_validator('fastq')",
+            "print(f\"Validator: {validator}\")",
+            "",
+            "# Test validation with a BytesIO stream",
+            "stream = io.BytesIO(fastq_content)",
+            "result = validator.validate_stream(stream)",
+            "print(f\"Validation result: {result}\")",
+            "EOL",
+            
+            "source venv/bin/activate && source /home/ubuntu/.env_checkfiles && python /tmp/test_validate_stream.py"
         ]}
     )
     
@@ -126,7 +229,7 @@ def run_checkfiles_command(event, context):
     put_secret_key_to_env_cmd = f"export PORTAL_SECRET_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_SECRET_KEY)"
     
     # Add PYTHONPATH explicitly to help with imports
-    setup_env_cmd = "export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH"
+    setup_env_cmd = "source /home/ubuntu/.env_checkfiles"
     
     if update:
         run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -m prod -q \"{query}\" --update --debug"
@@ -171,13 +274,13 @@ def run_checkfiles_command(event, context):
             "echo '=== POST-RUN DIAGNOSTICS ==='",
             "cd /home/ubuntu/checkfiles",
             "echo '=== Checking for validation logs ==='",
-            "find /home/ubuntu/checkfiles -name '*.log' | xargs cat",
+            "find /home/ubuntu/checkfiles -name '*.log' | xargs cat 2>/dev/null || echo 'No log files found'",
             "echo '=== Checking stderr output ==='",
-            "find /home/ubuntu/checkfiles/logs -type f | xargs cat",
+            "find /home/ubuntu/checkfiles/logs -type f 2>/dev/null | xargs cat 2>/dev/null || echo 'No log files found in logs directory'",
             "echo '=== Package Installation ==='",
             "source venv/bin/activate && pip list | grep -i fast",
             "echo '=== Module Path Check ==='",
-            "source venv/bin/activate && python3 -c 'import sys; print(sys.modules.keys())' | grep -i valid"
+            "source venv/bin/activate && python3 -c 'import sys; print([m for m in sys.modules.keys() if \"valid\" in m.lower() or \"fastq\" in m.lower()])'"
         ]}
     )
 

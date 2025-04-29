@@ -102,7 +102,7 @@ def upload_report_to_slack(event, context):
         upload_response = requests.post(
             upload_url,
             headers={"Content-Type": "text/plain"},
-            data=file_content.decode('utf-8')
+            data=file_content
         )
         print('upload_response')
         print(upload_response)
