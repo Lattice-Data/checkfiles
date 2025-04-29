@@ -91,9 +91,10 @@ def create_checkfiles_instance(event, context):
     echo "==== Installing checkfiles package ===="
     pip install -e . -v
     
-    # Create .env file with PYTHONPATH
-    echo "==== Configuring PYTHONPATH ===="
+    # Create .env file with environment variables
+    echo "==== Configuring environment variables ===="
     echo 'export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH' > /home/ubuntu/.env_checkfiles
+    echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
     echo 'source /home/ubuntu/.env_checkfiles' >> /home/ubuntu/.bashrc
     
     # Verify installation

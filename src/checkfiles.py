@@ -60,8 +60,12 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
     Args:
         result: The validation result dictionary
     """
-    progress_log_path = os.path.join(os.getcwd(), '../validation_progress.log')
+    # Get log directory from environment variable or use current directory
+    log_dir = os.getenv('CHECKFILES_LOG_DIR', os.getcwd())
+    os.makedirs(log_dir, exist_ok=True)
+    progress_log_path = os.path.join(log_dir, 'validation_progress.log')
     print(f"Writing result to {progress_log_path}")
+    
     # Format the result for the log
     file_path = result.get('file_path', 'unknown')
     if result.get('success', False):
@@ -119,7 +123,9 @@ def main():
         logger.debug(f"Logging redirected to: {args.log_file}")
     
     # Initialize the validation_progress.log file with a header
-    progress_log_path = os.path.join(os.getcwd(), 'validation_progress.log')
+    log_dir = os.getenv('CHECKFILES_LOG_DIR', os.getcwd())
+    os.makedirs(log_dir, exist_ok=True)
+    progress_log_path = os.path.join(log_dir, 'validation_progress.log')
     with open(progress_log_path, 'w') as f:
         f.write("# Validation Progress Log\n")
         f.write("# File\tStatus\tDetails\n")
