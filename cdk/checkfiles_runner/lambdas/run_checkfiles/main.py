@@ -94,7 +94,7 @@ def run_checkfiles_command(event, context):
         file_path_2 = "s3://submissions-czi035cvs/quertermous_dataset_1/pt2ASC/pt2ASC_S11_L001_R2_001.fastq.gz"
         file_path_3 = "s3://submissions-czi035cvs/quertermous_dataset_1/pt2PA/pt2PA_S15_L002_R1_001.fastq.gz"
  
-        run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -f fastq -s3 \"{file_path_1},{file_path_2},{file_path_3}\" --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
+        run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -f fastq --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     
     # Create a combined command that sets up the environment and runs checkfiles
     run_with_debug_cmd = f"""
