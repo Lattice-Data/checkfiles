@@ -121,7 +121,7 @@ EOL
     /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/debug_imports.py
     
     # Run the actual checkfiles command
-    /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
+    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
     """
     
     # Execute the command on the instance
