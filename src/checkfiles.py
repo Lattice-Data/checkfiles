@@ -68,29 +68,66 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
     print(f"Writing result to {progress_log_path}")
     
     file_path = result.get('file_path', 'unknown')
+    
+    # Get identifier directly from result if available
+    identifier = result.get('identifier', '')
+    if not identifier:
+        # Fall back to extracting from file path
+        file_name = os.path.basename(file_path)
+        identifier = file_name
+        if 'accession=' in file_path:
+            try:
+                # Try to extract accession from the query string
+                accession_part = file_path.split('accession=')[1].split('&')[0]
+                identifier = accession_part
+            except (IndexError, AttributeError):
+                pass
+    
+    uri = file_path if file_path.startswith('s3://') else ''
+    
     if result.get('success', False):
-        validity = "Valid" if result.get('results', {}).get('valid', False) else "Invalid"
-        errors = result.get('results', {}).get('errors', {})
-        warnings = result.get('results', {}).get('warnings', {})
-        stats = result.get('results', {}).get('stats', {})
+        validation_results = result.get('results', {})
+        errors = validation_results.get('errors', {})
+        stats = validation_results.get('stats', {})
         
-        # Include all stats, not just a subset
-        details = [f"{k}={v}" for k, v in stats.items()] if stats else []
-        details_str = "\t".join(details)
-        error_str = "\t".join([f"{k}={v}" for k, v in errors.items()]) if errors else ""
-        warning_str = "\t".join([f"{k}={v}" for k, v in warnings.items()]) if warnings else ""
+        # Create a json_patch dictionary with key fields to update
+        json_patch = {}
+        if stats:
+            json_patch = {
+                'file_size': stats.get('file_size', ''),
+                'md5sum': stats.get('md5sum', ''),
+                'sha256': stats.get('sha256', ''),
+                'crc32c': stats.get('crc32c', ''),
+                'content_md5sum': stats.get('content_md5sum', ''),
+                'read_count': stats.get('read_count', ''),
+                'read_length': stats.get('read_length', '')
+            }
+            # Add flowcell_details if available
+            if 'flowcell_details' in stats:
+                json_patch['flowcell_details'] = stats['flowcell_details']
+            # Add platform if available
+            if 'platform' in stats:
+                json_patch['platform'] = stats['platform']
+            # Add validation status
+            json_patch['validated'] = validation_results.get('valid', False)
         
-        log_line = f"{file_path}\t{validity}\t{details_str}"
-        if error_str:
-            log_line += f"\tErrors: {error_str}"
-        if warning_str:
-            log_line += f"\tWarnings: {warning_str}"
+        log_line = f"{identifier}\t{uri}\t{errors}\t{stats}\t{json_patch}\tsuccess\tsuccess"
     else:
         error = result.get('error', 'Unknown error')
-        log_line = f"{file_path}\tFailed\tError: {error}"
+        log_line = f"{identifier}\t{uri}\t{{'error': '{error}'}}\t{{}}\t{{}}\tfailed\tfailed"
     
     with validation_log_lock:
-        with open(progress_log_path, 'a') as f:
+        # Check if the file exists and has the header
+        file_exists = os.path.exists(progress_log_path)
+        
+        # If file doesn't exist or is empty, write the header first
+        mode = 'a'  # Append by default
+        if not file_exists or os.path.getsize(progress_log_path) == 0:
+            mode = 'w'  # Write mode if file doesn't exist or is empty
+            
+        with open(progress_log_path, mode) as f:
+            if mode == 'w':
+                f.write("identifier\turi\terrors\tresults\tjson_patch\tLattice patched?\tS3 tag patched?\n")
             f.write(f"{log_line}\n")
             f.flush()
             os.fsync(f.fileno())  # Ensure data is written to disk
@@ -188,8 +225,7 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     progress_log_path = os.path.join(log_dir, 'validation_progress.log')
     with open(progress_log_path, 'w') as f:
-        f.write("# Validation Progress Log\n")
-        f.write("# File\tStatus\tDetails\n")
+        f.write("identifier\turi\terrors\tresults\tjson_patch\tLattice patched?\tS3 tag patched?\n")
     
     # Check if file format is supported
     if not args.file_format:
@@ -306,6 +342,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         if local_files:
             print(f"Processing {len(local_files)} local files...")
             for file_path in local_files:
+                # For local files, we may not have identifiers
                 futures.append(
                     executor.submit(
                         validate_local_file,
@@ -320,7 +357,21 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         # Process S3 files
         if s3_files:
             print(f"Processing {len(s3_files)} S3 files...")
+
+            # Create a mapping from S3 URI to accession
+            s3_uri_to_accession = {}
+            if backend_files:
+                # Map S3 URIs to their accessions
+                for file_obj in backend_files:
+                    if file_obj.get('s3_uri') and file_obj.get('accession'):
+                        s3_uri_to_accession[file_obj['s3_uri']] = file_obj['accession']
+                print(f"Created mapping for {len(s3_uri_to_accession)} files with accessions")
+                
+            # Submit validation tasks for each S3 file
             for s3_path in s3_files:
+                # Get identifier from mapping if available
+                identifier = s3_uri_to_accession.get(s3_path, "")
+                
                 futures.append(
                     executor.submit(
                         validate_s3_file,
@@ -328,7 +379,8 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         file_format,
                         debug,
                         validator,  # Pass the validator instance
-                        progress_tracker
+                        progress_tracker,
+                        identifier  # Pass the identifier if available
                     )
                 )
         

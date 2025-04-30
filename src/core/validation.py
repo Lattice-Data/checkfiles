@@ -76,7 +76,8 @@ def track_validation_progress(file_path: str, progress_tracker: Optional[SimpleA
 
 def validate_local_file(file_path: str, file_format: str, debug: bool = False, 
                       validator: Optional[Any] = None, 
-                      progress_tracker: Optional[SimpleActivityTracker] = None) -> Dict[str, Any]:
+                      progress_tracker: Optional[SimpleActivityTracker] = None,
+                      identifier: str = "") -> Dict[str, Any]:
     """Validate a local file.
     
     Args:
@@ -85,6 +86,7 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         debug: Whether to enable debug output
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
+        identifier: Optional identifier for the file (e.g., accession number)
         
     Returns:
         Dictionary with validation results
@@ -135,7 +137,8 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         return {
             "file_path": file_path,
             "results": results,
-            "success": True
+            "success": True,
+            "identifier": identifier
         }
         
     except Exception as e:
@@ -147,12 +150,14 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         return {
             "file_path": file_path,
             "error": error_msg,
-            "success": False
+            "success": False,
+            "identifier": identifier
         }
 
 def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
                    validator: Optional[Any] = None, 
-                   progress_tracker: Optional[SimpleActivityTracker] = None) -> Dict[str, Any]:
+                   progress_tracker: Optional[SimpleActivityTracker] = None,
+                   identifier: str = "") -> Dict[str, Any]:
     """Validate an S3 file using streaming without downloading to disk.
     
     Args:
@@ -161,6 +166,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         debug: Whether to enable debug output
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
+        identifier: Optional identifier for the file (e.g., accession number)
         
     Returns:
         Dictionary with validation results
@@ -207,7 +213,8 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         return {
             "file_path": s3_path,
             "results": results,
-            "success": True
+            "success": True,
+            "identifier": identifier
         }
         
     except Exception as e:
@@ -220,5 +227,6 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         return {
             "file_path": s3_path,
             "error": error_msg,
-            "success": False
+            "success": False,
+            "identifier": identifier
         } 
