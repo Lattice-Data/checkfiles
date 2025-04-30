@@ -39,12 +39,9 @@ def upload_report_to_slack(event, context):
                 'commands': [
                     '#!/bin/bash',
                     'echo "=== Upload Report Debug ==="',
+                    'source /home/ubuntu/.env_checkfiles',
                     'echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"',
                     'echo "Current directory: $(pwd)"',
-                    'echo "Environment file contents:"',
-                    'cat /home/ubuntu/.env_checkfiles || echo "No .env_checkfiles found"',
-                    'echo "=== Directory Contents ==="',
-                    'ls -la /home/ubuntu/checkfiles || echo "Failed to list directory"',
                     'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
                     'echo "=== Log File Check ==="',
                     'ls -l validation_progress.log || echo "No validation_progress.log found"',
