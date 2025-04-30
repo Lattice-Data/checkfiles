@@ -148,6 +148,9 @@ EOL
     """
     
     # Execute the command on the instance
+    logger.info("Sending SSM command to instance")
+    logger.info(f"Command to execute: {run_with_debug_cmd}")
+    
     ssm = boto3.client('ssm')
     response = ssm.send_command(
         InstanceIds=[instance_id],
@@ -162,6 +165,7 @@ EOL
         }
     )
     command_id = response['Command']['CommandId']
+    logger.info(f"Command sent with ID: {command_id}")
 
     # Return execution details
     return {
