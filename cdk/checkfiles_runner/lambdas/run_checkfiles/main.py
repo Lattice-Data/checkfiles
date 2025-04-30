@@ -102,11 +102,15 @@ def run_checkfiles_command(event, context):
     
     # Load environment variables from .env_checkfiles
     echo "=== Loading environment from .env_checkfiles ==="
-    while IFS= read -r line; do
-        if [[ $line =~ ^export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
-        fi
-    done < /home/ubuntu/.env_checkfiles
+    if [ -f /home/ubuntu/.env_checkfiles ]; then
+        while read -r line; do
+            if [[ "$line" =~ ^export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+                var_name="${{BASH_REMATCH[1]}}"
+                var_value="${{BASH_REMATCH[2]}}"
+                export "$var_name=$var_value"
+            fi
+        done < /home/ubuntu/.env_checkfiles
+    fi
     echo "CHECKFILES_LOG_DIR after loading: $CHECKFILES_LOG_DIR"
     
     # Debug environment
