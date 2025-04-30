@@ -65,7 +65,7 @@ def create_checkfiles_instance(event, context):
     security_group = get_security_group()
     tag = get_checkfiles_tag()
     
-    # Enhanced installation script with better debugging and proper Python path setup
+    # Enhanced installation script with virtual environment setup
     user_data = f'''#!/bin/bash
     set -ex  # Enable debugging and exit on error
     
@@ -77,6 +77,13 @@ def create_checkfiles_instance(event, context):
     git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
     cd checkfiles
     
+    # Create and set up virtual environment
+    echo "==== Setting up Python virtual environment ===="
+    python3 -m venv venv
+    . venv/bin/activate
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    
     # Create .env file with environment variables
     echo "==== Configuring environment variables ===="
     echo 'export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH' > /home/ubuntu/.env_checkfiles
@@ -84,7 +91,7 @@ def create_checkfiles_instance(event, context):
     echo 'source /home/ubuntu/.env_checkfiles' >> /home/ubuntu/.bashrc
     
     # Source the environment variables for the current session
-    source /home/ubuntu/.env_checkfiles
+    . /home/ubuntu/.env_checkfiles
     
     # Set proper permissions
     echo "==== Setting permissions ===="
