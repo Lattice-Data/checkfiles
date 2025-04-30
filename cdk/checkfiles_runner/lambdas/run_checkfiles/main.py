@@ -72,7 +72,7 @@ def run_checkfiles_command(event, context):
     echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
 
     # Source environment file
-    source /home/ubuntu/.env_checkfiles
+    . /home/ubuntu/.env_checkfiles
     echo "Environment after sourcing:"
     env | grep -E 'CHECKFILES|PYTHON|PATH'
 
