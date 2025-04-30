@@ -93,12 +93,16 @@ def run_checkfiles_command(event, context):
     
     # Create a combined command that sets up the environment and runs checkfiles
     run_with_debug_cmd = f"""
-    echo '=== Running checkfiles with PYTHONPATH and debug flags ==='
-    {setup_env_cmd}
-    echo \"PYTHONPATH: $PYTHONPATH\"
-    {put_portal_key_to_env_cmd}
-    {put_secret_key_to_env_cmd}
-    export DEBUG=1
+    # Enable error handling and debugging
+    set -x
+    set -e
+    
+    echo '=== Starting checkfiles execution ==='
+    
+    # Initial environment check
+    echo "=== Initial Environment ==="
+    env | grep -E 'CHECKFILES|PYTHON|PATH'
+    echo "Current directory: $(pwd)"
     
     # Load environment variables from .env_checkfiles
     echo "=== Loading environment from .env_checkfiles ==="
@@ -108,43 +112,29 @@ def run_checkfiles_command(event, context):
                 var_name="${{BASH_REMATCH[1]}}"
                 var_value="${{BASH_REMATCH[2]}}"
                 export "$var_name=$var_value"
+                echo "Set $var_name=$var_value"
             fi
         done < /home/ubuntu/.env_checkfiles
+    else
+        echo "ERROR: .env_checkfiles not found"
+        exit 1
     fi
-    echo "CHECKFILES_LOG_DIR after loading: $CHECKFILES_LOG_DIR"
     
-    # Debug environment
-    echo "=== Environment Debug ==="
-    echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
-    echo "Current directory: $(pwd)"
-    echo "Environment file contents:"
-    cat /home/ubuntu/.env_checkfiles || echo "No .env_checkfiles found"
+    # Verify environment after loading
+    echo "=== Environment After Loading ==="
+    env | grep -E 'CHECKFILES|PYTHON|PATH'
     
-    # Use absolute paths for Python and set up virtual environment
-    cd /home/ubuntu/checkfiles
+    # Set up Python environment
     echo "=== Setting up Python environment ==="
+    cd /home/ubuntu/checkfiles
     export PATH=/home/ubuntu/checkfiles/venv/bin:$PATH
     echo "Python path: $(which python)"
     echo "Python version: $(python --version)"
     
-    # Verify imports are working
-    cat > /home/ubuntu/checkfiles/debug_imports.py << 'EOL'
-import sys
-import os
-print('Python sys.path:')
-print('\\n'.join(sys.path))
-print('\\nEnvironment:')
-print(f"CHECKFILES_LOG_DIR: {{os.getenv('CHECKFILES_LOG_DIR')}}")
-print('\\nChecking imports:')
-try:
-    from src.utils.helpers import stream_s3_file, stream_local_file, validate_gzip_format
-    print('stream_s3_file, stream_local_file, and validate_gzip_format successfully imported')
-except ImportError as e:
-    print(f'Error importing helpers: {{e}}')
-EOL
-    
-    # Run the debug script
-    python /home/ubuntu/checkfiles/debug_imports.py
+    # Verify virtual environment
+    echo "=== Virtual Environment Check ==="
+    ls -la /home/ubuntu/checkfiles/venv/bin/python
+    ls -la /home/ubuntu/checkfiles/venv/bin/activate
     
     # Run the actual checkfiles command
     echo "=== Running checkfiles command ==="
@@ -182,6 +172,18 @@ EOL
     )
     command_id = response['Command']['CommandId']
     logger.info(f"Command sent with ID: {command_id}")
+
+    # Wait a bit and get the command output
+    time.sleep(5)
+    try:
+        result = ssm.get_command_invocation(
+            CommandId=command_id,
+            InstanceId=instance_id
+        )
+        logger.info(f"Command output:\n{result.get('StandardOutputContent', 'No output')}")
+        logger.info(f"Command error:\n{result.get('StandardErrorContent', 'No error')}")
+    except Exception as e:
+        logger.error(f"Error getting command output: {e}")
 
     # Return execution details
     return {
