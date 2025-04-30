@@ -100,6 +100,11 @@ def run_checkfiles_command(event, context):
     {put_secret_key_to_env_cmd}
     export DEBUG=1
     
+    # Source the environment file first
+    echo "=== Sourcing environment file ==="
+    source /home/ubuntu/.env_checkfiles
+    echo "CHECKFILES_LOG_DIR after sourcing: $CHECKFILES_LOG_DIR"
+    
     # Debug environment
     echo "=== Environment Debug ==="
     echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
