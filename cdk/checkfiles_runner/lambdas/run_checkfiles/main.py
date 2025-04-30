@@ -135,8 +135,16 @@ EOL
     echo "CHECKFILES_LOG_DIR before command: $CHECKFILES_LOG_DIR"
     CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
     echo "=== Checkfiles command completed ==="
+    
+    # Verify log file creation
+    echo "=== Log File Verification ==="
     echo "Current directory: $(pwd)"
-    echo "Validation log exists: $(ls -l validation_progress.log 2>/dev/null || echo 'No log file')"
+    echo "CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
+    echo "Log file path: $CHECKFILES_LOG_DIR/validation_progress.log"
+    echo "Log file exists: $(ls -l $CHECKFILES_LOG_DIR/validation_progress.log 2>/dev/null || echo 'No log file')"
+    echo "Log file contents:"
+    cat $CHECKFILES_LOG_DIR/validation_progress.log 2>/dev/null || echo "No log file to read"
+    echo "=== End of Log File Verification ==="
     """
     
     # Execute the command on the instance
