@@ -106,11 +106,12 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
         List of file objects to validate
     """
     logger.info(f"Fetching files from backend using query: {query}")
-    
+    print( "fetching file objects from backend")
     # Get authentication credentials from environment variables
     portal_key = os.getenv('PORTAL_KEY')
     portal_secret_key = os.getenv('PORTAL_SECRET_KEY')
-    
+    print(f"portal_key: {portal_key}")
+    print(f"portal_secret_key: {portal_secret_key}")
     if not portal_key or not portal_secret_key:
         logger.error("Missing authentication credentials. Please set PORTAL_KEY and PORTAL_SECRET_KEY environment variables.")
         return []
@@ -152,7 +153,7 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
                 continue
                 
             files_to_validate.append(file_json)
-            
+        print (f"files_to_validate: {files_to_validate}")    
         return files_to_validate
         
     except requests.HTTPError as e:
