@@ -308,7 +308,8 @@ def main():
         thread_count=thread_count,
         debug=args.debug,
         validator=validator,
-        progress_tracker=progress_tracker
+        progress_tracker=progress_tracker,
+        backend_files=backend_files
     )
     
     # Close progress tracker
@@ -320,7 +321,8 @@ def main():
 
 def process_files_in_parallel(local_files: List[str], s3_files: List[str], 
                               file_format: str, thread_count: int, debug: bool,
-                              validator: Any, progress_tracker: SimpleActivityTracker = None) -> List[Dict[str, Any]]:
+                              validator: Any, progress_tracker: SimpleActivityTracker = None,
+                              backend_files: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Process multiple files in parallel using a thread pool.
     
     Args:
@@ -331,6 +333,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         debug: Whether to enable debug output
         validator: Validator instance to use
         progress_tracker: Activity tracker instance or None if tracking is disabled
+        backend_files: List of file objects from the backend API
         
     Returns:
         List of validation results
