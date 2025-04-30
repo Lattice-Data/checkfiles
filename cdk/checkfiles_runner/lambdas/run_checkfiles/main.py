@@ -80,9 +80,13 @@ def run_checkfiles_command(event, context):
     cd /home/ubuntu/checkfiles
     echo "Current directory after cd: $(pwd)"
 
+    # Activate virtual environment
+    source /home/ubuntu/checkfiles/venv/bin/activate
+    echo "Python path after activation: $(which python)"
+
     # Run the checkfiles command
     echo "=== Running checkfiles command ==="
-    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
+    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" python src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
 
     # Verify log file
     echo "=== Log File Verification ==="
