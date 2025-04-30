@@ -112,9 +112,12 @@ def run_checkfiles_command(event, context):
     echo "Environment file contents:"
     cat /home/ubuntu/.env_checkfiles || echo "No .env_checkfiles found"
     
-    # Use absolute paths for Python
+    # Use absolute paths for Python and activate virtual environment
     cd /home/ubuntu/checkfiles
-    export PATH=/home/ubuntu/checkfiles/venv/bin:$PATH
+    echo "=== Activating virtual environment ==="
+    source /home/ubuntu/checkfiles/venv/bin/activate
+    echo "Python path after activation: $(which python)"
+    echo "Python version: $(python --version)"
     
     # Verify imports are working
     cat > /home/ubuntu/checkfiles/debug_imports.py << 'EOL'
@@ -133,12 +136,12 @@ except ImportError as e:
 EOL
     
     # Run the debug script
-    /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/debug_imports.py
+    python /home/ubuntu/checkfiles/debug_imports.py
     
     # Run the actual checkfiles command
     echo "=== Running checkfiles command ==="
     echo "CHECKFILES_LOG_DIR before command: $CHECKFILES_LOG_DIR"
-    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
+    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
     echo "=== Checkfiles command completed ==="
     
     # Verify log file creation
