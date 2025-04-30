@@ -157,6 +157,7 @@ def upload_report_to_slack(event, context):
         if not response_data.get("ok"):
             raise Exception(f"Failed to complete upload: {response_data.get('error', 'Unknown error')}")
 
+        time.sleep(20000)
 
         return {
             'status': 'SUCCESS',
