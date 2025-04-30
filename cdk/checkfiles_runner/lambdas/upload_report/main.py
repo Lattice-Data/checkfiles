@@ -38,10 +38,20 @@ def upload_report_to_slack(event, context):
             Parameters={
                 'commands': [
                     '#!/bin/bash',
+                    'echo "=== Upload Report Debug ==="',
+                    'echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"',
+                    'echo "Current directory: $(pwd)"',
+                    'echo "Environment file contents:"',
+                    'cat /home/ubuntu/.env_checkfiles || echo "No .env_checkfiles found"',
+                    'echo "=== Directory Contents ==="',
+                    'ls -la /home/ubuntu/checkfiles || echo "Failed to list directory"',
                     'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
+                    'echo "=== Log File Check ==="',
+                    'ls -l validation_progress.log || echo "No validation_progress.log found"',
                     'if [ ! -f "validation_progress.log" ]; then',
                     '  echo "No validation results available" > validation_progress.log',
                     'fi',
+                    'echo "=== File Content ==="',
                     'cat validation_progress.log | base64 -w 0'
                 ]
             }
@@ -53,8 +63,11 @@ def upload_report_to_slack(event, context):
             CommandId=copy_command['Command']['CommandId'],
             InstanceId=instance_id
         )
-        print('result')
-        print(result)
+        print('=== SSM Command Result ===')
+        print('Status:', result['Status'])
+        print('Standard Output:', result.get('StandardOutputContent', 'No output'))
+        print('Standard Error:', result.get('StandardErrorContent', 'No error'))
+        
         if result['Status'] != 'Success':
             raise Exception(f"Command failed: {result.get('StandardErrorContent', 'No error message available')}")
 

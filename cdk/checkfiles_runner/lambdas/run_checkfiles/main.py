@@ -100,6 +100,13 @@ def run_checkfiles_command(event, context):
     {put_secret_key_to_env_cmd}
     export DEBUG=1
     
+    # Debug environment
+    echo "=== Environment Debug ==="
+    echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
+    echo "Current directory: $(pwd)"
+    echo "Environment file contents:"
+    cat /home/ubuntu/.env_checkfiles || echo "No .env_checkfiles found"
+    
     # Use absolute paths for Python
     cd /home/ubuntu/checkfiles
     export PATH=/home/ubuntu/checkfiles/venv/bin:$PATH
@@ -107,8 +114,11 @@ def run_checkfiles_command(event, context):
     # Verify imports are working
     cat > /home/ubuntu/checkfiles/debug_imports.py << 'EOL'
 import sys
+import os
 print('Python sys.path:')
 print('\\n'.join(sys.path))
+print('\\nEnvironment:')
+print(f"CHECKFILES_LOG_DIR: {{os.getenv('CHECKFILES_LOG_DIR')}}")
 print('\\nChecking imports:')
 try:
     from src.utils.helpers import stream_s3_file, stream_local_file, validate_gzip_format
@@ -121,7 +131,12 @@ EOL
     /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/debug_imports.py
     
     # Run the actual checkfiles command
+    echo "=== Running checkfiles command ==="
+    echo "CHECKFILES_LOG_DIR before command: $CHECKFILES_LOG_DIR"
     CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" /home/ubuntu/checkfiles/venv/bin/python /home/ubuntu/checkfiles/src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
+    echo "=== Checkfiles command completed ==="
+    echo "Current directory: $(pwd)"
+    echo "Validation log exists: $(ls -l validation_progress.log 2>/dev/null || echo 'No log file')"
     """
     
     # Execute the command on the instance
