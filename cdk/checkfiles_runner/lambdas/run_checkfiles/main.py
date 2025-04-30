@@ -71,6 +71,16 @@ def run_checkfiles_command(event, context):
     echo "Current directory: $(pwd)"
     echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
 
+    # Check if environment file exists
+    if [ ! -f "/home/ubuntu/.env_checkfiles" ]; then
+        echo "ERROR: Environment file /home/ubuntu/.env_checkfiles not found"
+        echo "=== Directory contents of /home/ubuntu ==="
+        ls -la /home/ubuntu/
+        echo "=== EC2 instance startup status ==="
+        cat /var/log/cloud-init-output.log | tail -n 50 || echo "Cloud-init log not found"
+        exit 1
+    fi
+
     # Source environment file
     . /home/ubuntu/.env_checkfiles
     echo "Environment after sourcing:"
@@ -82,10 +92,22 @@ def run_checkfiles_command(event, context):
 
     # Check if virtual environment exists
     if [ ! -d "venv" ]; then
-        echo "Error: Virtual environment not found at $(pwd)/venv"
+        echo "ERROR: Virtual environment not found at $(pwd)/venv"
+        echo "=== Directory contents ==="
+        ls -la
+        echo "=== Setup status ==="
+        cat /var/log/cloud-init-output.log | tail -n 50 || echo "Cloud-init log not found"
         exit 1
     fi
 
+    # Verify venv python is available
+    if [ ! -f "venv/bin/python" ]; then
+        echo "ERROR: Python not found in virtual environment"
+        echo "=== Virtual environment contents ==="
+        ls -la venv/bin/
+        exit 1
+    fi
+    
     # Activate virtual environment
     . venv/bin/activate
     echo "Python path after activation: $(which python)"
