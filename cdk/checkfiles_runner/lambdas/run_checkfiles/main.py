@@ -107,9 +107,21 @@ def run_checkfiles_command(event, context):
     pip3 show requests || echo "requests package not found"
     pip3 show boto3 || echo "boto3 package not found"
 
+    # Retrieve portal credentials from AWS Secrets Manager
+    echo "=== Retrieving portal credentials ==="
+    PORTAL_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_KEY)
+    PORTAL_SECRET_KEY=$(aws secretsmanager get-secret-value --region us-west-1 --secret-id {secret_arn} --output text | awk '{{print $4}}' | jq -r .PORTAL_SECRET_KEY)
+    
+    if [ -z "$PORTAL_KEY" ] || [ -z "$PORTAL_SECRET_KEY" ]; then
+        echo "ERROR: Failed to retrieve portal credentials"
+        exit 1
+    else
+        echo "Portal credentials retrieved successfully"
+    fi
+
     # Run the checkfiles command
     echo "=== Running checkfiles command ==="
-    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" python3 src/checkfiles.py {run_checkfiles_cmd.split('python3 src/checkfiles.py')[1]}
+    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" PORTAL_KEY="$PORTAL_KEY" PORTAL_SECRET_KEY="$PORTAL_SECRET_KEY" python3 src/checkfiles.py {run_checkfiles_cmd.split('python3 src/checkfiles.py')[1]}
 
     # Verify log file
     echo "=== Log File Verification ==="
