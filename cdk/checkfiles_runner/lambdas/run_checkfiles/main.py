@@ -100,10 +100,14 @@ def run_checkfiles_command(event, context):
     {put_secret_key_to_env_cmd}
     export DEBUG=1
     
-    # Source the environment file first
-    echo "=== Sourcing environment file ==="
-    source /home/ubuntu/.env_checkfiles
-    echo "CHECKFILES_LOG_DIR after sourcing: $CHECKFILES_LOG_DIR"
+    # Load environment variables from .env_checkfiles
+    echo "=== Loading environment from .env_checkfiles ==="
+    while IFS= read -r line; do
+        if [[ $line =~ ^export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+        fi
+    done < /home/ubuntu/.env_checkfiles
+    echo "CHECKFILES_LOG_DIR after loading: $CHECKFILES_LOG_DIR"
     
     # Debug environment
     echo "=== Environment Debug ==="
@@ -112,11 +116,11 @@ def run_checkfiles_command(event, context):
     echo "Environment file contents:"
     cat /home/ubuntu/.env_checkfiles || echo "No .env_checkfiles found"
     
-    # Use absolute paths for Python and activate virtual environment
+    # Use absolute paths for Python and set up virtual environment
     cd /home/ubuntu/checkfiles
-    echo "=== Activating virtual environment ==="
-    source /home/ubuntu/checkfiles/venv/bin/activate
-    echo "Python path after activation: $(which python)"
+    echo "=== Setting up Python environment ==="
+    export PATH=/home/ubuntu/checkfiles/venv/bin:$PATH
+    echo "Python path: $(which python)"
     echo "Python version: $(python --version)"
     
     # Verify imports are working
