@@ -11,6 +11,7 @@
         "../scripts/create_validator_stubs.sh",
         "../scripts/debug_fuse.sh",
         "../scripts/goofys_mount.sh",
+        "../scripts/setup_environment_file.sh",
         "../scripts/validate_ami.sh"
     ],
     "ami_type": "checkfiles_jammy_ami",

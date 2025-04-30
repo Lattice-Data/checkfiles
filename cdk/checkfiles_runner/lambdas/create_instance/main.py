@@ -65,7 +65,7 @@ def create_checkfiles_instance(event, context):
     security_group = get_security_group()
     tag = get_checkfiles_tag()
     
-    # Enhanced installation script with virtual environment setup
+    # Enhanced installation script that only clones the repo
     user_data = f'''#!/bin/bash
     set -ex  # Enable debugging and exit on error
     
@@ -84,20 +84,10 @@ def create_checkfiles_instance(event, context):
     pip install --upgrade pip
     pip install -r requirements.txt
     
-    # Create .env file with environment variables
-    echo "==== Configuring environment variables ===="
-    echo 'export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH' > /home/ubuntu/.env_checkfiles
-    echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
-    echo 'source /home/ubuntu/.env_checkfiles' >> /home/ubuntu/.bashrc
-    
-    # Source the environment variables for the current session
-    . /home/ubuntu/.env_checkfiles
-    
     # Set proper permissions
     echo "==== Setting permissions ===="
     cd /home/ubuntu
     chown -R ubuntu:ubuntu checkfiles/
-    chown ubuntu:ubuntu /home/ubuntu/.env_checkfiles
     
     echo "==== Runtime setup complete ===="
     '''
