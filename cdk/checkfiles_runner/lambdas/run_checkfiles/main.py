@@ -80,9 +80,16 @@ def run_checkfiles_command(event, context):
     cd /home/ubuntu/checkfiles
     echo "Current directory after cd: $(pwd)"
 
+    # Check if virtual environment exists
+    if [ ! -d "venv" ]; then
+        echo "Error: Virtual environment not found at $(pwd)/venv"
+        exit 1
+    fi
+
     # Activate virtual environment
-    source /home/ubuntu/checkfiles/venv/bin/activate
+    . venv/bin/activate
     echo "Python path after activation: $(which python)"
+    echo "Python version: $(python --version)"
 
     # Run the checkfiles command
     echo "=== Running checkfiles command ==="
