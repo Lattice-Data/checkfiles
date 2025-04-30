@@ -435,18 +435,6 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
-        run_checkfiles_command_lambda.add_to_role_policy(
-            PolicyStatement(
-                actions=[
-                    'logs:CreateLogGroup',
-                    'logs:CreateLogStream',
-                    'logs:PutLogEvents',
-                    'logs:DescribeLogStreams',
-                ],
-                resources=['*'],
-            )
-        )
-
         run_checkfiles_command = LambdaInvoke(
             self,
             'RunCheckFilesCommand',
