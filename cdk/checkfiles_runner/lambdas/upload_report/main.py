@@ -73,13 +73,37 @@ def upload_report_to_slack(event, context):
         if not base64_content:
             raise Exception("No log content found")
             
-        padding_needed = len(base64_content) % 4
-        if padding_needed:
-            base64_content += '=' * (4 - padding_needed)
+        # Find where the base64 content starts (after "=== File Content ===" line)
+        try:
+            content_lines = base64_content.split('\n')
+            start_idx = -1
+            for i, line in enumerate(content_lines):
+                if line.strip() == "=== File Content ===":
+                    start_idx = i + 1
+                    break
+            
+            if start_idx != -1 and start_idx < len(content_lines):
+                # Use only the actual base64 content, not the debug output
+                base64_content = content_lines[start_idx].strip()
+                
+            # Add padding if needed
+            padding_needed = len(base64_content) % 4
+            if padding_needed:
+                base64_content += '=' * (4 - padding_needed)
+            
+            # Try to decode as UTF-8, but fall back to binary if it fails
+            try:
+                file_content = base64.b64decode(base64_content).decode('utf-8')
+            except UnicodeDecodeError:
+                # If we can't decode as UTF-8, use binary mode
+                binary_content = base64.b64decode(base64_content)
+                file_content = binary_content.decode('utf-8', errors='replace')
+                
+            timestamp = time.strftime('%Y%m%d-%H%M%S')
+            filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv'
+        except Exception as e:
+            raise Exception(f"Error processing base64 content: {str(e)}. Content: {base64_content[:100]}")
         
-        file_content = base64.b64decode(base64_content).decode('utf-8')
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        filename = f'checkfiles-report-{instance_name_suffix}-{timestamp}.tsv'
         print('file_content')
         print(file_content)
         print('filename')
