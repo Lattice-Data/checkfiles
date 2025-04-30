@@ -57,9 +57,9 @@ def run_checkfiles_command(event, context):
     
     # Prepare the checkfiles command based on update flag
     if update:
-        run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -m prod -q \"{query}\" --update --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
+        run_checkfiles_cmd = f"python3 src/checkfiles.py -m prod -q \"{query}\" --update --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     else:
-        run_checkfiles_cmd = f"venv/bin/python src/checkfiles.py -f fastq --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
+        run_checkfiles_cmd = f"python3 src/checkfiles.py -f fastq --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     
     # Create a combined command that sets up the environment and runs checkfiles
     run_with_debug_cmd = f"""
@@ -70,6 +70,10 @@ def run_checkfiles_command(event, context):
     echo "=== Starting checkfiles execution ==="
     echo "Current directory: $(pwd)"
     echo "Current CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
+    
+    # Check cloud-init logs to see if setup completed
+    echo "=== Cloud-init status ==="
+    cat /var/log/cloud-init-output.log | tail -n 50 || echo "Cloud-init log not found"
 
     # Check if environment file exists
     if [ ! -f "/home/ubuntu/.env_checkfiles" ]; then
@@ -89,33 +93,23 @@ def run_checkfiles_command(event, context):
     # Change to checkfiles directory
     cd /home/ubuntu/checkfiles
     echo "Current directory after cd: $(pwd)"
-
-    # Check if virtual environment exists
-    if [ ! -d "venv" ]; then
-        echo "ERROR: Virtual environment not found at $(pwd)/venv"
-        echo "=== Directory contents ==="
-        ls -la
-        echo "=== Setup status ==="
-        cat /var/log/cloud-init-output.log | tail -n 50 || echo "Cloud-init log not found"
-        exit 1
-    fi
-
-    # Verify venv python is available
-    if [ ! -f "venv/bin/python" ]; then
-        echo "ERROR: Python not found in virtual environment"
-        echo "=== Virtual environment contents ==="
-        ls -la venv/bin/
-        exit 1
-    fi
     
-    # Activate virtual environment
-    . venv/bin/activate
-    echo "Python path after activation: $(which python)"
-    echo "Python version: $(python --version)"
+    # Check Python version and installed packages
+    echo "Python path: $(which python3)"
+    echo "Python version: $(python3 --version)"
+    
+    # Show installed packages in system Python
+    echo "=== Installed Python packages ==="
+    pip3 list
+    
+    # Check for specific packages
+    echo "=== Checking for required packages ==="
+    pip3 show requests || echo "requests package not found"
+    pip3 show boto3 || echo "boto3 package not found"
 
     # Run the checkfiles command
     echo "=== Running checkfiles command ==="
-    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" python src/checkfiles.py {run_checkfiles_cmd.split('venv/bin/python src/checkfiles.py')[1]}
+    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" python3 src/checkfiles.py {run_checkfiles_cmd.split('python3 src/checkfiles.py')[1]}
 
     # Verify log file
     echo "=== Log File Verification ==="

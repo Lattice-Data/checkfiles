@@ -52,7 +52,8 @@ pip3 install --no-cache-dir \
     types-boto3==1.0.2 \
     numpy==1.24.3 \
     crcmod==1.7 \
-    h5py==3.10.0
+    h5py==3.10.0 \
+    requests==2.31.0
 
 # Create src package directory if it doesn't exist
 echo "Setting up package directories..."
