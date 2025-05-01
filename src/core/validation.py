@@ -8,11 +8,12 @@ import hashlib
 import crcmod.predefined
 import tempfile
 import subprocess
-from typing import Dict, Any, Optional, BinaryIO, Tuple
+from typing import Dict, Any, Optional, BinaryIO, Tuple, Union
 
 from src.tracking.progress import SimpleActivityTracker, ProgressTrackingStream
 from src.utils.helpers import has_gz_extension, stream_s3_file, stream_local_file
 from src.validators.base import HashCalculatingStream, GzipHashCalculatingStream
+from src.models.validation_record import FileValidationRecord
 
 logger = logging.getLogger(__name__)
 
@@ -124,10 +125,50 @@ def calculate_hashes_for_stream(stream: BinaryIO, is_gzipped: bool) -> Dict[str,
     logger.debug(f"Hash calculation complete: {list(stats.keys())}")
     return stats
 
+def create_validation_record(result: Dict[str, Any], file_path: str, uuid: str = None, etag: str = None) -> FileValidationRecord:
+    """Convert a validation result dictionary to a FileValidationRecord.
+    
+    Args:
+        result: Dictionary with validation results
+        file_path: Path to the validated file
+        uuid: Optional UUID of the file
+        etag: Optional ETag value for concurrency control
+        
+    Returns:
+        A populated FileValidationRecord
+    """
+    validation_record = FileValidationRecord(file_path, uuid, etag)
+    
+    # Set validation status
+    if 'success' in result:
+        validation_record.validation_success = result['success']
+    elif 'results' in result and 'valid' in result['results']:
+        validation_record.validation_success = result['results']['valid']
+    
+    # Add stats and metadata as info
+    if 'results' in result and 'stats' in result['results']:
+        validation_record.update_info(result['results']['stats'])
+    
+    # Add any platform, read_count, read_length, flowcell_details etc. from results
+    if 'results' in result:
+        for key in ['platform', 'read_count', 'read_length', 'flowcell_details', 'md5sum', 
+                   'sha256', 'crc32c', 'content_md5sum', 'file_size']:
+            if key in result['results']:
+                validation_record.update_info({key: result['results'][key]})
+    
+    # Add errors
+    if 'error' in result:
+        validation_record.update_errors({'validation_error': result['error']})
+    elif 'results' in result and 'errors' in result['results']:
+        validation_record.update_errors(result['results']['errors'])
+    
+    return validation_record
+
 def validate_local_file(file_path: str, file_format: str, debug: bool = False, 
                       validator: Optional[Any] = None, 
                       progress_tracker: Optional[SimpleActivityTracker] = None,
-                      identifier: str = "") -> Dict[str, Any]:
+                      identifier: str = "", return_record: bool = False, 
+                      etag: Optional[str] = None) -> Union[Dict[str, Any], FileValidationRecord]:
     """Validate a local file.
     
     Args:
@@ -137,9 +178,11 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         identifier: Optional identifier for the file (e.g., accession number)
+        return_record: Whether to return a FileValidationRecord instead of a dictionary
+        etag: Optional ETag value for concurrency control
         
     Returns:
-        Dictionary with validation results
+        Dictionary with validation results or FileValidationRecord
     """
     try:
         if progress_tracker:
@@ -197,12 +240,18 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         
         track_validation_progress(file_path, progress_tracker, "Validation complete", True, validation_results)
             
-        return {
+        result = {
             "file_path": file_path,
             "results": validation_results, # Return combined results
             "success": True,
             "identifier": identifier
         }
+        
+        # Convert to structured record if requested
+        if return_record:
+            return create_validation_record(result, file_path, identifier, etag)
+        
+        return result
         
     except Exception as e:
         error_msg = f"Error validating {file_path}: {str(e)}"
@@ -210,17 +259,24 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         
         track_validation_progress(file_path, progress_tracker, f"Error: {str(e)}", False, {"error": str(e)})
             
-        return {
+        result = {
             "file_path": file_path,
             "error": error_msg,
             "success": False,
             "identifier": identifier
         }
+        
+        # Convert to structured record if requested
+        if return_record:
+            return create_validation_record(result, file_path, identifier, etag)
+        
+        return result
 
 def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
                    validator: Optional[Any] = None, 
                    progress_tracker: Optional[SimpleActivityTracker] = None,
-                   identifier: str = "") -> Dict[str, Any]:
+                   identifier: str = "", return_record: bool = False,
+                   etag: Optional[str] = None) -> Union[Dict[str, Any], FileValidationRecord]:
     """Validate an S3 file using streaming without downloading to disk.
     
     Args:
@@ -230,9 +286,11 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         identifier: Optional identifier for the file (e.g., accession number)
+        return_record: Whether to return a FileValidationRecord instead of a dictionary
+        etag: Optional ETag value for concurrency control
         
     Returns:
-        Dictionary with validation results
+        Dictionary with validation results or FileValidationRecord
     """
     process = None
     
@@ -287,12 +345,18 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         # Combine results
         validation_results['stats'] = {**validation_results.get('stats', {}), **hash_stats}
         
-        return {
+        result = {
             "file_path": s3_path,
             "results": validation_results,
             "success": True,
             "identifier": identifier
         }
+        
+        # Convert to structured record if requested
+        if return_record:
+            return create_validation_record(result, s3_path, identifier, etag)
+        
+        return result
         
     except Exception as e:
         error_msg = f"Error validating {s3_path}: {str(e)}"
@@ -301,9 +365,15 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         if progress_tracker:
             progress_tracker.complete_file(s3_path, False, {"error": str(e)})
         
-        return {
+        result = {
             "file_path": s3_path,
             "error": error_msg,
             "success": False,
             "identifier": identifier
-        } 
+        }
+        
+        # Convert to structured record if requested
+        if return_record:
+            return create_validation_record(result, s3_path, identifier, etag)
+        
+        return result 
