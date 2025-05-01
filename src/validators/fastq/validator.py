@@ -212,13 +212,13 @@ class FastqValidator(BaseValidator):
         current_block = []
         
         # Determine the actual stream to read from (handle decompression)
-        actual_stream = None
-        buffer = None # Keep track of buffer if created
+        validation_stream = None # Renamed for clarity
         
         if is_gzipped:
             try:
                 logger.debug(f"Creating GzipFile decompression stream for {type(stream)}")
-                actual_stream = gzip.GzipFile(fileobj=stream, mode='rb')
+                # Directly wrap the input stream for transparent decompression
+                validation_stream = gzip.GzipFile(fileobj=stream, mode='rb')
                 logger.debug("GzipFile decompression stream created successfully")
             except Exception as e:
                 logger.error(f"Failed to decompress gzipped stream: {str(e)}", exc_info=True)
@@ -228,13 +228,18 @@ class FastqValidator(BaseValidator):
                 )
         else:
             logger.debug(f"Using direct stream for FASTQ validation {type(stream)}")
-            actual_stream = stream
+            validation_stream = stream # Use the raw stream if not gzipped
+        
+        # Ensure we have a stream to process
+        if validation_stream is None:
+            logger.error("Failed to obtain a validation stream (gzipped or raw).")
+            return FastqValidationResult.invalid("Could not process input stream", 0)
         
         try:
             # Process the stream line by line
             logger.debug("Starting to process FASTQ stream line by line")
             while True:
-                line = actual_stream.readline()
+                line = validation_stream.readline()
                 if not line:
                     break
                 line_count += 1
@@ -364,14 +369,11 @@ class FastqValidator(BaseValidator):
             )
         finally:
             # Clean up resources
-            if actual_stream is not None and hasattr(actual_stream, 'close'):
+            # Close the stream only if we created it (GzipFile)
+            # The original input_stream should be managed by the caller
+            if is_gzipped and validation_stream is not None and hasattr(validation_stream, 'close'):
                 try:
-                    actual_stream.close()
-                except:
-                    pass
-            if buffer is not None and hasattr(buffer, 'close'):
-                try:
-                    buffer.close()
+                    validation_stream.close()
                 except:
                     pass
 
