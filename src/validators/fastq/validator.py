@@ -67,116 +67,29 @@ class FastqValidator(BaseValidator):
             - warnings (dict): Any validation warnings
             - stats (dict): File statistics
         """
-        if not os.path.exists(file_path):
-            return self.format_validation_result(
+        # This method is now redundant as the core logic is handled
+        # in core/validation.py which calls validate_stream.
+        # We keep it here for potential backward compatibility or future file-specific logic
+        # but recommend using the stream-based validation flow.
+        logger.warning("validate_file is deprecated for FastqValidator. Use the validation flow in core/validation.py.")
+        
+        # Simplified call to the stream validation logic for basic check
+        try:
+            with open(file_path, 'rb') as f:
+                is_gzipped = has_gz_extension(file_path)
+                # Note: This will not return hashes as they are now calculated separately
+                return self.validate_stream(f, is_gzipped=is_gzipped)
+        except FileNotFoundError:
+             return self.format_validation_result(
                 valid=False,
                 errors={"file_not_found": f"File not found: {file_path}"}
             )
-        
-        # Check for empty file
-        if os.path.getsize(file_path) == 0:
+        except Exception as e:
+            logger.error(f"Error during basic file validation: {e}")
             return self.format_validation_result(
                 valid=False,
-                errors={"empty_file": "FASTQ file is empty"}
+                errors={"file_validation_error": str(e)}
             )
-        
-        errors = {}
-        warnings = {}
-        
-        file_handle = None
-        try:
-            # Reset collectors
-            self.header_parser.reset()
-            self.statistics.reset()
-            self.mismatched_ids = {}
-            
-            # Check if file is gzipped
-            is_gzipped = has_gz_extension(file_path)
-            
-            # For gzipped files, we'll use gzip.open
-            if is_gzipped:
-                with gzip.open(file_path, 'rb') as f:
-                    # Read the entire content
-                    content = f.read()
-                    # Use a BytesIO buffer for validation
-                    validation_stream = io.BytesIO(content)
-                    
-                    # Calculate hashes on the original compressed data
-                    with open(file_path, 'rb') as raw_file:
-                        # This handles md5sum, sha256, crc32c of the compressed file AND content_md5sum
-                        hash_stream, metadata = self.create_hash_calculating_stream(raw_file, is_gzipped=True)
-                        # Read to calculate all hashes in a single pass
-                        while hash_stream.read(8192):
-                            pass
-                    
-                    # Get content_md5sum from the GzipHashCalculatingStream
-                    if isinstance(hash_stream, GzipHashCalculatingStream):
-                        metadata["content_md5sum"] = hash_stream.get_content_md5sum()
-                    
-                    # Validate the content
-                    validation_result = self.validate_fastq_stream(validation_stream, collect_stats=True)
-            else:
-                # For uncompressed files
-                with open(file_path, 'rb') as f:
-                    # Read the entire content
-                    content = f.read()
-                    # Use a BytesIO buffer for both validation and hash calculation
-                    validation_stream = io.BytesIO(content)
-                    hash_stream_source = io.BytesIO(content)
-                    # Calculate hashes
-                    hash_stream, metadata = self.create_hash_calculating_stream(hash_stream_source, is_gzipped=False)
-                    # Read the stream to calculate hashes
-                    while hash_stream.read(8192):
-                        pass
-                    # Validate the content
-                    validation_result = self.validate_fastq_stream(validation_stream, collect_stats=True)
-            
-            if not validation_result.valid:
-                error_detail = validation_result.error_message
-                if validation_result.line_number is not None:
-                    error_detail += f" at line {validation_result.line_number}"
-                return self.format_validation_result(
-                    valid=False,
-                    errors={"invalid_format": error_detail}
-                )
-            
-            # Get hash values from the stream
-            hash_stats = self.get_hash_values(hash_stream, metadata)
-            
-            logger.debug(f"Validated FASTQ file: {file_path}")
-            
-        except Exception as e:
-            errors["validation_error"] = f"Validation error: {str(e)}"
-            logger.error(f"Validation failed: {str(e)}")
-            return self.format_validation_result(valid=False, errors=errors)
-        
-        # Get statistics
-        stats = self.statistics.get_statistics()
-        
-        # Add hash values to stats
-        stats.update(hash_stats)
-        
-        # Add metadata from header parser
-        stats.update(self.header_parser.get_formatted_metadata())
-        
-        # Additional validations and quality checks based on stats
-        validation_result = self.statistics.validate_statistics()
-        errors.update(validation_result.get("errors", {}))
-        warnings.update(validation_result.get("warnings", {}))
-        
-        # Add mismatched IDs to errors instead of warnings
-        if self.mismatched_ids:
-            errors["mismatched_ids"] = f"Found {len(self.mismatched_ids)} records with mismatched IDs in header and description lines"
-        
-        # Determine if valid (no errors, even if there are warnings)
-        valid = len(errors) == 0
-        
-        return self.format_validation_result(
-            valid=valid,
-            errors=errors,
-            warnings=warnings,
-            stats=stats
-        )
     
     def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
@@ -191,6 +104,7 @@ class FastqValidator(BaseValidator):
         """
         errors = {}
         warnings = {}
+        stats = {} # Initialize stats dict
         
         try:
             logger.debug("Starting FASTQ stream validation")
@@ -219,46 +133,32 @@ class FastqValidator(BaseValidator):
             is_seekable = hasattr(input_stream, 'seek') and hasattr(input_stream, 'tell')
             logger.debug(f"Stream is seekable: {is_seekable}, is_gzipped: {is_gzipped}")
             
-            # Create a hash calculating stream wrapper
-            # This wrapper will calculate hashes while we read for validation
-            try:
-                logger.debug("Creating hash calculating stream")
-                hash_stream, metadata = self.create_hash_calculating_stream(input_stream, is_gzipped)
-                logger.debug(f"Hash stream created, type: {type(hash_stream)}")
-                
-                # Directly validate the FASTQ format using the hash_stream
-                logger.debug("Starting FASTQ stream validation with hash calculation")
-                fastq_validation_result = self.validate_fastq_stream(hash_stream, collect_stats=True, is_gzipped=is_gzipped)
-                logger.debug(f"FASTQ validation result: {fastq_validation_result.valid}")
-                
-                # Get the hash values calculated during validation
-                logger.debug("Getting hash values")
-                hash_stats = self.get_hash_values(hash_stream, metadata)
-                logger.debug(f"Hash calculation successful: {list(hash_stats.keys())}")
-                
-            except Exception as e:
-                logger.error(f"Error during stream validation: {str(e)}", exc_info=True)
-                return self.format_validation_result(
-                    valid=False,
-                    errors={"validation_error": f"Stream validation error: {str(e)}"}
-                )
+            # Hashes are now calculated externally in core/validation.py
+            # This method focuses only on format validation and statistics collection.
             
+            # Directly validate the FASTQ format using the input stream
+            logger.debug("Starting FASTQ format validation")
+            # Pass collect_stats=True to gather read counts, lengths etc.
+            fastq_validation_result = self.validate_fastq_stream(input_stream, collect_stats=True, is_gzipped=is_gzipped)
+            logger.debug(f"FASTQ format validation result: {fastq_validation_result.valid}")
+
             if not fastq_validation_result.valid:
                 error_detail = fastq_validation_result.error_message
                 if fastq_validation_result.line_number is not None:
                     error_detail += f" at line {fastq_validation_result.line_number}"
-                logger.debug(f"FASTQ validation failed: {error_detail}")
+                logger.debug(f"FASTQ format validation failed: {error_detail}")
                 return self.format_validation_result(
                     valid=False,
                     errors={"invalid_format": error_detail}
                 )
             
             # Get statistics collected during validation
-            stats = self.statistics.get_statistics()
-            
-            # Add hash values to stats
-            stats.update(hash_stats)
-            
+            format_stats = self.statistics.get_statistics()
+            # Update the main stats dictionary with format-specific stats
+            stats.update(format_stats)
+
+            # Hash stats are added externally in core/validation.py
+
             # Add metadata from header parser
             stats.update(self.header_parser.get_formatted_metadata())
             
@@ -311,48 +211,13 @@ class FastqValidator(BaseValidator):
         line_count = 0
         current_block = []
         
-        # Determine which stream to use for validation
-        if isinstance(stream, GzipHashCalculatingStream):
-            logger.debug("Stream is a GzipHashCalculatingStream, creating a separate decompression stream")
-            # Copy the data to a memory buffer so we can decompress it
-            # We need to do this because GzipHashCalculatingStream is handling the hash calculation
-            # and we need a separate stream to handle the FASTQ format validation
-            buffer = io.BytesIO()
-            chunk_size = 8192
-            
-            try:
-                # Read from the beginning to make sure we get all the data
-                # This will update all the hash calculations
-                stream_pos = 0
-                while True:
-                    chunk = stream.read(chunk_size)
-                    if not chunk:
-                        break
-                    buffer.write(chunk)
-                    stream_pos += len(chunk)
-                
-                # Reset the buffer for reading
-                buffer.seek(0)
-                
-                # Create a gzip decompression stream
-                if is_gzipped:
-                    logger.debug("Creating GzipFile for decompression of buffer data")
-                    actual_stream = gzip.GzipFile(fileobj=buffer, mode='rb')
-                else:
-                    logger.debug("Using buffer directly for non-compressed data")
-                    actual_stream = buffer
-                    
-            except Exception as e:
-                logger.error(f"Failed to prepare validation stream: {str(e)}", exc_info=True)
-                return FastqValidationResult.invalid(
-                    f"Failed to prepare validation stream: {str(e)}",
-                    0
-                )
-        # If the stream is gzipped but not a GzipHashCalculatingStream
-        elif is_gzipped:
+        # Determine the actual stream to read from (handle decompression)
+        actual_stream = None
+        buffer = None # Keep track of buffer if created
+        
+        if is_gzipped:
             try:
                 logger.debug(f"Creating GzipFile decompression stream for {type(stream)}")
-                # Use gzip.GzipFile for efficient streaming decompression
                 actual_stream = gzip.GzipFile(fileobj=stream, mode='rb')
                 logger.debug("GzipFile decompression stream created successfully")
             except Exception as e:
@@ -499,48 +364,16 @@ class FastqValidator(BaseValidator):
             )
         finally:
             # Clean up resources
-            if 'actual_stream' in locals() and hasattr(actual_stream, 'close'):
+            if actual_stream is not None and hasattr(actual_stream, 'close'):
                 try:
                     actual_stream.close()
                 except:
                     pass
-            if 'buffer' in locals() and hasattr(buffer, 'close'):
+            if buffer is not None and hasattr(buffer, 'close'):
                 try:
                     buffer.close()
                 except:
                     pass
-
-    def _process_fastq_content(self, stream: BinaryIO) -> None:
-        """
-        Process FASTQ content to extract statistics and metadata.
-        
-        This method reads through a FASTQ file, updating statistics and
-        extracting metadata from headers.
-        
-        Args:
-            stream: Binary stream containing FASTQ data
-        """
-        current_block = []
-        
-        for line in stream:
-            line = line.rstrip(b'\r\n')
-            
-            # Add line to current block
-            current_block.append(line)
-            
-            # Process complete blocks (4 lines per FASTQ record)
-            if len(current_block) == 4:
-                # Process header for metadata
-                header = current_block[0].decode('utf-8', errors='replace')
-                self.header_parser.parse_header(header)
-                
-                # Process sequence and quality for statistics
-                sequence = current_block[1].decode('utf-8', errors='replace')
-                quality = current_block[3].decode('utf-8', errors='replace')
-                self.statistics.update_sequence_stats(sequence, quality)
-                
-                # Reset block
-                current_block = []
 
     def get_last_machine_ids(self) -> str:
         """Get machine IDs from the last validation as a pipe-separated string."""

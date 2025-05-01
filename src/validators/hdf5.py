@@ -50,64 +50,26 @@ class Hdf5Validator(BaseValidator):
             - warnings (dict): Any validation warnings
             - stats (dict): File statistics
         """
-        if not os.path.exists(file_path):
-            return self.format_validation_result(
+        # This method is now redundant as the core logic is handled
+        # in core/validation.py which calls validate_stream.
+        logger.warning("validate_file is deprecated for Hdf5Validator. Use the validation flow in core/validation.py.")
+        
+        # Simplified call for basic check
+        try:
+            # Note: gzipped HDF5 is not standard, assume is_gzipped=False
+            with open(file_path, 'rb') as f:
+                return self.validate_stream(f, is_gzipped=False)
+        except FileNotFoundError:
+             return self.format_validation_result(
                 valid=False,
                 errors={"file_not_found": f"File not found: {file_path}"}
             )
-        
-        # Check for empty file
-        if os.path.getsize(file_path) == 0:
+        except Exception as e:
+            logger.error(f"Error during basic file validation: {e}")
             return self.format_validation_result(
                 valid=False,
-                errors={"empty_file": "HDF5 file is empty"}
+                errors={"file_validation_error": str(e)}
             )
-        
-        # If h5py is not available, return basic file stats only
-        if not self.has_h5py:
-            warnings = {"h5py_missing": "h5py module not available for full validation"}
-            stats = {
-                "file_size": os.path.getsize(file_path),
-                "file_exists": True,
-            }
-            return self.format_validation_result(
-                valid=True,
-                warnings=warnings,
-                stats=stats
-            )
-        
-        errors = {}
-        warnings = {}
-        stats = {}
-        
-        try:
-            # Try to open the file with h5py to validate format
-            with h5py.File(file_path, 'r') as f:
-                # Collect basic statistics
-                stats["groups"] = self._count_groups(f)
-                stats["datasets"] = self._count_datasets(f)
-                stats["attributes"] = self._count_attributes(f)
-            
-            logger.debug(f"Validated HDF5 file: {file_path}")
-            
-        except (IOError, OSError) as e:
-            errors["validation_error"] = f"Invalid HDF5 file: {str(e)}"
-            logger.error(f"Validation failed: {str(e)}")
-            return self.format_validation_result(valid=False, errors=errors)
-        except Exception as e:
-            errors["validation_error"] = f"Validation error: {str(e)}"
-            logger.error(f"Validation failed: {str(e)}")
-            return self.format_validation_result(valid=False, errors=errors)
-        
-        # Determine if valid (no errors, even if there are warnings)
-        valid = len(errors) == 0
-        
-        return self.format_validation_result(
-            valid=valid,
-            errors=errors,
-            warnings=warnings,
-            stats=stats
-        )
     
     def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
@@ -120,49 +82,20 @@ class Hdf5Validator(BaseValidator):
         Returns:
             Dictionary with validation results including:
             - valid (bool): Whether the stream data is valid
-            - errors (dict): Any validation errors
-            - warnings (dict): Any validation warnings
-            - stats (dict): Data statistics
+            - errors (dict): Any validation errors (format specific)
+            - warnings (dict): Any validation warnings (format specific)
+            - stats (dict): Data statistics (format specific, like group/dataset counts)
         """
         import io
-        import hashlib
+        # import hashlib # No longer needed here
         
         errors = {}
         warnings = {}
         stats = {}
         
-        # If h5py is not available, return basic stream stats only
+        # If h5py is not available, we can't validate the HDF5 structure.
         if not self.has_h5py:
             warnings = {"h5py_missing": "h5py module not available for full validation"}
-            
-            # Create an in-memory buffer to store the data
-            buffer = io.BytesIO()
-            
-            # Set up hash calculators for data
-            md5_hash = hashlib.md5()
-            sha256_hash = hashlib.sha256()
-            
-            # Read the stream in chunks and update hash calculators
-            total_bytes = 0
-            chunk_size = 262144  # 256KB chunks
-            
-            while True:
-                chunk = input_stream.read(chunk_size)
-                if not chunk:
-                    break
-                
-                # Update hash calculators
-                md5_hash.update(chunk)
-                sha256_hash.update(chunk)
-                
-                # Write to in-memory buffer
-                buffer.write(chunk)
-                total_bytes += len(chunk)
-            
-            # Add hash values to stats
-            stats["md5sum"] = md5_hash.hexdigest()
-            stats["sha256"] = sha256_hash.hexdigest()
-            stats["file_size"] = total_bytes
             
             return self.format_validation_result(
                 valid=True,
@@ -170,50 +103,25 @@ class Hdf5Validator(BaseValidator):
                 stats=stats
             )
         
-        # Set up hash calculators for data
-        md5_hash = hashlib.md5()
-        sha256_hash = hashlib.sha256()
-        
-        # Create an in-memory buffer to store the data
-        buffer = io.BytesIO()
-        
+        # Hash calculation is now done externally.
+        # We attempt to validate the structure directly from the stream.
+        # Note: HDF5 might not be fully streamable depending on the file structure
+        # and h5py's ability to handle the stream type (seekable vs non-seekable).
+        # Gzipped HDF5 is uncommon and not handled here; assume input_stream is raw HDF5 data.
         try:
-            # Read the stream in chunks and update hash calculators
-            total_bytes = 0
-            chunk_size = 262144  # 256KB chunks
-            
-            while True:
-                chunk = input_stream.read(chunk_size)
-                if not chunk:
-                    break
-                
-                # Update hash calculators
-                md5_hash.update(chunk)
-                sha256_hash.update(chunk)
-                
-                # Write to in-memory buffer
-                buffer.write(chunk)
-                total_bytes += len(chunk)
-            
-            # Add hash values to stats
-            stats["md5sum"] = md5_hash.hexdigest()
-            stats["sha256"] = sha256_hash.hexdigest()
-            stats["file_size"] = total_bytes
-            
-            # Rewind buffer for reading
-            buffer.seek(0)
-            
-            # Save to a temporary in-memory file handle that h5py can work with
             try:
                 # Try to validate the HDF5 data
-                with h5py.File(buffer, 'r') as f:
+                # Attempt to open directly from the stream
+                with h5py.File(input_stream, 'r') as f:
                     # Collect basic statistics
                     stats["groups"] = self._count_groups(f)
                     stats["datasets"] = self._count_datasets(f)
                     stats["attributes"] = self._count_attributes(f)
             except Exception as e:
-                errors["validation_error"] = f"Invalid HDF5 data: {str(e)}"
+                # This could be due to invalid format or stream incompatibility (e.g., non-seekable)
+                errors["validation_error"] = f"Invalid HDF5 structure or stream error: {str(e)}"
                 logger.error(f"HDF5 validation failed: {str(e)}")
+                # Return immediately on format error, stats might be incomplete/irrelevant
                 return self.format_validation_result(valid=False, errors=errors, stats=stats)
             
         except Exception as e:

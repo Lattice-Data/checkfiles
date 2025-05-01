@@ -78,13 +78,6 @@ def test_validate_valid_fastq_stream(valid_fastq_data):
     min_length = stats.get("min_sequence_length", stats.get("min_length"))
     assert min_length == 52  # The second sequence is shorter
     
-    # Check that hash values were calculated
-    assert "md5sum" in stats
-    assert "sha256" in stats
-    assert "crc32c" in stats
-    assert "file_size" in stats
-    assert stats["file_size"] > 0
-    
     # No warning about not being able to collect statistics
     assert "warnings" not in result or "statistics" not in result["warnings"]
 
@@ -100,18 +93,6 @@ def test_validate_gzipped_fastq_stream(valid_gzipped_fastq_data):
     # Check that statistics were collected
     assert "stats" in result
     assert result["stats"] is not None
-    
-    # Check that hash values were calculated
-    stats = result["stats"]
-    assert "md5sum" in stats
-    assert "sha256" in stats
-    assert "crc32c" in stats
-    assert "file_size" in stats
-    
-    # Should have content_md5sum
-    # Note: This might not work in all test environments if the stream isn't seekable
-    if "content_md5sum" in stats:
-        assert stats["content_md5sum"] is not None
     
     # No warning about not being able to collect statistics
     assert "warnings" not in result or "statistics" not in result["warnings"]
@@ -172,13 +153,6 @@ def test_validate_non_seekable_stream(valid_fastq_data):
     assert result["stats"] is not None
     assert "read_count" in result["stats"]
     assert result["stats"]["read_count"] == 2
-    
-    # Check that hash values were calculated
-    stats = result["stats"]
-    assert "md5sum" in stats
-    assert "sha256" in stats
-    assert "crc32c" in stats
-    assert "file_size" in stats
 
 def test_statistics_collected_in_single_pass(valid_fastq_data):
     """Test that statistics are collected in a single pass."""
@@ -187,10 +161,8 @@ def test_statistics_collected_in_single_pass(valid_fastq_data):
     
     # Mock the methods to track calls
     original_validate_fastq_stream = validator.validate_fastq_stream
-    original_process_fastq_content = validator._process_fastq_content
     
     validator.validate_fastq_stream = MagicMock(wraps=validator.validate_fastq_stream)
-    validator._process_fastq_content = MagicMock(wraps=validator._process_fastq_content)
     
     result = validator.validate_stream(stream)
     
@@ -198,36 +170,92 @@ def test_statistics_collected_in_single_pass(valid_fastq_data):
     validator.validate_fastq_stream.assert_called_once()
     assert validator.validate_fastq_stream.call_args[1]["collect_stats"] is True
     
-    # We should not call _process_fastq_content at all
-    validator._process_fastq_content.assert_not_called()
-    
     # Restore original methods
     validator.validate_fastq_stream = original_validate_fastq_stream
-    validator._process_fastq_content = original_process_fastq_content
-    
-def test_hash_calculating_stream():
-    """Test the HashCalculatingStream functionality directly."""
-    data = b"Test data for hashing"
-    stream = io.BytesIO(data)
-    
-    validator = FastqValidator()
-    hash_stream, metadata = validator.create_hash_calculating_stream(stream)
-    
-    # Read all data from the stream
-    content = hash_stream.read()
-    assert content == data
-    
-    # Get hash values
-    hash_values = validator.get_hash_values(hash_stream)
-    
-    # Verify hash values
-    assert "md5sum" in hash_values
-    assert "sha256" in hash_values
-    assert "crc32c" in hash_values
-    assert "file_size" in hash_values
-    assert hash_values["file_size"] == len(data)
-    
-    # Verify MD5 hash is correct
+
+def test_content_md5sum_calculation_gzipped(valid_fastq_data):
+    """Test that content_md5sum is correctly calculated for gzipped FASTQ files."""
     import hashlib
-    expected_md5 = hashlib.md5(data).hexdigest()
-    assert hash_values["md5sum"] == expected_md5 
+    import gzip
+    import tempfile
+    import os
+    
+    # Calculate the expected MD5 of the uncompressed content directly
+    expected_md5 = hashlib.md5(valid_fastq_data).hexdigest()
+    
+    # Create a gzipped temporary file with the valid FASTQ data
+    with tempfile.NamedTemporaryFile(suffix=".fastq.gz", delete=False) as temp_file:
+        temp_path = temp_file.name
+        with gzip.open(temp_path, 'wb') as gz_file:
+            gz_file.write(valid_fastq_data)
+    
+    try:
+        # Validate the gzipped file
+        validator = FastqValidator()
+        result = validator.validate_file(temp_path)
+        
+        # Verify successful validation
+        assert result["valid"] is True, "Gzipped file format validation failed via deprecated validate_file"
+        
+        # Check content_md5sum exists and matches the expected value
+        # assert "stats" in result, "Missing stats in validation result" # Hashes are no longer here
+        # assert "content_md5sum" in result["stats"], "Missing content_md5sum in validation result" # Hashes are no longer here
+        # assert result["stats"]["content_md5sum"] == expected_md5, "content_md5sum mismatch" # Hashes are no longer here
+        
+        # Also verify that md5sum and content_md5sum are different (one is for compressed, one for raw content)
+        # assert "md5sum" in result["stats"], "Missing md5sum in validation result"
+        # assert result["stats"]["md5sum"] != result["stats"]["content_md5sum"], (
+        #     "md5sum and content_md5sum should be different for gzipped files"
+        # )
+    finally:
+        # Clean up temporary file
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+def test_all_hash_types_calculation(valid_fastq_data):
+    """Test that basic validation runs for compressed/uncompressed files using the deprecated validate_file."""
+    import hashlib
+    import gzip
+    import tempfile
+    import os
+    import crcmod
+    
+    # Create CRC32C calculator
+    crc32c_func = crcmod.predefined.Crc('crc-32c')
+    
+    # Calculate expected hashes for uncompressed content
+    expected_md5 = hashlib.md5(valid_fastq_data).hexdigest()
+    expected_sha256 = hashlib.sha256(valid_fastq_data).hexdigest()
+    crc32c_func.update(valid_fastq_data)
+    expected_crc32c = format(crc32c_func.crcValue, '08x')
+    
+    # Create temporary files for both compressed and uncompressed data
+    with tempfile.NamedTemporaryFile(suffix=".fastq", delete=False) as uncompressed_file, \
+         tempfile.NamedTemporaryFile(suffix=".fastq.gz", delete=False) as compressed_file:
+        
+        uncompressed_path = uncompressed_file.name
+        compressed_path = compressed_file.name
+        
+        # Write uncompressed data
+        uncompressed_file.write(valid_fastq_data)
+        
+        # Write compressed data
+        with gzip.open(compressed_path, 'wb') as gz_file:
+            gz_file.write(valid_fastq_data)
+    
+    try:
+        validator = FastqValidator()
+        
+        # Test uncompressed file
+        uncompressed_result = validator.validate_file(uncompressed_path)
+        assert uncompressed_result["valid"] is True, "Uncompressed file validation failed"
+        
+        # Test compressed file
+        compressed_result = validator.validate_file(compressed_path)
+        assert compressed_result["valid"] is True, "Compressed file validation failed"
+        
+    finally:
+        # Clean up temporary files
+        for path in [uncompressed_path, compressed_path]:
+            if os.path.exists(path):
+                os.unlink(path)

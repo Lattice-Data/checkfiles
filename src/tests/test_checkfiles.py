@@ -14,6 +14,7 @@ import pytest
 import subprocess
 import shutil
 from pathlib import Path
+import ast
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -312,18 +313,16 @@ def test_validate_s3_file_success(monkeypatch):
     monkeypatch.setattr("subprocess.Popen", mock_popen)
     
     # Also patch the hash calculation to ensure consistent results
-    def mock_get_hash_values(self, hash_stream, metadata=None):
+    def mock_calculate_hashes(stream, is_gzipped):
         return {
             "md5sum": "d41d8cd98f00b204e9800998ecf8427e",  # Example hash
             "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",  # Example hash
             "crc32c": "00000000",
-            "file_size": len(test_content)
+            "file_size": len(test_content) # Simulate file size calculation
         }
     
-    # Patch the method in the validator class
-    from src.validators.base import BaseValidator
-    original_get_hash_values = BaseValidator.get_hash_values
-    monkeypatch.setattr(BaseValidator, "get_hash_values", mock_get_hash_values)
+    # Patch the centralized function
+    monkeypatch.setattr("src.core.validation.calculate_hashes_for_stream", mock_calculate_hashes)
     
     try:
         # Call the function
@@ -337,7 +336,7 @@ def test_validate_s3_file_success(monkeypatch):
         assert result["results"]["stats"]["md5sum"] == "d41d8cd98f00b204e9800998ecf8427e"
     finally:
         # Restore the original method to avoid affecting other tests
-        monkeypatch.setattr(BaseValidator, "get_hash_values", original_get_hash_values)
+        monkeypatch.setattr("src.core.validation.calculate_hashes_for_stream", None)
 
 
 def test_stream_s3_file(monkeypatch):
@@ -429,8 +428,6 @@ def test_validate_gzip_format_s3_error(monkeypatch):
 
 def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
     """Test that write_result_to_progress_log writes exactly all stats fields to the log file."""
-    import re
-
     temp_dir = tempfile.mkdtemp()
     monkeypatch.setenv("CHECKFILES_LOG_DIR", temp_dir)
     log_path = os.path.join(temp_dir, "validation_progress.log")
@@ -461,20 +458,18 @@ def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
         lines = f.readlines()
     last_line = lines[-1]
 
-    # Extract key=value pairs from the log line (after the first two columns)
-    log_fields = last_line.strip().split('\t')[2:]
-    log_stats = {}
-    for field in log_fields:
-        if field.startswith("Errors:") or field.startswith("Warnings:"):
-            continue
-        if '=' in field:
-            k, v = field.split('=', 1)
-            log_stats[k] = v
+    # Extract the stats dictionary from the log line (it's in the 4th column)
+    log_fields = last_line.strip().split('\t')
+    log_stats_str = log_fields[3]  # The stats dictionary is in the 4th column
+    
+    # Convert the string representation of the dictionary back to a dictionary
+    log_stats = ast.literal_eval(log_stats_str)
 
     # Compare sets of keys
     assert set(log_stats.keys()) == set(stats.keys()), (
         f"Log stats keys {set(log_stats.keys())} do not match input stats keys {set(stats.keys())}"
     )
+    
     # Compare values
     for k, v in stats.items():
         assert str(log_stats[k]) == str(v), f"Value for {k} does not match: {log_stats[k]} != {v}"

@@ -180,7 +180,8 @@ def test_validate_empty_file(validator, test_files):
     result = validator.validate_file(test_files["empty"])
     
     assert result["valid"] is False
-    assert "empty_file" in result["errors"]
+    assert "invalid_format" in result["errors"], "Expected 'invalid_format' error for empty file"
+    assert "Empty FASTQ file" in result["errors"]["invalid_format"], "Expected specific empty file message"
 
 
 def test_validate_short_reads(validator, test_files):

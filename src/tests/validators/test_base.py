@@ -8,11 +8,8 @@ import hashlib
 import unittest
 from typing import Dict, Any
 
-from src.validators.base import (
-    HashCalculatingStream,
-    GzipHashCalculatingStream,
-    BaseValidator
-)
+# Import the new centralized function
+from src.core.validation import calculate_hashes_for_stream
 
 class TestHashCalculatingStream(unittest.TestCase):
     """Test the HashCalculatingStream class."""
@@ -27,18 +24,9 @@ class TestHashCalculatingStream(unittest.TestCase):
         expected_md5 = hashlib.md5(test_data).hexdigest()
         expected_sha256 = hashlib.sha256(test_data).hexdigest()
         
-        # Create validator to use its helper methods
-        validator = BaseValidator()
-        
-        # Create hash calculating stream
-        hash_stream, _ = validator.create_hash_calculating_stream(input_stream, is_gzipped=False)
-        
-        # Read all data from the stream to calculate hashes
-        content = hash_stream.read()
-        self.assertEqual(content, test_data)
-        
-        # Get calculated hash values
-        hash_stats = validator.get_hash_values(hash_stream)
+        # Use the centralized hash calculation function
+        # This function consumes the stream
+        hash_stats = calculate_hashes_for_stream(input_stream, is_gzipped=False)
         
         # Verify calculated hashes
         self.assertEqual(hash_stats['md5sum'], expected_md5)
@@ -67,18 +55,8 @@ class TestGzipHashCalculatingStream(unittest.TestCase):
         expected_compressed_sha256 = hashlib.sha256(compressed_bytes).hexdigest()
         expected_content_md5 = hashlib.md5(original_data).hexdigest()
         
-        # Create validator to use its helper methods
-        validator = BaseValidator()
-        
-        # Create hash calculating stream for gzipped data
-        hash_stream, _ = validator.create_hash_calculating_stream(io.BytesIO(compressed_bytes), is_gzipped=True)
-        
-        # Read all data from the stream to calculate hashes
-        content = hash_stream.read()
-        self.assertEqual(content, compressed_bytes)
-        
-        # Get calculated hash values
-        hash_stats = validator.get_hash_values(hash_stream)
+        # Use the centralized hash calculation function
+        hash_stats = calculate_hashes_for_stream(io.BytesIO(compressed_bytes), is_gzipped=True)
         
         # Verify calculated hashes
         self.assertEqual(hash_stats['md5sum'], expected_compressed_md5)
@@ -106,25 +84,14 @@ class TestGzipHashCalculatingStream(unittest.TestCase):
         # Calculate expected content MD5 directly
         expected_content_md5 = hashlib.md5(original_data).hexdigest()
         
-        # Create validator to use its helper methods
-        validator = BaseValidator()
-        
-        # Create hash calculating stream for gzipped data
-        hash_stream, _ = validator.create_hash_calculating_stream(io.BytesIO(compressed_bytes), is_gzipped=True)
-        
-        # Read data in small chunks (512 bytes)
-        chunk_size = 512
-        chunks = []
-        while True:
-            chunk = hash_stream.read(chunk_size)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        
-        # Get calculated hash values
-        hash_stats = validator.get_hash_values(hash_stream)
+        # Use the centralized hash calculation function
+        # Note: calculate_hashes_for_stream reads the whole stream internally,
+        # so direct testing of chunked reading on the *wrapper* isn't applicable here.
+        # We test that the function works correctly with gzipped data.
+        hash_stats = calculate_hashes_for_stream(io.BytesIO(compressed_bytes), is_gzipped=True)
         
         # Verify content_md5sum was calculated correctly even with chunked reading
+        # (The function handles internal reading, ensuring correctness)
         self.assertEqual(hash_stats['content_md5sum'], expected_content_md5)
         self.assertEqual(hash_stats['content_size'], len(original_data))
 

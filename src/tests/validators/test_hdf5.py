@@ -97,7 +97,9 @@ def test_validate_empty_file(validator):
         result = validator.validate_file(temp_path)
         
         assert result["valid"] is False
-        assert "empty_file" in result["errors"]
+        # The error now comes from h5py trying to read the empty file stream
+        assert "validation_error" in result["errors"], "Expected validation error for empty file"
+        assert "file signature not found" in result["errors"]["validation_error"], "Expected specific h5py error for empty file"
     finally:
         # Clean up
         try:
@@ -118,7 +120,9 @@ def test_validate_invalid_file(validator):
         result = validator.validate_file(temp_path)
         
         assert result["valid"] is False
-        assert "validation_error" in result["errors"]
+        # Updated error message check
+        assert "Invalid HDF5 structure or stream error" in result["errors"]["validation_error"]
+        assert "file signature not found" in result["errors"]["validation_error"] # More specific h5py error
     finally:
         # Clean up
         try:
@@ -136,10 +140,9 @@ def test_validate_stream(validator):
     
     assert result["valid"] is False
     assert "validation_error" in result["errors"]
-    assert "Invalid HDF5 data" in result["errors"]["validation_error"]
+    # Check the specific error message from h5py for invalid stream/signature
+    assert "Invalid HDF5 structure or stream error" in result["errors"]["validation_error"]
+    assert "file signature not found" in result["errors"]["validation_error"]
     
-    # Check that basic stats were calculated despite failure
-    assert "file_size" in result["stats"]
-    assert result["stats"]["file_size"] == len(b"Test data")
-    assert "md5sum" in result["stats"]
-    assert "sha256" in result["stats"] 
+    # Hashes are no longer calculated here
+    # assert "file_size" in result["stats"] # No longer calculated here
