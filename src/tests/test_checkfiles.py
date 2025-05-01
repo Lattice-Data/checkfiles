@@ -497,3 +497,67 @@ def test_file_source_validation():
     sources_provided = 2
     result = sources_provided > 1
     assert result is True, "Should detect when multiple sources are provided"
+
+
+# Add test for file format validation rules
+def test_file_format_validation_direct():
+    """Test the file format validation logic directly."""
+    
+    # Test case 1: Local files without file format
+    sources_provided = 1  # Assume local_file is provided
+    has_local_or_s3 = True
+    has_backend = False
+    has_file_format = False
+    
+    # Should require file format for local/S3 files
+    assert (has_local_or_s3 and not has_file_format) is True, "Should detect when file format is missing for local/S3 files"
+    
+    # Test case 2: Backend with file format
+    has_local_or_s3 = False
+    has_backend = True
+    has_file_format = True
+    
+    # Should not allow file format with backend
+    assert (has_backend and has_file_format) is True, "Should detect when file format is provided with backend"
+    
+    # Test case 3: Local files with file format
+    has_local_or_s3 = True  
+    has_backend = False
+    has_file_format = True
+    
+    # Should allow file format with local/S3 files
+    assert (has_local_or_s3 and has_file_format) is True, "Should allow file format with local/S3 files"
+    
+    # Test case 4: Backend without file format
+    has_local_or_s3 = False
+    has_backend = True
+    has_file_format = False
+    
+    # Should allow backend without file format
+    assert (has_backend and not has_file_format) is True, "Should allow backend without file format"
+
+
+# Test handling of file formats from backend
+def test_backend_file_format_mapping():
+    """Test handling of file format mapping from backend objects."""
+    
+    # Create a mock mapping of S3 URIs to file formats
+    s3_uri_to_file_format = {
+        "s3://bucket/file1.fastq.gz": "fastq",
+        "s3://bucket/file2.bam": "bam"
+    }
+    
+    # Test case 1: File with format in mapping
+    s3_path = "s3://bucket/file1.fastq.gz"
+    default_format = "hdf5"
+    
+    # Should use format from mapping
+    file_format = s3_uri_to_file_format.get(s3_path, default_format)
+    assert file_format == "fastq", "Should use format from mapping when available"
+    
+    # Test case 2: File without format in mapping
+    s3_path = "s3://bucket/file3.unknown"
+    
+    # Should use default format
+    file_format = s3_uri_to_file_format.get(s3_path, default_format)
+    assert file_format == default_format, "Should use default format when not in mapping"

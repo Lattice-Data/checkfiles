@@ -200,8 +200,6 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
         logger.error(f"Error fetching files from backend: {e}")
         return []
 
-
-
 def main():
     """Main entry point for checkfiles utility."""
     args = parse_arguments()
@@ -227,21 +225,6 @@ def main():
     with open(progress_log_path, 'w') as f:
         f.write("identifier\turi\terrors\tresults\tjson_patch\tLattice patched?\tS3 tag patched?\n")
     
-    # Check if file format is supported
-    if not args.file_format:
-        print("Please specify a file format using the -f/--file-format option")
-        sys.exit(1)
-        
-    # Initialize validator
-    try:
-        validator = initialize_validator(args.file_format)
-    except ValueError as e:
-        print(str(e))
-        sys.exit(1)
-    except ImportError as e:
-        print(str(e))
-        sys.exit(1)
-        
     # Check that only one file source is provided
     sources_provided = 0
     if args.local_file:
@@ -259,17 +242,39 @@ def main():
         print("Error: Only one file source can be used at a time. Choose one of: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)")
         sys.exit(1)
     
+    # Enforce file format rules:
+    # 1. When using local or S3 files directly, -f is required
+    # 2. When using backend API, -f must not be provided
+    if (args.local_file or args.s3_file) and not args.file_format:
+        print("Error: When using -l or -s3, you must specify a file format using the -f/--file-format option")
+        sys.exit(1)
+    
+    if args.backend_uri and args.query and args.file_format:
+        print("Error: When using --backend-uri and --query, the -f/--file-format option must not be provided")
+        print("The file format will be determined from the backend file information")
+        sys.exit(1)
+    
     # Get list of files to process
     local_files = []
     s3_files = []
     backend_files = []
+    s3_uri_to_file_format = {}  # Mapping of S3 URI to file format for backend files
     
     # If backend_uri and query are provided, fetch files from backend
     if args.backend_uri and args.query:
         backend_files = fetch_files_from_backend(args.backend_uri, args.query)
+        
         for file_obj in backend_files:
             if file_obj.get('s3_uri'):
-                s3_files.append(file_obj['s3_uri'])
+                s3_uri = file_obj.get('s3_uri')
+                s3_files.append(s3_uri)
+                
+                # Extract file format from backend file object
+                if file_obj.get('file_format'):
+                    s3_uri_to_file_format[s3_uri] = file_obj.get('file_format')
+                else:
+                    logger.warning(f"File {s3_uri} has no file_format field in backend response")
+                    print(f"Warning: File {s3_uri} has no file_format field in backend response")
     elif args.local_file:
         raw_local_files = [f.strip() for f in args.local_file.split(',')]
         
@@ -318,9 +323,10 @@ def main():
         file_format=args.file_format,
         thread_count=thread_count,
         debug=args.debug,
-        validator=validator,
+        validator=None,  # No longer provide a pre-initialized validator
         progress_tracker=progress_tracker,
-        backend_files=backend_files
+        backend_files=backend_files,
+        s3_uri_to_file_format=s3_uri_to_file_format  # Pass the mapping to the function
     )
     
     # Close progress tracker
@@ -333,18 +339,20 @@ def main():
 def process_files_in_parallel(local_files: List[str], s3_files: List[str], 
                               file_format: str, thread_count: int, debug: bool,
                               validator: Any, progress_tracker: SimpleActivityTracker = None,
-                              backend_files: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                              backend_files: List[Dict[str, Any]] = None,
+                              s3_uri_to_file_format: Dict[str, str] = {}) -> List[Dict[str, Any]]:
     """Process multiple files in parallel using a thread pool.
     
     Args:
         local_files: List of local file paths
         s3_files: List of S3 file paths
-        file_format: Format of the files
+        file_format: Format of the files (used for local/S3 files without backend info)
         thread_count: Number of threads to use
         debug: Whether to enable debug output
-        validator: Validator instance to use (will be ignored, new instances created per file)
+        validator: Validator instance (not used anymore, kept for backward compatibility)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         backend_files: List of file objects from the backend API
+        s3_uri_to_file_format: Mapping of S3 URI to file format for backend files
         
     Returns:
         List of validation results
@@ -355,6 +363,15 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         # Process local files
         if local_files:
             print(f"Processing {len(local_files)} local files...")
+            
+            # Check if file format is supported
+            try:
+                # Test initializing a validator to catch errors early
+                test_validator = initialize_validator(file_format)
+            except (ValueError, ImportError) as e:
+                print(f"Error initializing validator for format '{file_format}': {str(e)}")
+                sys.exit(1)
+                
             for file_path in local_files:
                 # Create a new validator instance for each file to ensure thread safety
                 file_validator = initialize_validator(file_format)
@@ -386,8 +403,20 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 
             # Submit validation tasks for each S3 file
             for s3_path in s3_files:
-                # Create a new validator instance for each file to ensure thread safety
-                file_validator = initialize_validator(file_format)
+                # Determine file format for this file
+                s3_file_format = s3_uri_to_file_format.get(s3_path)
+                
+                # If no format from backend, use the one provided on command line
+                if not s3_file_format:
+                    s3_file_format = file_format
+                
+                try:
+                    # Create a new validator instance for each file to ensure thread safety
+                    file_validator = initialize_validator(s3_file_format)
+                except (ValueError, ImportError) as e:
+                    print(f"Error initializing validator for S3 file {s3_path} with format '{s3_file_format}': {str(e)}")
+                    # Skip this file and continue with others
+                    continue
                 
                 # Get identifier from mapping if available
                 identifier = s3_uri_to_accession.get(s3_path, "")
@@ -396,7 +425,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                     executor.submit(
                         validate_s3_file,
                         s3_path,
-                        file_format,
+                        s3_file_format,  # Use the format for this specific file
                         debug,
                         file_validator,  # Pass a unique validator instance
                         progress_tracker,
