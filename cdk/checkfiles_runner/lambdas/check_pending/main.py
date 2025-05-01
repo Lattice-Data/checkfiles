@@ -79,7 +79,9 @@ def files_are_pending(pending_files):
 def check_pending_files(event, context):
     query = event.get("query")
     backend_uri = event['backend_uri']
-    backend_uri_query = backend_uri + query
+    #backend_uri_query = backend_uri + query
+    backend_uri_query = backend_uri + query.replace('report', 'search')
+   
     secret_arn = get_secret_arn()
     secret = get_secret(secret_arn)
     logging.info(f'looking for pending files in backend: {backend_uri_query}')
