@@ -103,22 +103,15 @@ class FastqValidator(BaseValidator):
                     
                     # Calculate hashes on the original compressed data
                     with open(file_path, 'rb') as raw_file:
-                        # This handles md5sum, sha256, crc32c of the compressed file
-                        hash_stream, metadata = self.create_hash_calculating_stream(raw_file, is_gzipped=False)
-                        # Read to calculate hashes
+                        # This handles md5sum, sha256, crc32c of the compressed file AND content_md5sum
+                        hash_stream, metadata = self.create_hash_calculating_stream(raw_file, is_gzipped=True)
+                        # Read to calculate all hashes in a single pass
                         while hash_stream.read(8192):
                             pass
                     
-                    # Calculate content_md5sum on the decompressed data separately
-                    content_stream = io.BytesIO(content)
-                    content_hash_stream = HashCalculatingStream(content_stream, calculate_content_md5=True, 
-                                                               calculate_other_hashes=False)
-                    # Read to calculate content hash
-                    while content_hash_stream.read(8192):
-                        pass
-                    
-                    # Merge the hash results
-                    metadata["content_md5sum"] = content_hash_stream.content_md5_hexdigest
+                    # Get content_md5sum from the GzipHashCalculatingStream
+                    if isinstance(hash_stream, GzipHashCalculatingStream):
+                        metadata["content_md5sum"] = hash_stream.get_content_md5sum()
                     
                     # Validate the content
                     validation_result = self.validate_fastq_stream(validation_stream, collect_stats=True)
