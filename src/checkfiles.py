@@ -331,7 +331,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         file_format: Format of the files
         thread_count: Number of threads to use
         debug: Whether to enable debug output
-        validator: Validator instance to use
+        validator: Validator instance to use (will be ignored, new instances created per file)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         backend_files: List of file objects from the backend API
         
@@ -345,6 +345,9 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         if local_files:
             print(f"Processing {len(local_files)} local files...")
             for file_path in local_files:
+                # Create a new validator instance for each file to ensure thread safety
+                file_validator = initialize_validator(file_format)
+                
                 # For local files, we may not have identifiers
                 futures.append(
                     executor.submit(
@@ -352,7 +355,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         file_path,
                         file_format,
                         debug,
-                        validator,  # Pass the validator instance
+                        file_validator,  # Pass a unique validator instance
                         progress_tracker
                     )
                 )
@@ -372,6 +375,9 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 
             # Submit validation tasks for each S3 file
             for s3_path in s3_files:
+                # Create a new validator instance for each file to ensure thread safety
+                file_validator = initialize_validator(file_format)
+                
                 # Get identifier from mapping if available
                 identifier = s3_uri_to_accession.get(s3_path, "")
                 
@@ -381,7 +387,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         s3_path,
                         file_format,
                         debug,
-                        validator,  # Pass the validator instance
+                        file_validator,  # Pass a unique validator instance
                         progress_tracker,
                         identifier  # Pass the identifier if available
                     )
