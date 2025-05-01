@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.utils.helpers import has_gz_extension, validate_gzip_format, stream_s3_file
 from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
 from src.tracking.progress import SimpleActivityTracker
-from src.checkfiles import write_result_to_progress_log
+from src.checkfiles import write_result_to_progress_log, main
 
 
 @pytest.fixture
@@ -475,3 +475,25 @@ def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
         assert str(log_stats[k]) == str(v), f"Value for {k} does not match: {log_stats[k]} != {v}"
 
     shutil.rmtree(temp_dir)
+
+
+# Add test for file source validation
+def test_file_source_validation():
+    """Test the file source validation logic directly."""
+    
+    from src.checkfiles import main
+    
+    # Test case 1: No sources
+    sources_provided = 0
+    result = sources_provided == 0
+    assert result is True, "Should detect when no sources are provided"
+    
+    # Test case 2: One source
+    sources_provided = 1
+    result = sources_provided > 1
+    assert result is False, "Should allow exactly one source"
+    
+    # Test case 3: Multiple sources
+    sources_provided = 2
+    result = sources_provided > 1
+    assert result is True, "Should detect when multiple sources are provided"

@@ -14,27 +14,28 @@ def parse_arguments() -> argparse.Namespace:
     default_threads = multiprocessing.cpu_count()
     
     parser = argparse.ArgumentParser(
-        description='Checkfiles utility - validates file formats like FASTQ. Accepts files from local paths, S3, or stdin.',
+        description='Checkfiles utility - validates file formats like FASTQ. Accepts files from local paths, S3, or backend API query.',
         epilog='''Examples:
   # Validate a single local file
   ./src/checkfiles.py -f fastq -l path/to/file.fastq.gz
   
+  # Validate multiple local files
+  ./src/checkfiles.py -f fastq -l path/to/file1.fastq.gz,path/to/file2.fastq.gz
+  
   # Validate multiple S3 files
   ./src/checkfiles.py -f fastq -s3 s3://bucket/file1.fastq.gz,s3://bucket/file2.fastq.gz
   
-  # Validate from stdin (pipe input)
-  cat file.fastq | ./src/checkfiles.py -f fastq
-  # or
-  aws s3 cp s3://bucket/file.fastq.gz - | gunzip -c | ./src/checkfiles.py -f fastq
+  # Validate files using a backend query
+  ./src/checkfiles.py -f fastq --backend-uri https://example.com/api/ --query type=File&accession=ABCD1234
+  
+  Note: Only one file source (-l, -s3, or --backend-uri/--query) can be used at a time.
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     parser.add_argument('-s3', '--s3-file', help='Specify S3 file(s) as comma-separated paths')
     parser.add_argument('-l', '--local-file', help='Specify local file(s) to validate as comma-separated paths')
-    parser.add_argument('-f', '--file-format', help='Specify the file format (e.g., fastq)')
-    parser.add_argument('-s', '--stream', action='store_true', default=True, 
-                        help='Use streaming mode for validation (default: True)')
+    parser.add_argument('-f', '--file-format', help='Specify the file format (e.g., fastq)', required=True)
     parser.add_argument('-d', '--debug', action='store_true', 
                         help='Enable debug output')
     parser.add_argument('-t', '--threads', type=int, default=default_threads, 

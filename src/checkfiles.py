@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Checkfiles utility - validates file formats like FASTQ.
-Handles files from local paths, S3, or stdin.
+Handles files from local paths, S3, or a backend API query.
 """
 
 import sys
@@ -230,18 +230,35 @@ def main():
     # Check if file format is supported
     if not args.file_format:
         print("Please specify a file format using the -f/--file-format option")
-        return
+        sys.exit(1)
         
     # Initialize validator
     try:
         validator = initialize_validator(args.file_format)
     except ValueError as e:
         print(str(e))
-        return
+        sys.exit(1)
     except ImportError as e:
         print(str(e))
-        return
+        sys.exit(1)
         
+    # Check that only one file source is provided
+    sources_provided = 0
+    if args.local_file:
+        sources_provided += 1
+    if args.s3_file:
+        sources_provided += 1
+    if args.backend_uri and args.query:
+        sources_provided += 1
+    
+    if sources_provided == 0:
+        print("Error: You must specify one file source: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)")
+        sys.exit(1)
+    
+    if sources_provided > 1:
+        print("Error: Only one file source can be used at a time. Choose one of: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)")
+        sys.exit(1)
+    
     # Get list of files to process
     local_files = []
     s3_files = []
@@ -253,9 +270,7 @@ def main():
         for file_obj in backend_files:
             if file_obj.get('s3_uri'):
                 s3_files.append(file_obj['s3_uri'])
-
-    
-    if args.local_file:
+    elif args.local_file:
         raw_local_files = [f.strip() for f in args.local_file.split(',')]
         
         # Process each local file path through the path translator
@@ -266,18 +281,14 @@ def main():
                 resolved_path = resolve_path(file_path)
                 logger.debug(f"Resolved path '{file_path}' to '{resolved_path}'")
                 local_files.append(resolved_path)
-        
-    if args.s3_file:
-        s3_files += [f.strip() for f in args.s3_file.split(',')]
+    elif args.s3_file:
+        s3_files = [f.strip() for f in args.s3_file.split(',')]
     
     total_files = len(local_files) + len(s3_files)
     
-    # If neither local nor S3 files were specified, use stdin
     if total_files == 0:
-        print("Running validator in streaming mode")
-        results = validator.validate_stream(sys.stdin.buffer)
-        print(f"Validation results: {results}")
-        return
+        print("Error: No files found to validate")
+        sys.exit(1)
     
     # Initialize activity tracker
     progress_tracker = None
