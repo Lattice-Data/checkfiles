@@ -7,6 +7,7 @@ import zlib
 import io
 import gzip
 import crcmod.predefined
+import subprocess
 from typing import Dict, Any, Optional, BinaryIO, Tuple, List, Callable
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,7 @@ class HashCalculatingStream(io.BufferedReader):
 class GzipHashCalculatingStream(HashCalculatingStream):
     """
     Stream wrapper that calculates hash digests for both compressed and uncompressed content.
-    For gzipped files, this calculates both regular file hashes and the content_md5sum hash
-    of the decompressed content in a single pass, without storing the entire decompressed file.
+    Uses streaming approach with system commands for content_md5sum calculation.
     """
     
     def __init__(self, stream: BinaryIO, hash_calculators: List[Tuple[str, Callable]]):
@@ -115,19 +115,39 @@ class GzipHashCalculatingStream(HashCalculatingStream):
         """
         super().__init__(stream, hash_calculators)
         
-        # Initialize decompressor for streaming decompression
-        self.decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)  # This magic number enables gzip format
-        
-        # Initialize content MD5 calculator
-        self.content_md5_calc = hashlib.md5()
+        # Initialize content size tracker
         self.content_size = 0
         
-        # Flag to track decompressor state
-        self.decompressor_finished = False
+        # Set up md5 process that will calculate content_md5sum
+        # This uses a pipe to gunzip | md5sum, similar to old_lattice_checkfiles.py
+        self.md5_process = subprocess.Popen(
+            ["gunzip", "--stdout", "-"],  # gunzip from stdin, output to stdout
+            stdin=subprocess.PIPE,         # we'll write to this
+            stdout=subprocess.PIPE,        # output of gunzip
+            stderr=subprocess.PIPE         # capture any errors
+        )
+        
+        # Set up a second process to calculate md5 from gunzip output
+        self.md5sum_process = subprocess.Popen(
+            ["md5sum"],
+            stdin=self.md5_process.stdout,  # read from gunzip's stdout
+            stdout=subprocess.PIPE,         # capture the md5sum output
+            stderr=subprocess.PIPE          # capture any errors
+        )
+        
+        # Close stdout in the first process to prevent deadlocks
+        # This allows EOF to be sent to md5sum when gunzip is done
+        self.md5_process.stdout.close()
+        
+        # For tracking uncompressed size
+        self.decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        
+        # For error handling
+        self.process_failed = False
     
     def read(self, size=-1):
         """
-        Read from stream, update all hash calculators, and decompress for content_md5sum.
+        Read from stream, update hash calculators, and feed data to gunzip process.
         
         Args:
             size: Number of bytes to read
@@ -138,45 +158,102 @@ class GzipHashCalculatingStream(HashCalculatingStream):
         data = super().read(size)
         
         if data:
+            # Feed data to gunzip process for md5sum
+            if not self.process_failed:
+                try:
+                    # Write to gunzip's stdin in a non-blocking way
+                    self.md5_process.stdin.write(data)
+                    self.md5_process.stdin.flush()
+                except BrokenPipeError:
+                    # Gunzip may have crashed or closed the pipe
+                    self.process_failed = True
+                    logger.error("Broken pipe to gunzip process")
+                except Exception as e:
+                    self.process_failed = True
+                    logger.error(f"Error writing to gunzip: {e}")
+            
+            # Also track uncompressed size using zlib
             try:
-                # Decompress data and update content MD5 hash
                 decompressed = self.decompressor.decompress(data)
                 if decompressed:
-                    self.content_md5_calc.update(decompressed)
                     self.content_size += len(decompressed)
             except Exception as e:
-                logger.error(f"Error decompressing data: {e}")
-        elif not self.decompressor_finished:
-            # End of stream but decompressor may have remaining data
-            self._flush_decompressor()
-            self.decompressor_finished = True
+                logger.error(f"Error in decompression: {e}")
+                
+        elif not self.process_failed:
+            # End of stream - close stdin to signal end of input
+            try:
+                self.md5_process.stdin.close()
+            except Exception as e:
+                logger.error(f"Error closing gunzip stdin: {e}")
+                self.process_failed = True
+                
+            # Try to flush decompressor for accurate content size
+            try:
+                remaining = self.decompressor.flush()
+                if remaining:
+                    self.content_size += len(remaining)
+            except Exception as e:
+                logger.error(f"Error flushing decompressor: {e}")
         
         return data
     
-    def _flush_decompressor(self):
-        """Process any remaining data in the decompressor."""
-        try:
-            if hasattr(self.decompressor, 'flush'):
-                remaining = self.decompressor.flush()
-                if remaining:
-                    self.content_md5_calc.update(remaining)
-                    self.content_size += len(remaining)
-        except Exception as e:
-            logger.error(f"Error flushing decompressor: {e}")
-    
     def get_content_md5sum(self) -> str:
         """
-        Get the MD5 hash digest of the decompressed content.
+        Get the MD5 hash digest of the decompressed content using piped gunzip | md5sum.
         
         Returns:
             Hexadecimal digest of content MD5
         """
-        # Ensure we've processed any remaining decompressed data
-        if not self.decompressor_finished:
-            self._flush_decompressor()
-            self.decompressor_finished = True
+        # If the process failed, return an empty string
+        if self.process_failed:
+            try:
+                error = self.md5_process.stderr.read().decode('utf-8', errors='replace') or \
+                        self.md5sum_process.stderr.read().decode('utf-8', errors='replace')
+                logger.error(f"Content MD5 calculation failed: {error}")
+            except:
+                pass
+            return ""
             
-        return self.content_md5_calc.hexdigest()
+        try:
+            # Wait for the md5sum process to complete
+            stdout, stderr = self.md5sum_process.communicate(timeout=10)
+            
+            # Check if process completed successfully
+            if self.md5sum_process.returncode != 0:
+                error = stderr.decode('utf-8', errors='replace')
+                logger.error(f"md5sum process failed: {error}")
+                return ""
+                
+            # Parse the md5sum output to get just the hash
+            # md5sum output format is: "hash  -" (hash followed by two spaces and a dash)
+            md5sum_output = stdout.decode('utf-8', errors='replace').strip()
+            content_md5 = md5sum_output.split(' ')[0]
+            
+            return content_md5
+            
+        except subprocess.TimeoutExpired:
+            # Process took too long, kill it and return empty string
+            logger.error("Timeout waiting for md5sum to complete")
+            self.md5sum_process.kill()
+            return ""
+        except Exception as e:
+            logger.error(f"Error getting content md5: {e}")
+            return ""
+        finally:
+            # Clean up any remaining process resources
+            try:
+                if hasattr(self, 'md5_process') and self.md5_process:
+                    if self.md5_process.poll() is None:  # still running
+                        self.md5_process.terminate()
+            except:
+                pass
+            try:
+                if hasattr(self, 'md5sum_process') and self.md5sum_process:
+                    if self.md5sum_process.poll() is None:  # still running
+                        self.md5sum_process.terminate()
+            except:
+                pass
     
     def get_content_size(self) -> int:
         """
