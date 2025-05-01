@@ -59,7 +59,7 @@ def run_checkfiles_command(event, context):
     if update:
         run_checkfiles_cmd = f"python3 src/checkfiles.py -m prod -q \"{query}\" --update --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     else:
-        run_checkfiles_cmd = f"python3 src/checkfiles.py -f fastq --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
+        run_checkfiles_cmd = f"python3 src/checkfiles.py --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     
     # Create a combined command that sets up the environment and runs checkfiles
     run_with_debug_cmd = f"""
