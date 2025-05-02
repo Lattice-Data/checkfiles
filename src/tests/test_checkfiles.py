@@ -15,6 +15,10 @@ import subprocess
 import shutil
 from pathlib import Path
 import ast
+import multiprocessing
+from unittest.mock import patch, MagicMock
+import inspect
+import re
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -23,7 +27,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.utils.helpers import has_gz_extension, validate_gzip_format, stream_s3_file
 from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
 from src.tracking.progress import SimpleActivityTracker
-from src.checkfiles import write_result_to_progress_log, main
+from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel
 
 
 @pytest.fixture
@@ -561,3 +565,25 @@ def test_backend_file_format_mapping():
     # Should use default format
     file_format = s3_uri_to_file_format.get(s3_path, default_format)
     assert file_format == default_format, "Should use default format when not in mapping"
+
+
+def test_process_files_in_parallel_uses_process_pool():
+    """Test that process_files_in_parallel imports and uses ProcessPoolExecutor."""
+    # Get the source code of the functions
+    process_parallel_source = inspect.getsource(process_files_in_parallel)
+    main_source = inspect.getsource(main)
+    
+    # Check that ProcessPoolExecutor is being used in process_files_in_parallel
+    assert 'ProcessPoolExecutor' in process_parallel_source
+    assert 'with ProcessPoolExecutor' in process_parallel_source
+    
+    # Check that it's not using ThreadPoolExecutor anywhere
+    assert 'ThreadPoolExecutor' not in process_parallel_source
+    
+    # Check the main function for ProcessPoolExecutor usage in patching
+    assert 'ProcessPoolExecutor' in main_source
+    assert 'ThreadPoolExecutor' not in main_source
+    
+    # Use regex to verify ProcessPoolExecutor is used with correct parameters
+    assert re.search(r'ProcessPoolExecutor\(max_workers=thread_count\)', process_parallel_source)
+    assert re.search(r'ProcessPoolExecutor\(max_workers=min\(args\.threads, len\(patch_jobs\)\)\)', main_source)

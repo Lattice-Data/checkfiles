@@ -7,6 +7,7 @@ Handles files from local paths, S3, or a backend API query.
 import sys
 import os
 import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import logging
 import threading
@@ -454,9 +455,9 @@ def main():
         logger.info(f"Preparing to update {len(patch_jobs)} files")
         print(f"Preparing to update {len(patch_jobs)} files")
         
-        # Use a thread pool to process patch jobs
+        # Use a process pool to process patch jobs
         patched_count = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.threads, len(patch_jobs))) as executor:
+        with ProcessPoolExecutor(max_workers=min(args.threads, len(patch_jobs))) as executor:
             for result in executor.map(patching_worker, patch_jobs):
                 if result:
                     patched_count += 1
@@ -472,13 +473,13 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                               validator: Any, progress_tracker: SimpleActivityTracker = None,
                               backend_files: List[Dict[str, Any]] = None,
                               s3_uri_to_file_format: Dict[str, str] = {}) -> List[Dict[str, Any]]:
-    """Process multiple files in parallel using a thread pool.
+    """Process multiple files in parallel using a process pool.
     
     Args:
         local_files: List of local file paths
         s3_files: List of S3 file paths
         file_format: Format of the files (used for local/S3 files without backend info)
-        thread_count: Number of threads to use
+        thread_count: Number of processes to use
         debug: Whether to enable debug output
         validator: Validator instance (not used anymore, kept for backward compatibility)
         progress_tracker: Activity tracker instance or None if tracking is disabled
@@ -488,7 +489,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
     Returns:
         List of validation results
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
+    with ProcessPoolExecutor(max_workers=thread_count) as executor:
         futures = []
         
         # Process local files
