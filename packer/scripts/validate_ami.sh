@@ -14,7 +14,6 @@ set -euo pipefail
 
 # Configuration
 REQUIRED_PACKAGES=(
-    "samtools"
     "python3"
     "pip3"
     "aws"
@@ -28,7 +27,6 @@ REQUIRED_DIRS=(
 )
 
 REQUIRED_FILES=(
-    "/usr/local/bin/samtools"
 )
 
 # Error handling function
@@ -48,14 +46,28 @@ fi
 
 echo "Starting AMI validation..."
 
-# Check required packages
-echo "Checking required packages..."
-for package in "${REQUIRED_PACKAGES[@]}"; do
-    if ! command -v "$package" &> /dev/null; then
-        echo "ERROR: Required package $package is not installed"
+# Check required executables
+required_executables=(
+    "python3"
+    "pip3"
+    "aws"
+)
+
+# Check required executable paths
+required_paths=(
+    "/usr/bin/python3"
+    "/usr/bin/pip3"
+    "/usr/local/bin/aws"
+)
+
+# Check if all required executables are installed
+echo "Checking required executables..."
+for exec in "${required_executables[@]}"; do
+    if ! command -v "$exec" &> /dev/null; then
+        echo "ERROR: $exec is not installed"
         exit 1
     fi
-    echo "✓ $package is installed"
+    echo "✓ $exec is installed"
 done
 
 # Check required directories
@@ -82,22 +94,14 @@ for file in "${REQUIRED_FILES[@]}"; do
     echo "✓ File $file exists"
 done
 
-# Check samtools version and functionality
-echo "Checking samtools..."
-SAMTOOLS_VERSION=$(samtools --version | head -n 1 | awk '{print $2}')
-if [ -z "$SAMTOOLS_VERSION" ]; then
-    echo "ERROR: Could not determine samtools version"
-    exit 1
-fi
-echo "✓ Samtools version $SAMTOOLS_VERSION is installed"
-
-# Check Python environment
+# Check Python environment and version
 echo "Checking Python environment..."
-if ! python3 -c "import sys; print(f'Python {sys.version}')" &> /dev/null; then
-    echo "ERROR: Python environment is not properly configured"
+PYTHON_VERSION=$(python3 --version | awk '{print $2}')
+if [[ "$PYTHON_VERSION" < "3.8" ]]; then
+    echo "ERROR: Python version must be at least 3.8, found $PYTHON_VERSION"
     exit 1
 fi
-echo "✓ Python environment is properly configured"
+echo "✓ Python version $PYTHON_VERSION is sufficient"
 
 # Check AWS CLI configuration
 echo "Checking AWS CLI..."

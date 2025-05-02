@@ -1,18 +1,16 @@
 """
-Validators for various file formats.
+Validator modules for different file formats.
 
-This package contains validators for different bioinformatics file formats,
-including FASTQ, BAM, CRAM, and HDF5.
+This package contains modules for validating various file formats,
+including FASTQ, HDF5.
 """
 
 from src.validators.fastq import FastqValidator
-from src.validators.bam import BamValidator
-from src.validators.cram import CramValidator
 from src.validators.hdf5 import Hdf5Validator
+from src.validators.h5ad import H5adValidator
 
 __all__ = [
     "FastqValidator",
-    "BamValidator", 
-    "CramValidator",
-    "Hdf5Validator"
+    "Hdf5Validator",
+    "H5adValidator",
 ]

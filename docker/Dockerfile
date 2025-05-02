@@ -2,7 +2,7 @@
 # 
 # This Dockerfile builds a container for the Checkfiles validation service.
 # It includes all required dependencies for processing and validating
-# various file formats including FASTQ, BAM, and CRAM files.
+# various file formats including FASTQ files.
 #
 # Maintainer: [Your Organization/Team]
 # Last updated: $(date +'%Y-%m-%d')
@@ -14,8 +14,7 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONPATH="${PYTHONPATH}:/app" \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive \
-    SAMTOOLS_VERSION=1.17
+    DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -26,9 +25,9 @@ RUN apt-get update && apt-get install -y \
     g++ \
     libhdf5-dev \
     python3-dev \
-    # Dependencies for samtools
-    build-essential \
     wget \
+    unzip \
+    build-essential \
     bzip2 \
     zlib1g-dev \
     libbz2-dev \
@@ -44,17 +43,6 @@ RUN pip3 install --no-cache-dir \
     botocore==1.31.17 \
     awscli==1.29.17 \
     boto3==1.28.17
-
-
-# Install samtools for BAM/CRAM validation
-RUN wget https://github.com/samtools/samtools/releases/download/${SAMTOOLS_VERSION}/samtools-${SAMTOOLS_VERSION}.tar.bz2 && \
-    tar -xjf samtools-${SAMTOOLS_VERSION}.tar.bz2 && \
-    cd samtools-${SAMTOOLS_VERSION} && \
-    ./configure --prefix=/usr/local && \
-    make && \
-    make install && \
-    cd .. && \
-    rm -rf samtools-${SAMTOOLS_VERSION} samtools-${SAMTOOLS_VERSION}.tar.bz2
 
 # Create required directories
 RUN mkdir -p /opt/checkfiles /app/logs

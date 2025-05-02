@@ -4,11 +4,10 @@
     "name_tag": "checkfiles__ami",
     "installation_scripts": [
         "../scripts/install_base_checkfiles_packages.sh",
-        "../scripts/install_samtools.sh",
         "../scripts/install_python_dependencies.sh",
         "../scripts/setup_validator_modules.sh",
-        "../scripts/create_validator_stubs.sh",
         "../scripts/setup_environment_file.sh",
+        "../scripts/create_validator_stubs.sh",
         "../scripts/validate_ami.sh"
     ],
     "ami_type": "checkfiles_jammy_ami",

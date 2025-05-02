@@ -1,48 +1,67 @@
 # Checkfiles Source Code
 
-## Streaming Validation Implementation
+## Checkfiles Project Structure
 
-The validation system in checkfiles has been optimized for true streaming operation, particularly for large S3 files. This ensures efficient processing without storing large files on disk.
+This directory contains the main source code for the Checkfiles project.
 
-### Key Improvements
+### Key Components
 
-1. **Pure Streaming S3 Validation**
-   - Files are validated directly from the S3 stream without creating temporary files
-   - Prevents "No space left on device" errors when processing large files
-   - Significantly reduces memory usage and eliminates disk I/O bottlenecks
+1. **Core Validation Framework**
+   - Base validator classes and common utilities
+   - Abstract interfaces for file and stream validation
+   - Standardized validation result formats
 
-2. **Single-Pass FASTQ Validation**
-   - The FASTQ validator now processes files in a single pass rather than reading twice
-   - Format validation and statistics collection happen simultaneously
-   - No longer buffers large portions of the file in memory
+2. **Specialized Validators**
+   - FASTQ validators with enhanced quality checking
+   - HDF5/H5AD validation with structure verification
+   - Extensible framework for adding new validators
 
-3. **Pipe-Based BAM/CRAM Validation**
-   - BAM and CRAM validators now pipe data directly to `samtools quickcheck`
-   - No temporary files are created during validation
-   - Memory usage remains constant regardless of file size
+3. **Stream Processing**
+   - Memory-efficient validation of large files
+   - S3 integration for direct validation without local storage
+   - Streaming validation for all supported formats
 
-### Implementation Details
+4. **CLI & API**
+   - Command-line interface with multiple modes
+   - Backend API for integration with data portals
+   - Configuration management and logging
 
-#### S3 File Processing
-- Uses AWS CLI with streaming output piped directly to validators
-- Progress tracking counts bytes processed without storing them
-- Decompression of gzipped files happens on-the-fly using pipes
+### Recent Improvements
 
-#### FASTQ Validation
-- Processes 4-line blocks one at a time through a single stream iteration
-- Validates format and collects statistics in the same pass
-- Maintains error context with line numbers for accurate reporting
+1. **Enhanced FASTQ Validation**
+   - Improved read name validation
+   - Quality score distribution analysis
+   - Base composition statistics
 
-#### BAM/CRAM Validation
-- Pipes data directly to samtools using subprocess stdin
-- Processes files in chunks to maintain constant memory usage
-- Reports total bytes processed for statistics
+2. **Optimized Memory Usage**
+   - Streaming validation for all formats
+   - Progress tracking for long-running validations
+   - Reduced peak memory usage for large files
 
-### Memory and Disk Usage
+3. **Parallel Processing**
+   - Multi-process validation support
+   - Configurable thread counts
+   - Automatic scaling based on available resources
 
-The improved implementation has the following characteristics:
-- Memory usage remains nearly constant regardless of file size
-- No disk usage for temporary storage of file content
-- Processing time scales linearly with file size
+### File Formats Supported
 
-These improvements ensure checkfiles can validate files of any size within reasonable memory constraints. 
+- **FASTQ**: Sequence reads with quality scores
+- **HDF5**: Hierarchical data format
+- **H5AD**: AnnData single-cell genomics data
+
+### Development
+
+1. **Testing**
+   - Unit tests for all validators
+   - Integration tests with real file examples
+   - Performance benchmarking
+
+2. **Documentation**
+   - Validator-specific README files
+   - API documentation
+   - Usage examples
+
+3. **Future Plans**
+   - Additional file format support
+   - Enhanced reporting
+   - Cloud function deployment 
