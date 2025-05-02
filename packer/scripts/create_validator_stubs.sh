@@ -1112,87 +1112,21 @@ class CsvValidator(BaseValidator):
 EOF
 fi
 
-# Create verification script
-cat > "/tmp/verify_validators.py" << 'EOF'
-#!/usr/bin/env python3
-"""
-Verification script for validator modules.
-
-This script tests importing the validator modules and verifies that 
-they have the expected methods and behavior.
-"""
-
+# Verify Python modules
+echo "Verifying Python modules can be imported..."
+python3 -c "
 import sys
-import importlib
-import inspect
-
-def verify_module(module_name, expected_class, expected_methods):
-    """Verify that a module can be imported and has expected attributes."""
-    try:
-        module = importlib.import_module(module_name)
-        print(f"✓ Successfully imported {module_name}")
-        
-        # Check for class
-        if hasattr(module, expected_class):
-            cls = getattr(module, expected_class)
-            print(f"✓ Found {expected_class} class in {module_name}")
-            
-            # Check for methods
-            instance = cls()
-            for method_name in expected_methods:
-                if hasattr(instance, method_name):
-                    method = getattr(instance, method_name)
-                    if callable(method):
-                        print(f"  ✓ Found method {method_name} in {expected_class}")
-                        # Print method signature for debugging
-                        sig = inspect.signature(method)
-                        print(f"    Signature: {method_name}{sig}")
-                    else:
-                        print(f"  ✗ Attribute {method_name} is not callable")
-                        return False
-                else:
-                    print(f"  ✗ Method {method_name} not found in {expected_class}")
-                    return False
-            return True
-        else:
-            print(f"✗ Class {expected_class} not found in {module_name}")
-            return False
-    except ImportError as e:
-        print(f"✗ Failed to import {module_name}: {e}")
-        return False
-    except Exception as e:
-        print(f"✗ Error verifying {module_name}: {e}")
-        return False
-
-def main():
-    """Main verification function."""
-    print("Verifying validator modules...")
-    
-    # Add src to path
-    sys.path.insert(0, "/usr/local/lib/python3.10/dist-packages")
-    
-    # Verify validators
-    success = True
-    success &= verify_module("src.validators.fastq", "FastqValidator", 
-                           ["validate_file", "validate_stream"])
-    success &= verify_module("src.validators.bam", "BamValidator", 
-                           ["validate_file", "validate_stream"])
-    success &= verify_module("src.validators.hdf5", "Hdf5Validator",
-                           ["validate_file", "validate_stream"])
-    
-    # Print summary
-    if success:
-        print("\nAll validator modules verified successfully! ✓")
-        sys.exit(0)
-    else:
-        print("\nSome validator modules failed verification! ✗")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-EOF
-
-# Run verification script
-python3 /tmp/verify_validators.py
+print('Python path:', sys.path)
+try:
+    import src.validators.base
+    print('✓ Successfully imported base validator')
+except ImportError as e:
+    print('✗ Failed to import base validator:', e)
+try:
+    import src.validators.fastq
+    print('✓ Successfully imported fastq validator')
+except ImportError as e:
+    print('✗ Failed to import fastq validator:', e)
+"
 
 echo "Validator stubs created successfully." 

@@ -4,7 +4,7 @@ set -ex
 # Update package lists
 sudo apt-get update
 
-# Install base packages (removed fuse-specific packages as they're installed in install_goofys_and_validatefiles.sh)
+# Install base packages (removed fuse-specific packages)
 sudo apt-get -y install \
     python3-pip \
     python3-venv \

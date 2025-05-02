@@ -29,7 +29,6 @@ REQUIRED_DIRS=(
 
 REQUIRED_FILES=(
     "/usr/local/bin/samtools"
-    "/usr/local/bin/validatefiles"
 )
 
 # Error handling function
@@ -58,29 +57,6 @@ for package in "${REQUIRED_PACKAGES[@]}"; do
     fi
     echo "✓ $package is installed"
 done
-
-# Check if fuse is installed properly using multiple detection methods
-echo "Checking fuse installation..."
-if dpkg -l | grep -q 'fuse\s'; then
-    echo "✓ fuse package is installed (detected via dpkg)"
-elif [ -f "/usr/bin/fusermount" ] || [ -f "/bin/fusermount" ]; then
-    echo "✓ fuse package is installed (detected via fusermount binary)"
-elif [ -c "/dev/fuse" ]; then
-    echo "✓ fuse package is installed (detected via /dev/fuse device)"
-else
-    echo "WARNING: Trying to install fuse package..."
-    apt-get update && apt-get install -y fuse
-    
-    if ! dpkg -l | grep -q 'fuse\s'; then
-        echo "WARNING: Could not verify fuse installation, but continuing since it might be integrated into the kernel"
-    fi
-fi
-
-# Try to load fuse module if not already loaded
-if ! lsmod | grep -q fuse; then
-    echo "Attempting to load fuse kernel module..."
-    modprobe fuse 2>/dev/null || true
-fi
 
 # Check required directories
 echo "Checking required directories..."
@@ -132,5 +108,4 @@ fi
 echo "✓ AWS CLI is properly configured"
 
 echo "AMI validation completed successfully!"
-exit 0 
 exit 0 

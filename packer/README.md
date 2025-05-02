@@ -119,97 +119,54 @@ For additional help or issues, please refer to:
 
 # Checkfiles AMI Builder
 
-This directory contains Packer templates and scripts to build the AWS AMI used by the checkfiles application.
+This directory contains the Packer configuration and scripts for building the Checkfiles AMI.
 
-## Updates (Important)
+## Overview
 
-**April 2025 Update**: Fixed critical module path structure issues in the AMI. The scripts now correctly set up the validators modules in the expected `src/validators/fastq` structure rather than just `validators/fastq`, resolving import errors in the runtime environment.
+The Checkfiles AMI builds an AWS EC2 image with the necessary software to validate file formats like FASTQ, BAM, HDF5, etc. The AMI is designed to work with direct S3 streaming, eliminating the need for mounting S3 buckets or local storage.
 
-## Requirements
+## Recent Updates
 
-- [Packer](https://www.packer.io/downloads)
-- AWS CLI configured with appropriate permissions
-- Python 3.10+
+As of the latest version, the following changes have been made:
 
-## Directory Structure
-
-```
-.
-├── README.md
-├── scripts/                  # Scripts for setting up the AMI
-│   ├── create_validator_stubs.sh
-│   ├── debug_fuse.sh
-│   ├── goofys_mount.sh
-│   ├── install_python_dependencies.sh
-│   ├── install_samtools.sh
-│   ├── setup_validator_modules.sh
-│   └── validate_ami.sh
-└── templates/                # Packer templates
-    ├── build_AMI.pkr.hcl
-    └── checkfiles_ubuntu_2204_variables.json
-```
+- Removed goofys S3 mount functionality as it's no longer needed
+- Removed validateFiles binary as it's been replaced by Python-based validators
+- Simplified installation scripts to focus on core validation functionality
+- Updated validator modules to work directly with S3 streaming APIs
 
 ## Building the AMI
 
-1. Ensure all code changes are committed to the repository
-2. Navigate to the packer directory
+To build the AMI:
+
+1. Ensure you have Packer installed
+2. Configure AWS credentials
 3. Run the build command:
 
 ```bash
-cd packer
-packer build -var-file=templates/checkfiles_ubuntu_2204_variables.json templates/build_AMI.pkr.hcl
+cd packer/templates
+packer build -var-file=checkfiles_ubuntu_2204_variables.json ./checkfiles_ubuntu_2204.json
 ```
 
-## Deploying the New AMI
+## Included Scripts
 
-After building the new AMI, you'll need to update the CDK deployment to use the new AMI ID:
+- `install_base_checkfiles_packages.sh` - Installs base system packages
+- `install_samtools.sh` - Installs samtools for BAM validation
+- `install_python_dependencies.sh` - Installs Python packages
+- `setup_validator_modules.sh` - Sets up Python validation modules
+- `create_validator_stubs.sh` - Creates stub implementations of validators
+- `setup_environment_file.sh` - Sets up environment variables
+- `validate_ami.sh` - Validates the AMI configuration
 
-1. Update the AMI ID in the CDK configuration file:
+## Architecture
 
-```bash
-# Navigate to the CDK directory
-cd ../cdk
+The Checkfiles application now uses direct S3 streaming for validation:
 
-# Update the AMI ID in the appropriate configuration file
-# The file location might vary depending on your setup
-```
+1. Application receives a file to validate (either local or S3)
+2. If it's an S3 file, it streams the content directly using boto3
+3. Content is passed through validators without storing on disk
+4. Validation results, stats, and hash values are returned
 
-2. Deploy the updated CDK stack:
-
-```bash
-cdk deploy checkfiles-runner-stack
-```
-
-## Troubleshooting
-
-### Common Issues
-
-#### Import Error: `No module named 'src.validators.fastq'`
-
-This indicates a mismatch between the code's import expectations and the module structure in the AMI. The recent update should fix this issue by creating the correct directory structure. If you're still experiencing this issue:
-
-1. Verify that the scripts in the `packer/scripts` directory are correctly setting up the module structure
-2. Ensure the AMI is being built with the latest scripts
-3. Verify that the CDK stack is using the new AMI ID
-
-#### Validator Methods Missing
-
-If you encounter errors about missing methods (like `validate_stream`), make sure the validator stubs in `create_validator_stubs.sh` include all required methods with the correct signatures.
-
-## Testing the AMI
-
-You can test the AMI functionality directly before deploying:
-
-1. Launch an EC2 instance using the new AMI
-2. Connect to the instance using SSH
-3. Run the verification script:
-
-```bash
-cd /opt/checkfiles
-python -c "from src.validators.fastq import FastqValidator; print('Import successful')"
-validator = FastqValidator()
-print(hasattr(validator, 'validate_stream'))
-```
+This approach improves performance, reduces storage requirements, and eliminates the need for FUSE mounts like goofys.
 
 ## Contact
 

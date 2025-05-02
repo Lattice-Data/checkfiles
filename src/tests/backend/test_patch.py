@@ -1,5 +1,6 @@
 import pytest
 import requests
+import json
 from unittest.mock import patch, MagicMock
 
 from src.models.validation_record import FileValidationRecord

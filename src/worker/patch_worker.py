@@ -1,5 +1,7 @@
 import logging
 import os
+import requests
+import datetime
 from typing import Dict, Any, Tuple, Optional
 
 from src.models.validation_record import FileValidationRecord
@@ -96,9 +98,6 @@ def check_credentials_expired(portal_uri: str, file_uuid: str, auth: Tuple[str, 
     Returns:
         True if credentials have expired, False otherwise
     """
-    import requests
-    import datetime
-    
     logger.info(f'Checking upload credential expiration status for {file_uuid}')
     request_uri = f'{portal_uri}/{file_uuid}/@@upload'
     
