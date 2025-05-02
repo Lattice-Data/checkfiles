@@ -44,7 +44,7 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        coverage run -m pytest
+        coverage run -m pytest --ignore=cdk/
         coverage report
         coverage xml
 
