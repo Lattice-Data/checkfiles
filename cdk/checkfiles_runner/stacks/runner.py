@@ -48,6 +48,7 @@ class RunCheckfilesStepFunctionProps:
     portal_secrets_arn: str
     slack_channel_id_arn: str 
     slack_token_arn: str 
+    s3_bucket_name: str
 
 class RunCheckfilesStepFunction(Stack):
 
@@ -476,7 +477,8 @@ class RunCheckfilesStepFunction(Stack):
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
                 'SLACK_TOKEN_ARN': self.props.slack_token_arn,
-                'SLACK_CHANNEL_ID_ARN': self.props.slack_channel_id_arn
+                'SLACK_CHANNEL_ID_ARN': self.props.slack_channel_id_arn,
+                'S3_BUCKET_NAME': self.props.s3_bucket_name
             }
         )
         slack_token_secret = SMSecret.from_secret_complete_arn(
@@ -501,6 +503,15 @@ class RunCheckfilesStepFunction(Stack):
                     'ssm:GetCommandInvocation'
                 ],
                 resources=['*'],
+            )
+        )
+
+        upload_report_lambda.add_to_role_policy(
+            PolicyStatement(
+                actions=[
+                    's3:PutObject'
+                ],
+                resources=[f'arn:aws:s3:::{self.props.s3_bucket_name}/*'],
             )
         )
 

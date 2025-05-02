@@ -9,4 +9,5 @@ config = {
     'instance_profile_arn_production': 'arn:aws:iam::585222078325:instance-profile/checkfiles-instance',
     'instance_security_group_production': 'sg-0da14ac5025210cf9',
     'checkfiles_tag_production': 'cdk-step-function',
+    's3_bucket_name_production': 'lattice-checkfiles',
 }

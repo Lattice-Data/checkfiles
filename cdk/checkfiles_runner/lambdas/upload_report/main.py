@@ -13,11 +13,25 @@ logging.basicConfig(
 )
 
 def upload_report_to_slack(event, context):
+    """
+    Uploads checkfiles validation report to Slack and S3.
+    
+    This function retrieves the validation report from an EC2 instance,
+    then uploads it to both a Slack channel and an S3 bucket.
+    
+    Args:
+        event (dict): Event data containing instance information
+        context (object): Lambda context
+        
+    Returns:
+        dict: Status of the upload operation and related metadata
+    """
     instance_id = event['instance_id']
     instance_name_suffix = event.get('instance_name_suffix', '')
     
     ssm = boto3.client('ssm')
     secrets = boto3.client('secretsmanager')
+    s3 = boto3.client('s3')
     
     try:
         # Get Slack credentials
@@ -30,6 +44,9 @@ def upload_report_to_slack(event, context):
         
         slack_token = json.loads(token_secret)['BOT_TOKEN']
         slack_channel_id = json.loads(channel_secret)['CHANNEL_ID']
+        
+        # Get S3 bucket name from environment
+        s3_bucket_name = os.environ['S3_BUCKET_NAME']
 
         # Get file content from EC2
         copy_command = ssm.send_command(
@@ -108,7 +125,23 @@ def upload_report_to_slack(event, context):
         print(file_content)
         print('filename')
         print(filename)
-        # Get upload URL
+        
+        # Upload file to S3
+        s3_upload_status = "FAILED"
+        try:
+            s3.put_object(
+                Bucket=s3_bucket_name,
+                Key=f"reports/{filename}",
+                Body=file_content,
+                ContentType="text/tab-separated-values"
+            )
+            s3_upload_status = "SUCCESS"
+            logging.info(f"Successfully uploaded report to S3: {s3_bucket_name}/reports/{filename}")
+        except Exception as e:
+            logging.error(f"Error uploading to S3: {str(e)}")
+            # Continue with Slack upload even if S3 upload fails
+        
+        # Get Slack upload URL
         headers = {
             "Authorization": f"Bearer {slack_token}"
         }
@@ -178,11 +211,14 @@ def upload_report_to_slack(event, context):
         if not response_data.get("ok"):
             raise Exception(f"Failed to complete upload: {response_data.get('error', 'Unknown error')}")
 
-        time.sleep(20000)
+        slack_upload_status = "SUCCESS"
 
         return {
             'status': 'SUCCESS',
             'filename': filename,
+            's3_upload_status': s3_upload_status,
+            'slack_upload_status': slack_upload_status,
+            's3_location': f"s3://{s3_bucket_name}/reports/{filename}",
             # Preserve other state data
             'instance_id': instance_id,
             'instance_id_list': event.get('instance_id_list', []),
