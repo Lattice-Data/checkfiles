@@ -491,6 +491,13 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
     Returns:
         List of validation results
     """
+    print(f"Starting parallel processing with {thread_count} threads")
+    
+    # Debug info to help identify serialization issues
+    if progress_tracker:
+        print(f"Progress tracker type: {type(progress_tracker)}")
+        print(f"Progress tracker attributes: {dir(progress_tracker)}")
+    
     with ProcessPoolExecutor(max_workers=thread_count) as executor:
         futures = []
         
@@ -507,7 +514,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 sys.exit(1)
                 
             for file_path in local_files:
-                # Don't create validator here, let the worker function create it
+                # DON'T pass the progress_tracker to the worker processes
                 futures.append(
                     executor.submit(
                         validate_local_file,
@@ -515,7 +522,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         file_format,
                         debug,
                         None,  # Pass None instead of validator instance
-                        progress_tracker
+                        None   # Don't pass progress_tracker to worker processes
                     )
                 )
                 
@@ -559,7 +566,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         s3_file_format,  # Use the format for this specific file
                         debug,
                         None,  # Pass None instead of validator instance
-                        progress_tracker,
+                        None,  # Don't pass progress_tracker to worker processes
                         identifier  # Pass the identifier if available
                     )
                 )
@@ -570,10 +577,20 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
             try:
                 result = future.result()
                 all_results.append(result)
+                
+                # Update progress tracker in the main process if it exists
+                if progress_tracker:
+                    file_path = result.get('file_path', 'unknown')
+                    if result.get('success', False):
+                        progress_tracker.complete_file(file_path, True, result.get('results', {}))
+                    else:
+                        progress_tracker.complete_file(file_path, False, {"error": result.get('error', 'Unknown error')})
+                
                 # Write each result to validation_progress.log as it completes
                 write_result_to_progress_log(result)
             except Exception as e:
                 logger.error(f"Error processing file: {str(e)}")
+                print(f"Error processing file: {str(e)}")
                 error_result = {
                     "file_path": "unknown",
                     "error": str(e),
@@ -637,3 +654,65 @@ def display_summary(all_results: List[Dict[str, Any]]) -> None:
 
 if __name__ == "__main__":
     main()
+    
+# Add this function to test serialization with multiprocessing
+def test_multiprocessing_serialization():
+    """
+    Test function to diagnose serialization issues with multiprocessing.
+    
+    Run this directly to test if objects can be properly serialized:
+    python -c "from src.checkfiles import test_multiprocessing_serialization; test_multiprocessing_serialization()"
+    """
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+    
+    def worker_function(data):
+        """Simple worker function that returns its input."""
+        print(f"Worker received: {data}")
+        return data
+        
+    print("Testing basic multiprocessing serialization...")
+    
+    # Test with different types of data
+    test_data = [
+        {"type": "dict", "value": 123},
+        "simple string",
+        42,
+        [1, 2, 3]
+    ]
+    
+    # Test using ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=2) as executor:
+        futures = []
+        for data in test_data:
+            futures.append(executor.submit(worker_function, data))
+            
+        # Collect results
+        results = []
+        for future in futures:
+            try:
+                result = future.result()
+                print(f"Successfully processed: {result}")
+                results.append(result)
+            except Exception as e:
+                print(f"Error in worker: {str(e)}")
+                
+    print(f"Successfully processed {len(results)} out of {len(test_data)} items")
+    
+    # Try to initialize a progress tracker in isolation
+    try:
+        from src.tracking.progress import SimpleActivityTracker
+        tracker = SimpleActivityTracker(10)
+        print(f"Created tracker: {type(tracker)}")
+        print(f"Tracker attributes: {dir(tracker)}")
+        
+        # Test if tracker can be serialized directly
+        import pickle
+        try:
+            pickle_data = pickle.dumps(tracker)
+            print(f"Successfully pickled tracker: {len(pickle_data)} bytes")
+        except Exception as e:
+            print(f"Failed to pickle tracker: {str(e)}")
+            
+    except ImportError:
+        print("Could not import SimpleActivityTracker for testing")

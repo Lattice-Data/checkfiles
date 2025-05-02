@@ -1,11 +1,12 @@
 """Progress tracking for file validation operations."""
 
 import threading
+import multiprocessing
 from datetime import datetime
 from typing import Dict, Any, Optional
 
 class SimpleActivityTracker:
-    """Simple activity tracker for validation processes."""
+    """Simple activity tracker for validation processes that's compatible with multiprocessing."""
     
     def __init__(self, total_files: int):
         """Initialize a new activity tracker.
@@ -15,8 +16,16 @@ class SimpleActivityTracker:
         """
         self.total_files = total_files
         self.completed = 0
-        self.lock = threading.Lock()
+        # Use a multiprocessing manager for thread-safe operations instead of a lock
+        # This is commented out because we'll avoid passing this object to worker processes
+        # self.manager = multiprocessing.Manager()
+        # self.file_status = self.manager.dict()
+        # self.completed = self.manager.Value('i', 0)
+        
+        # Use a regular dict and lock for the main process only
         self.file_status: Dict[str, Dict[str, Any]] = {}
+        self.lock = threading.Lock()
+        
         self.start_time = datetime.now()
         print(f"Starting validation of {total_files} files at {self.start_time}")
     
@@ -107,6 +116,23 @@ class SimpleActivityTracker:
         print("\nThread distribution:")
         for thread, count in thread_counts.items():
             print(f"  {thread}: {count} file(s)")
+            
+    def __getstate__(self):
+        """Custom method for pickle to exclude the lock object.
+        
+        This is critical for multiprocessing to work, as threading.Lock cannot be pickled.
+        """
+        state = self.__dict__.copy()
+        # Don't pickle the lock
+        if 'lock' in state:
+            del state['lock']
+        return state
+        
+    def __setstate__(self, state):
+        """Restore the state after unpickling, recreating any required resources."""
+        self.__dict__.update(state)
+        # Recreate the lock
+        self.lock = threading.Lock()
 
 class ProgressTrackingStream:
     """Stream wrapper that tracks reading progress for large file processing."""
