@@ -60,7 +60,7 @@ class H5adValidator(Hdf5Validator):
         super().__init__()
         self.has_scanpy = SCANPY_AVAILABLE
         if not self.has_scanpy:
-            self.logger.warning("scanpy not available, H5AD validation capabilities will be limited")
+            logger.warning("scanpy not available, H5AD validation capabilities will be limited")
     
     def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
@@ -97,34 +97,55 @@ class H5adValidator(Hdf5Validator):
                 stats=stats
             )
             
-        # Create a temporary file from the stream for scanpy to read
-        # This is necessary because scanpy expects a file path, not a stream
+        # Create a temporary file from the stream for scanpy to read if not seekable
+        temp_path = None
         try:
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                temp_path = temp_file.name
-                # Write the stream to the temporary file
-                input_stream.seek(0)  # Reset stream position
-                temp_file.write(input_stream.read())
-                
-            # Now validate the temporary file
-            validation_result = self._validate_h5ad_file(temp_path)
+            # Check if the stream is seekable
+            is_seekable = self.is_stream_seekable(input_stream)
             
+            if not is_seekable:
+                # Use our parent class method to create a temp file
+                temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
+                validation_result = self._validate_h5ad_file(temp_path)
+                # Close the temp file here - it will be deleted in finally block
+                temp_file.close()
+            else:
+                # For seekable streams, we can use stream position management
+                original_pos = input_stream.tell()
+                input_stream.seek(0)  # Reset stream position
+                
+                # Use a temporary file just for AnnData since it expects a file path
+                import tempfile
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_path = temp_file.name
+                    # Write the stream to the temporary file
+                    buffer_size = 1024 * 1024  # 1MB buffer
+                    import shutil
+                    shutil.copyfileobj(input_stream, temp_file, buffer_size)
+                
+                # Now validate the temporary file
+                validation_result = self._validate_h5ad_file(temp_path)
+                
+                # Restore original stream position
+                input_stream.seek(original_pos)
+                
             # Merge results with base validation
             errors.update(validation_result.get('errors', {}))
             warnings.update(validation_result.get('warnings', {}))
             stats.update(validation_result.get('stats', {}))
-            
-            # Clean up the temporary file
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.warning(f"Failed to delete temporary file {temp_path}: {e}")
                 
         except Exception as e:
             errors['h5ad_validation_error'] = f"Error during H5AD validation: {str(e)}"
             logger.error(f"Error during H5AD validation: {e}", exc_info=True)
-            
+        finally:
+            # Clean up the temporary file
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                    logger.debug(f"Deleted temporary H5AD file {temp_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file {temp_path}: {e}")
+                
         # Determine if valid (no errors, even if there are warnings)
         valid = len(errors) == 0
         

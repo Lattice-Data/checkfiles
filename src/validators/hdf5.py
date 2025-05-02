@@ -7,7 +7,9 @@ and conform to expected standards.
 
 import os
 import logging
-from typing import Dict, Any, BinaryIO, Optional
+import tempfile
+from typing import Dict, Any, BinaryIO, Optional, Tuple, IO
+import shutil
 
 from src.validators.base import BaseValidator
 
@@ -34,7 +36,7 @@ class Hdf5Validator(BaseValidator):
         super().__init__()
         self.has_h5py = H5PY_AVAILABLE
         if not self.has_h5py:
-            self.logger.warning("h5py not available, HDF5 validation capabilities will be limited")
+            logger.warning("h5py not available, HDF5 validation capabilities will be limited")
     
     def validate_file(self, file_path: str) -> Dict[str, Any]:
         """
@@ -71,6 +73,75 @@ class Hdf5Validator(BaseValidator):
                 errors={"file_validation_error": str(e)}
             )
     
+    def is_stream_seekable(self, stream: BinaryIO) -> bool:
+        """
+        Check if a stream is seekable (supports random access).
+        
+        Args:
+            stream: The stream to check
+            
+        Returns:
+            True if the stream is seekable, False otherwise
+        """
+        return hasattr(stream, 'seek') and hasattr(stream, 'tell')
+    
+    def create_temp_file_from_stream(self, stream: BinaryIO, is_gzipped: bool = False) -> Tuple[str, IO]:
+        """
+        Create a temporary file from a stream.
+        
+        Args:
+            stream: The stream to read from
+            is_gzipped: Whether the stream contains gzipped data
+            
+        Returns:
+            Tuple containing (temp_file_path, file_object)
+        """
+        import gzip
+        
+        # Create a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        temp_path = temp_file.name
+        
+        logger.debug(f"Created temporary file at {temp_path}")
+        
+        try:
+            # Store current position if seekable
+            original_pos = None
+            if self.is_stream_seekable(stream):
+                original_pos = stream.tell()
+                stream.seek(0)
+            
+            # Copy the stream to the temporary file
+            # Use larger buffer for better performance
+            buffer_size = 1024 * 1024  # 1MB buffer
+            
+            # If the stream is gzipped but we need raw data
+            # (decompression will be handled by h5py)
+            if is_gzipped:
+                shutil.copyfileobj(stream, temp_file, buffer_size)
+            else:
+                shutil.copyfileobj(stream, temp_file, buffer_size)
+            
+            temp_file.flush()
+            temp_file.close()
+            
+            # Restore original position if we changed it and stream is seekable
+            if original_pos is not None:
+                stream.seek(original_pos)
+            
+            # Reopen the file in binary read mode
+            reopened_file = open(temp_path, 'rb')
+            return temp_path, reopened_file
+            
+        except Exception as e:
+            # Clean up on error
+            temp_file.close()
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            raise RuntimeError(f"Failed to create temporary file: {str(e)}")
+    
     def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
         Validate an HDF5 data stream.
@@ -86,12 +157,11 @@ class Hdf5Validator(BaseValidator):
             - warnings (dict): Any validation warnings (format specific)
             - stats (dict): Data statistics (format specific, like group/dataset counts)
         """
-        import io
-        # import hashlib # No longer needed here
-        
         errors = {}
         warnings = {}
         stats = {}
+        temp_path = None
+        temp_file = None
         
         # If h5py is not available, we can't validate the HDF5 structure.
         if not self.has_h5py:
@@ -103,31 +173,53 @@ class Hdf5Validator(BaseValidator):
                 stats=stats
             )
         
-        # Hash calculation is now done externally.
-        # We attempt to validate the structure directly from the stream.
-        # Note: HDF5 might not be fully streamable depending on the file structure
-        # and h5py's ability to handle the stream type (seekable vs non-seekable).
-        # Gzipped HDF5 is uncommon and not handled here; assume input_stream is raw HDF5 data.
+        # Check if the stream is seekable
+        is_seekable = self.is_stream_seekable(input_stream)
+        logger.debug(f"Stream seekable: {is_seekable}")
+        
         try:
+            # For non-seekable streams (like process.stdout from S3), 
+            # we need to create a temporary file
+            if not is_seekable:
+                logger.debug("Stream is not seekable, creating temporary file")
+                temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
+                h5file_input = temp_file
+            else:
+                # For seekable streams, use directly
+                h5file_input = input_stream
+                # Make sure we're at the beginning of the stream
+                if hasattr(h5file_input, 'seek'):
+                    h5file_input.seek(0)
+            
+            # Try to validate the HDF5 data
             try:
-                # Try to validate the HDF5 data
-                # Attempt to open directly from the stream
-                with h5py.File(input_stream, 'r') as f:
+                with h5py.File(h5file_input, 'r') as f:
                     # Collect basic statistics
                     stats["groups"] = self._count_groups(f)
                     stats["datasets"] = self._count_datasets(f)
                     stats["attributes"] = self._count_attributes(f)
             except Exception as e:
-                # This could be due to invalid format or stream incompatibility (e.g., non-seekable)
                 errors["validation_error"] = f"Invalid HDF5 structure or stream error: {str(e)}"
                 logger.error(f"HDF5 validation failed: {str(e)}")
-                # Return immediately on format error, stats might be incomplete/irrelevant
                 return self.format_validation_result(valid=False, errors=errors, stats=stats)
             
         except Exception as e:
             errors["validation_error"] = f"Stream validation error: {str(e)}"
             logger.error(f"Stream validation failed: {str(e)}")
             return self.format_validation_result(valid=False, errors=errors)
+        finally:
+            # Clean up temporary file if we created one
+            if temp_file:
+                try:
+                    temp_file.close()
+                except:
+                    pass
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                    logger.debug(f"Deleted temporary file {temp_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file {temp_path}: {e}")
         
         # Determine if valid (no errors, even if there are warnings)
         valid = len(errors) == 0

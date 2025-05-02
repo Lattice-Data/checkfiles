@@ -72,6 +72,12 @@ def create_checkfiles_instance(event, context):
     echo "==== Starting checkfiles runtime setup ===="
     cd /home/ubuntu
     
+    # Set up scratch space on the existing boot volume
+    echo "==== Setting up scratch space ===="
+    mkdir -p /mnt/scratch
+    chmod 777 /mnt/scratch
+    chown ubuntu:ubuntu /mnt/scratch
+    
     # Clone repository with specific tag
     echo "==== Cloning checkfiles repository ===="
     git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
@@ -81,6 +87,7 @@ def create_checkfiles_instance(event, context):
     echo "==== Setting up environment variables ===="
     echo 'export PYTHONPATH=/home/ubuntu/checkfiles:' > /home/ubuntu/.env_checkfiles
     echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
+    echo 'export SCRATCH_DIR=/mnt/scratch' >> /home/ubuntu/.env_checkfiles
     chmod +x /home/ubuntu/.env_checkfiles
     
     # Set proper permissions
