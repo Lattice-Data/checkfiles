@@ -231,4 +231,4 @@ def test_h5ad_without_scanpy(validator):
     # Check that we get a warning but no validation
     assert 'warnings' in result
     assert 'scanpy_missing' in result['warnings']
-    assert result['valid'] is True  # We assume valid when we can't check
+    assert result['valid'] is True  # We assume valid when we can't check 
