@@ -172,7 +172,7 @@ def test_validate_local_gzipped_file(test_files, monkeypatch):
             }
     
     # Patch the initialize_validator function
-    def mock_initialize_validator(file_format):
+    def mock_initialize_validator(file_format, file_path=None):
         if file_format.lower() == "fastq":
             return MockFastqValidator()
         else:

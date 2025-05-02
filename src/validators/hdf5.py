@@ -29,6 +29,10 @@ class Hdf5Validator(BaseValidator):
     
     This validator ensures that HDF5 files are properly formatted and 
     can be opened without errors.
+    
+    Note: For H5AD files (a specialized form of HDF5 for single-cell data),
+    the H5adValidator should be used instead. Files with 'hdf5' format
+    but .h5ad extension will automatically use the H5adValidator.
     """
     
     def __init__(self):

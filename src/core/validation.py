@@ -17,11 +17,12 @@ from src.models.validation_record import FileValidationRecord
 
 logger = logging.getLogger(__name__)
 
-def initialize_validator(file_format: str) -> Any:
+def initialize_validator(file_format: str, file_path: str = None) -> Any:
     """Initialize and return the appropriate validator for the given file format.
     
     Args:
         file_format: The file format to validate (e.g., 'fastq')
+        file_path: Optional path to the file being validated, used to check file extension
         
     Returns:
         A validator instance for the specified format
@@ -31,6 +32,12 @@ def initialize_validator(file_format: str) -> Any:
         ImportError: If the validator module cannot be imported
     """
     logger.debug(f"Initializing validator for {file_format}")
+    
+    # Special case for HDF5 files with .h5ad extension
+    # Use H5adValidator for .h5ad files even if format is specified as hdf5
+    if file_format.lower() == "hdf5" and file_path and file_path.lower().endswith('.h5ad'):
+        logger.info(f"File {file_path} has .h5ad extension but format 'hdf5'. Using H5adValidator instead of Hdf5Validator.")
+        file_format = "h5ad"
     
     if file_format.lower() == "fastq":
         try:
@@ -229,7 +236,7 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
             
         if validator is None:
             try:
-                validator = initialize_validator(file_format)
+                validator = initialize_validator(file_format, file_path)
                 track_validation_progress(file_path, progress_tracker, "Validator created")
             except (ValueError, ImportError) as e:
                 raise e
@@ -337,7 +344,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
     
     try:
         if validator is None:
-            validator = initialize_validator(file_format)
+            validator = initialize_validator(file_format, s3_path)
             if progress_tracker:
                 progress_tracker.update_progress(s3_path, status="Validator initialized")
             

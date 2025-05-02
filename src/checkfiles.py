@@ -522,7 +522,8 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
             # Check if file format is supported
             try:
                 # Test initializing a validator to catch errors early
-                test_validator = initialize_validator(file_format)
+                # Don't pass a specific file path here since we're just testing general format support
+                test_validator = initialize_validator(file_format, None)
             except (ValueError, ImportError) as e:
                 print(f"Error initializing validator for format '{file_format}': {str(e)}")
                 sys.exit(1)
@@ -564,7 +565,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 
                 try:
                     # Test if the format is valid, but don't create the validator instance here
-                    initialize_validator(s3_file_format)
+                    initialize_validator(s3_file_format, s3_path)
                 except (ValueError, ImportError) as e:
                     print(f"Error initializing validator for S3 file {s3_path} with format '{s3_file_format}': {str(e)}")
                     # Skip this file and continue with others

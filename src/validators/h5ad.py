@@ -7,6 +7,9 @@ containing single-cell expression data, checking features like:
 - Feature type validation
 - Cell ID validation
 - Metadata structure validation
+
+Note: This validator is used for both files with 'h5ad' format and files with 'hdf5' format
+that have the .h5ad extension.
 """
 
 import logging
@@ -46,6 +49,9 @@ class H5adValidator(Hdf5Validator):
     - Checking cell barcode formats
     - Validating genome annotations
     - Extracting metadata for database consistency
+    
+    Note: This validator is used for both files with explicit 'h5ad' format
+    and files with 'hdf5' format that have the .h5ad extension.
     """
     
     # Define expected feature types and their mappings to standardized values
