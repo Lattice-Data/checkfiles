@@ -26,6 +26,12 @@
         "Environment": "production",
         "ManagedBy": "packer",
         "Application": "checkfiles"
+    },
+    "run_tags": {
+        "Name": "packer-idan",
+        "Environment": "production",
+        "ManagedBy": "packer",
+        "Application": "checkfiles"
     }
 }
 

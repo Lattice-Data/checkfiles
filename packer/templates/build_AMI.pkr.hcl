@@ -55,12 +55,20 @@ source "amazon-ebs" "builder" {
   source_ami_filter {
     filters = {
       virtualization-type = "hvm"
-        name = "${var.source_ami_name}"
-        root-device-type = "ebs"
+      name = "${var.source_ami_name}"
+      root-device-type = "ebs"
     }
     owners = ["099720109477"]
     most_recent = true
   }
+
+  run_tags = {
+    Name        = "packer-idan-${local.timestamp}"
+    CreatedBy   = "PackerIdan"
+    Project     = var.name_tag
+    AutoCleanup = "false"
+  }
+
 }
 
 # a build block invokes sources and runs provisioning steps on them. The

@@ -10,7 +10,7 @@ import concurrent.futures
 import multiprocessing
 import logging
 import threading
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from urllib.parse import urljoin
 import requests
 
@@ -52,6 +52,8 @@ from src.core.validation import initialize_validator, validate_local_file, valid
 from src.tracking.progress import SimpleActivityTracker
 from src.utils.helpers import has_gz_extension, validate_gzip_format
 from src.path_translator import resolve_path, is_s3_uri
+from src.models.validation_record import FileValidationRecord
+from src.worker.patch_worker import patching_worker
 
 # Create a lock for thread-safe writing to validation_progress.log
 validation_log_lock = threading.Lock()
@@ -200,6 +202,69 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
         logger.error(f"Error fetching files from backend: {e}")
         return []
 
+def fetch_schema_for_type(backend_uri: str, obj_type: str, auth: Tuple[str, str]) -> Dict[str, Any]:
+    """Fetch the schema properties for a given object type.
+    
+    Args:
+        backend_uri: Base URI for the backend API
+        obj_type: Type of object to fetch schema for
+        auth: Tuple of (key_id, secret_key) for authentication
+        
+    Returns:
+        Dictionary with schema properties
+    """
+    try:
+        schema_url = urljoin(backend_uri, f'profiles/{obj_type}/?format=json')
+        response = requests.get(schema_url, auth=auth)
+        response.raise_for_status()
+        return response.json().get('properties', {})
+    except Exception as e:
+        logger.error(f"Error fetching schema for {obj_type}: {e}")
+        return {}
+
+def convert_results_to_validation_records(results: List[Dict[str, Any]], 
+                                         file_objects: List[Dict[str, Any]],
+                                         portal_uri: str, 
+                                         auth: Tuple[str, str]) -> List[FileValidationRecord]:
+    """Convert validation results to FileValidationRecord objects.
+    
+    Args:
+        results: List of validation result dictionaries
+        file_objects: List of file metadata objects from the backend
+        portal_uri: Base URI for the backend API
+        auth: Tuple of (key_id, secret_key) for authentication
+        
+    Returns:
+        List of FileValidationRecord objects
+    """
+    # Create mapping of identifier to file object for faster lookup
+    file_map = {file_obj.get('accession', file_obj.get('uuid', '')): file_obj 
+               for file_obj in file_objects}
+    
+    validation_records = []
+    
+    for result in results:
+        if not result.get('success', False):
+            continue
+            
+        identifier = result.get('identifier', '')
+        if not identifier or identifier not in file_map:
+            logger.warning(f"No file metadata found for result with identifier: {identifier}")
+            continue
+            
+        # Get file metadata
+        file_obj = file_map[identifier]
+        uuid = file_obj.get('uuid', '')
+        
+        # Get ETag for the file
+        etag = fetch_etag_for_uuid(portal_uri, uuid, auth)
+        
+        # Create validation record
+        record = create_validation_record(result, result['file_path'], uuid, etag)
+        validation_records.append(record)
+        
+    return validation_records
+
 def main():
     """Main entry point for checkfiles utility."""
     args = parse_arguments()
@@ -335,6 +400,72 @@ def main():
     
     # Display summary
     display_summary(all_results)
+    
+    # Handle updating if requested and if used with backend_uri
+    if args.update and args.backend_uri and args.query:
+        logger.info("Updating backend with validation results")
+        
+        # Check auth environment variables
+        portal_key = os.getenv('PORTAL_KEY')
+        portal_secret_key = os.getenv('PORTAL_SECRET_KEY')
+        
+        if not portal_key or not portal_secret_key:
+            logger.error("Missing authentication credentials. Please set PORTAL_KEY and PORTAL_SECRET_KEY environment variables.")
+            print("Error: --update requires PORTAL_KEY and PORTAL_SECRET_KEY environment variables")
+            sys.exit(1)
+            
+        auth = (portal_key, portal_secret_key)
+        
+        # Convert results to validation records
+        validation_records = convert_results_to_validation_records(
+            all_results, backend_files, args.backend_uri, auth)
+        
+        if not validation_records:
+            logger.warning("No valid records found for updating")
+            print("No valid records found for updating")
+            return
+            
+        # Prepare patch jobs
+        patch_jobs = []
+        for record in validation_records:
+            # Get file metadata for this record
+            file_metadata = next((f for f in backend_files if f.get('uuid') == record.uuid), {})
+            
+            # Get schema properties for this file type
+            obj_types = file_metadata.get('@type', [])
+            schema_type = next((t for t in obj_types if t not in ['Item', 'File']), None)
+            
+            if not schema_type:
+                logger.warning(f"No valid schema type found for file {record.uuid}")
+                continue
+                
+            schema_properties = fetch_schema_for_type(args.backend_uri, schema_type, auth)
+            
+            # Create patch job
+            patch_jobs.append({
+                'portal_uri': args.backend_uri,
+                'auth': auth,
+                'validation_record': record,
+                'file_metadata': file_metadata,
+                'schema_properties': schema_properties,
+                'ignore_active_credentials': args.ignore_active_credentials
+            })
+        
+        logger.info(f"Preparing to update {len(patch_jobs)} files")
+        print(f"Preparing to update {len(patch_jobs)} files")
+        
+        # Use a thread pool to process patch jobs
+        patched_count = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.threads, len(patch_jobs))) as executor:
+            for result in executor.map(patching_worker, patch_jobs):
+                if result:
+                    patched_count += 1
+                    
+        logger.info(f"Successfully updated {patched_count} files")
+        print(f"Successfully updated {patched_count} files")
+    elif args.update and not (args.backend_uri and args.query):
+        logger.warning("The --update flag only works when using --backend-uri and --query")
+        print("Warning: The --update flag only works when using --backend-uri and --query")
 
 def process_files_in_parallel(local_files: List[str], s3_files: List[str], 
                               file_format: str, thread_count: int, debug: bool,
