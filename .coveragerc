@@ -1,0 +1,23 @@
+[run]
+source = src
+omit = 
+    */tests/*
+    */site-packages/*
+    setup.py
+    */docker/*
+    */cdk/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    pass
+    raise ImportError
+    except ImportError
+    SCANPY_AVAILABLE = False
+    H5PY_AVAILABLE = False
+    
+[html]
+directory = coverage_html_report 
