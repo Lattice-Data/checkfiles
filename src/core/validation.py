@@ -52,6 +52,43 @@ def initialize_validator(file_format: str) -> Any:
                 logger.error(f"Error importing FastqValidator from alternative path: {e2}")
                 print(f"Failed to import FastqValidator: {e2}")
                 raise ImportError(f"Error importing FastqValidator from all paths: {e}, {e2}")
+    elif file_format.lower() == "h5ad":
+        try:
+            from src.validators.h5ad import H5adValidator
+            logger.debug("Successfully imported H5adValidator")
+            return H5adValidator()
+        except ImportError as e:
+            logger.error(f"Error importing H5adValidator: {e}")
+            print(f"Error importing H5adValidator: {e}")
+            try:
+                # Try alternative import path
+                import sys
+                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                from validators.h5ad import H5adValidator
+                logger.debug("Successfully imported H5adValidator using alternative path")
+                return H5adValidator()
+            except ImportError as e2:
+                logger.error(f"Error importing H5adValidator from alternative path: {e2}")
+                print(f"Failed to import H5adValidator: {e2}")
+                raise ImportError(f"Error importing H5adValidator from all paths: {e}, {e2}")
+    elif file_format.lower() == "hdf5":
+        try:
+            from src.validators.hdf5 import Hdf5Validator
+            logger.debug("Successfully imported Hdf5Validator")
+            return Hdf5Validator()
+        except ImportError as e:
+            logger.error(f"Error importing Hdf5Validator: {e}")
+            print(f"Error importing Hdf5Validator: {e}")
+            try:
+                import sys
+                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                from validators.hdf5 import Hdf5Validator
+                logger.debug("Successfully imported Hdf5Validator using alternative path")
+                return Hdf5Validator()
+            except ImportError as e2:
+                logger.error(f"Error importing Hdf5Validator from alternative path: {e2}")
+                print(f"Failed to import Hdf5Validator: {e2}")
+                raise ImportError(f"Error importing Hdf5Validator from all paths: {e}, {e2}")
     else:
         raise ValueError(f"Unsupported file format: {file_format}")
 
