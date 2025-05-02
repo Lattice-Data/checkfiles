@@ -121,3 +121,66 @@ def test_check_credentials_expired(mock_get):
     
     # Should return False for valid credentials
     assert result is False
+
+def test_patching_worker_success():
+    """Test successful patching."""
+    # Mock setup
+    job = {
+        'portal_uri': 'https://test.org/api',
+        'auth': ('key', 'secret'),
+        'validation_record': MagicMock(validation_success=True, errors=None, uuid='test-uuid', original_etag='etag123'),
+        'file_metadata': {'uuid': 'test-uuid'},
+        'schema_properties': {},
+        'ignore_active_credentials': True
+    }
+    
+    # Mock the dependencies
+    with patch('src.worker.patch_worker.check_credentials_expired', return_value=True), \
+         patch('src.worker.patch_worker.fetch_etag_for_uuid', return_value='etag123'), \
+         patch('src.worker.patch_worker.compare_with_db', return_value={'post_json': {'validated': True}}), \
+         patch('src.worker.patch_worker.patch_file', return_value=True):
+        
+        result = patching_worker(job)
+        
+        # Check new return format
+        assert result['patched'] is True  # Changed from {'status': 'success'}
+
+def test_patching_worker_etag_mismatch():
+    """Test etag mismatch handling."""
+    # Mock setup
+    job = {
+        'portal_uri': 'https://test.org/api',
+        'auth': ('key', 'secret'),
+        'validation_record': MagicMock(validation_success=True, errors=None, uuid='test-uuid', original_etag='etag123'),
+        'file_metadata': {'uuid': 'test-uuid'},
+        'schema_properties': {},
+        'ignore_active_credentials': True
+    }
+    
+    # Mock the dependencies
+    with patch('src.worker.patch_worker.check_credentials_expired', return_value=True), \
+         patch('src.worker.patch_worker.fetch_etag_for_uuid', return_value='different-etag'):
+        
+        result = patching_worker(job)
+        
+        # Check new return format
+        assert result['patched'] is False  # Changed from None
+
+def test_patching_worker_credentials_not_expired():
+    """Test handling of non-expired credentials."""
+    # Mock setup
+    job = {
+        'portal_uri': 'https://test.org/api',
+        'auth': ('key', 'secret'),
+        'validation_record': MagicMock(validation_success=True, errors=None, uuid='test-uuid'),
+        'file_metadata': {'uuid': 'test-uuid'},
+        'schema_properties': {},
+    }
+    
+    # Mock the dependencies
+    with patch('src.worker.patch_worker.check_credentials_expired', return_value=False):
+        
+        result = patching_worker(job)
+        
+        # Check new return format
+        assert result['patched'] is False  # Changed from None

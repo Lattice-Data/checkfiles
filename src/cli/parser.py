@@ -56,5 +56,9 @@ def parse_arguments() -> argparse.Namespace:
                       help='Update the backend with validation results (only applies when using --backend-uri and --query)')
     parser.add_argument('--ignore-active-credentials', action='store_true',
                       help='Ignore upload credential expiration status when updating')
+    parser.add_argument('--update-s3-tags', action='store_true', default=True,
+                       help='Set tags on S3 objects after successful validation (default: True)')
+    parser.add_argument('--no-update-s3-tags', action='store_false', dest='update_s3_tags',
+                       help='Do not set tags on S3 objects after validation')
     
     return parser.parse_args() 

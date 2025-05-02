@@ -55,6 +55,7 @@ from src.utils.helpers import has_gz_extension, validate_gzip_format
 from src.path_translator import resolve_path, is_s3_uri
 from src.models.validation_record import FileValidationRecord
 from src.worker.patch_worker import patching_worker
+from src.utils.s3_utils import set_s3_tags
 
 # Define a helper function for writing to logs that doesn't depend on a global lock
 def write_result_to_progress_log(result: Dict[str, Any]) -> None:
@@ -369,7 +370,7 @@ def main():
         progress_tracker = SimpleActivityTracker(total_files)
     
     # Set a reasonable thread count based on file count and system resources
-    thread_count = max(1, min(args.threads, total_files, min(32, multiprocessing.cpu_count() * 2)))
+    thread_count = max(1, min(args.threads, total_files, multiprocessing.cpu_count()))
     print(f"Using {thread_count} threads for parallel file processing")
     
     # Pre-validate gzip files before starting threads
@@ -394,7 +395,9 @@ def main():
         validator=None,  # No longer provide a pre-initialized validator
         progress_tracker=progress_tracker,
         backend_files=backend_files,
-        s3_uri_to_file_format=s3_uri_to_file_format  # Pass the mapping to the function
+        s3_uri_to_file_format=s3_uri_to_file_format,  # Pass the mapping to the function
+        update=args.update,
+        backend_uri=args.backend_uri
     )
     
     # Close progress tracker
@@ -451,7 +454,9 @@ def main():
                 'validation_record': record,
                 'file_metadata': file_metadata,
                 'schema_properties': schema_properties,
-                'ignore_active_credentials': args.ignore_active_credentials
+                'ignore_active_credentials': args.ignore_active_credentials,
+                'update_s3_tags': args.update_s3_tags,
+                'is_lattice_db': args.backend_uri and 'lattice-data.org' in args.backend_uri
             })
         
         logger.info(f"Preparing to update {len(patch_jobs)} files")
@@ -459,13 +464,18 @@ def main():
         
         # Use a process pool to process patch jobs
         patched_count = 0
+        s3_tagged_count = 0
         with ProcessPoolExecutor(max_workers=min(args.threads, len(patch_jobs))) as executor:
             for result in executor.map(patching_worker, patch_jobs):
-                if result:
+                if result.get('patched'):
                     patched_count += 1
+                if result.get('s3_tagged'):
+                    s3_tagged_count += 1
                     
         logger.info(f"Successfully updated {patched_count} files")
+        logger.info(f"Successfully tagged {s3_tagged_count} S3 files")
         print(f"Successfully updated {patched_count} files")
+        print(f"Successfully tagged {s3_tagged_count} S3 files")
     elif args.update and not (args.backend_uri and args.query):
         logger.warning("The --update flag only works when using --backend-uri and --query")
         print("Warning: The --update flag only works when using --backend-uri and --query")
@@ -474,7 +484,9 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                               file_format: str, thread_count: int, debug: bool,
                               validator: Any, progress_tracker: SimpleActivityTracker = None,
                               backend_files: List[Dict[str, Any]] = None,
-                              s3_uri_to_file_format: Dict[str, str] = {}) -> List[Dict[str, Any]]:
+                              s3_uri_to_file_format: Dict[str, str] = {},
+                              update: bool = False,
+                              backend_uri: str = None) -> List[Dict[str, Any]]:
     """Process multiple files in parallel using a process pool.
     
     Args:
@@ -483,10 +495,12 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         file_format: Format of the files (used for local/S3 files without backend info)
         thread_count: Number of processes to use
         debug: Whether to enable debug output
-        validator: Validator instance (not used anymore, kept for backward compatibility)
+        validator: Validator instance 
         progress_tracker: Activity tracker instance or None if tracking is disabled
         backend_files: List of file objects from the backend API
         s3_uri_to_file_format: Mapping of S3 URI to file format for backend files
+        update: Whether to update the backend with results
+        backend_uri: The URI of the backend API
         
     Returns:
         List of validation results

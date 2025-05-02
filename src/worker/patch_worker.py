@@ -6,40 +6,40 @@ from typing import Dict, Any, Tuple, Optional
 
 from src.models.validation_record import FileValidationRecord
 from src.backend.patch import fetch_etag_for_uuid, patch_file, compare_with_db
+from src.utils.s3_utils import set_s3_tags
 
 logger = logging.getLogger(__name__)
 
-def patching_worker(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Worker function for patching validation results to the backend.
+def patching_worker(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a patch job for updating file metadata.
     
     Args:
-        job: Dictionary containing:
-            - portal_uri: Base URI for the portal API
-            - auth: Tuple of (key_id, secret_key) for authentication
-            - validation_record: FileValidationRecord with validation results
-            - file_metadata: Dictionary with current file metadata
-            - schema_properties: Dictionary with schema properties
-            - ignore_active_credentials: Whether to ignore upload credential expiration
-    
+        job: Dictionary containing patch job information
+        
     Returns:
-        Response from the patch operation or None if patching is skipped
+        Dictionary with patching results
     """
+    result = {'patched': False, 's3_tagged': False}
+    
+    # Extract job parameters
     portal_uri = job['portal_uri']
     auth = job['auth']
     validation_record = job['validation_record']
-    file_metadata = job.get('file_metadata', {})
-    schema_properties = job.get('schema_properties', {})
+    file_metadata = job['file_metadata']
+    schema_properties = job['schema_properties']
     ignore_active_credentials = job.get('ignore_active_credentials', False)
+    update_s3_tags = job.get('update_s3_tags', True)  # Default to True
+    is_lattice_db = job.get('is_lattice_db', False)
     
     # Skip if validation failed
     if not validation_record.validation_success:
         logger.info(f'Validation failed for {validation_record.uuid}, skipping patch')
-        return None
+        return result
         
     # Skip if file has errors
     if validation_record.errors:
         logger.info(f'Validation found errors for {validation_record.uuid}, skipping patch')
-        return None
+        return result
     
     # Check upload credentials expiration if needed
     if not ignore_active_credentials:
@@ -47,10 +47,10 @@ def patching_worker(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             credentials_expired = check_credentials_expired(portal_uri, validation_record.uuid, auth)
             if not credentials_expired:
                 logger.info(f'Upload credentials for {validation_record.uuid} not expired yet, skipping patch')
-                return None
+                return result
         except Exception as e:
             logger.error(f'Error checking credentials for {validation_record.uuid}: {str(e)}')
-            return None
+            return result
     
     # Get current ETag
     current_etag = fetch_etag_for_uuid(portal_uri, validation_record.uuid, auth)
@@ -62,7 +62,7 @@ def patching_worker(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             f'original={validation_record.original_etag}, current={current_etag}. '
             f'Will not patch.'
         )
-        return None
+        return result
     
     # Compare with DB to determine what needs to be patched
     comparison_result = compare_with_db(validation_record, file_metadata, schema_properties)
@@ -71,7 +71,7 @@ def patching_worker(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # If nothing to patch, skip
     if not post_json:
         logger.info(f'No updates needed for {validation_record.uuid}, skipping patch')
-        return None
+        return result
     
     # Log what we're patching
     logger.info(f'Patching {validation_record.uuid} with fields: {list(post_json.keys())}')
@@ -85,7 +85,27 @@ def patching_worker(job: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     patch_response = patch_file(portal_uri, auth, patch_record)
     logger.info(f'Patched {validation_record.uuid}: {patch_response}')
     
-    return patch_response
+    # After successful patching to backend
+    if patch_response:
+        result['patched'] = True
+        
+        # Check all conditions for S3 tagging
+        if (update_s3_tags and 
+            validation_record.validation_success and 
+            file_metadata.get('s3_uri') and
+            is_lattice_db):
+            
+            # Apply S3 tags
+            s3_uri = file_metadata.get('s3_uri')
+            tagging_result = set_s3_tags(s3_uri, validation_record.validation_success)
+            
+            if tagging_result.get('status') == 'success':
+                result['s3_tagged'] = True
+                logger.info(f"Successfully set S3 tags for {s3_uri}")
+            else:
+                logger.warning(f"Failed to set S3 tags for {s3_uri}: {tagging_result.get('status')}")
+    
+    return result
 
 def check_credentials_expired(portal_uri: str, file_uuid: str, auth: Tuple[str, str]) -> bool:
     """Check if upload credentials for a file have expired.
