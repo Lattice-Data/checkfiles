@@ -2,6 +2,8 @@
 
 A scalable system for processing and validating file uploads in a cloud environment. This project provides infrastructure and automation for file processing workflows.
 
+[![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/checkfiles/badge.svg?branch=cdk-step-function)](https://coveralls.io/github/Lattice-Data/checkfiles?branch=cdk-step-function)
+
 ## Overview
 
 Checkfiles is a cloud-based system that:
