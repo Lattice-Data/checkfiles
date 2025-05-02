@@ -22,12 +22,16 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install pytest pytest-cov
+        pip install pytest pytest-cov crcmod boto3 h5py scanpy
         
     - name: Install samtools
       run: |
         sudo apt-get update
         sudo apt-get install -y samtools
+    
+    - name: Install package in development mode
+      run: |
+        pip install -e .
     
     - name: Run tests
       run: |
