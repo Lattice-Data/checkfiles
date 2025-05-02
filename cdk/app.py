@@ -23,6 +23,7 @@ production_props = RunCheckfilesStepFunctionProps(
     portal_secrets_arn=config['portal_secrets_arn_production'],
     slack_channel_id_arn=config['slack_channel_id_arn'],
     slack_token_arn=config['slack_token_arn'],
+    s3_bucket_name=config['s3_bucket_name'],
 )
 
 
