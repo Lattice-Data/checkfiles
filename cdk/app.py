@@ -21,7 +21,9 @@ production_props = RunCheckfilesStepFunctionProps(
     instance_security_group_id=config['instance_security_group_production'],
     checkfiles_tag=config['checkfiles_tag_production'],
     portal_secrets_arn=config['portal_secrets_arn_production'],
-    backend_uri=config['backend_uri_production'],
+    slack_channel_id_arn=config['slack_channel_id_arn'],
+    slack_token_arn=config['slack_token_arn'],
+    s3_bucket_name=config['s3_bucket_name'],
 )
 
 

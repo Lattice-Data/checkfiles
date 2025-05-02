@@ -46,8 +46,9 @@ class RunCheckfilesStepFunctionProps:
     instance_security_group_id: str
     checkfiles_tag: str
     portal_secrets_arn: str
-    backend_uri: str
-
+    slack_channel_id_arn: str 
+    slack_token_arn: str 
+    s3_bucket_name: str
 
 class RunCheckfilesStepFunction(Stack):
 
@@ -68,6 +69,35 @@ class RunCheckfilesStepFunction(Stack):
             secret_complete_arn=self.props.portal_secrets_arn
         )
 
+        make_checkfiles_started_message = Pass(
+            self,
+            'MakeCheckfilesStartedMessage',
+            parameters={
+                'detailType': 'CheckfilesStarted',
+                'source': 'RunCheckfilesStepFunction',
+                'detail': {
+                    'metadata': {
+                        'includes_slack_notification': True
+                    },
+                    'data': {
+                        'slack': {
+                            'text': JsonPath.format(
+                                ':rocket: *EC2 Instance checkfiles {} started* | Preparing for {} pending files.',
+                                JsonPath.string_at('$.instance_name_suffix'),
+                                JsonPath.string_at('$.number_of_files_pending')
+                            )
+                        }
+                    }
+                },
+                'files_pending.$': '$.files_pending',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
+            },
+        )
+
         make_pending_files_checked_message = Pass(
             self,
             'MakePendingFilesCheckedMessage',
@@ -76,12 +106,13 @@ class RunCheckfilesStepFunction(Stack):
                 'source': 'RunCheckfilesStepFunction',
                 'detail': {
                     'metadata': {
-                        'includes_slack_notification': False
+                        'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
                             'text': JsonPath.format(
-                                ':white_check_mark: *CheckFilesStarted* | Found {} files in upload_status: pending',
+                                ':white_check_mark: *Checkfiles {} in progress* | Found {} files in upload_status: pending',
+                                JsonPath.string_at('$.instance_name_suffix'),
                                 JsonPath.string_at('$.number_of_files_pending')
                             )
                         }
@@ -89,6 +120,10 @@ class RunCheckfilesStepFunction(Stack):
                 },
                 'files_pending.$': '$.files_pending',
                 'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
             },
         )
 
@@ -100,22 +135,120 @@ class RunCheckfilesStepFunction(Stack):
                 'source': 'RunCheckfilesStepFunction',
                 'detail': {
                     'metadata': {
-                        'includes_slack_notification': False
+                        'includes_slack_notification': True
                     },
                     'data': {
                         'slack': {
                             'text': JsonPath.format(
-                                ':white_check_mark: *CheckFilesFinished* | command_status: {} | See log group checkfiles-log for details',
-                                JsonPath.string_at(
-                                    '$.checkfiles_command_status')
+                                ':white_check_mark: *Checkfiles {} finished* | command_status: {} | See log group checkfiles-log for details',
+                                JsonPath.string_at('$.instance_name_suffix'),
+                                JsonPath.string_at('$.checkfiles_command_status')
                             )
                         }
                     }
                 },
-                'instance_id_list.$': '$.instance_id_list'
+                'instance_id.$': '$.instance_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
+                'command_id.$': '$.command_id',
+                'checkfiles_command_status.$': '$.checkfiles_command_status'
             },
         )
+        
 
+        make_progress_message = Pass(
+            self,
+            'MakeProgressMessage',
+            parameters={
+                'detailType': 'CheckfilesProgress',
+                'source': 'RunCheckfilesStepFunction',
+                'detail': {
+                    'metadata': {
+                        'includes_slack_notification': True
+                    },
+                    'data': {
+                        'slack': {
+                            'text': JsonPath.format(
+                                ':hourglass_flowing_sand: *Checkfiles {} Progress* | Status: {} | Processed {} out of {} files.',
+                                JsonPath.string_at('$.instance_name_suffix'),
+                                JsonPath.string_at('$.checkfiles_command_status'),
+                                JsonPath.string_at('$.line_count'),
+                                JsonPath.string_at('$.number_of_files_pending')
+                            )
+                        }
+                    }
+                },
+                'checkfiles_command_status.$': '$.checkfiles_command_status',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
+                'instance_id_list.$': '$.instance_id_list',
+                'in_progress.$': '$.in_progress',
+                'iterator.$': '$.iterator',
+                'line_count.$': '$.line_count',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
+            }
+        )
+
+        get_checkfiles_command_status_lambda = PythonFunction(
+            self,
+            'GetCheckfilesCommandStatusLambda',
+            entry='checkfiles_runner/lambdas/get_status',
+            runtime=Runtime.PYTHON_3_11,
+            index='main.py',
+            handler='get_checkfiles_command_status',
+            timeout=Duration.seconds(180),
+        )
+
+        get_checkfiles_command_status_lambda.add_to_role_policy(
+            PolicyStatement(
+                actions=[
+                    'ssm:GetCommandInvocation',
+                    'ssm:SendCommand' 
+                ],
+                resources=['*'],
+            )
+        )
+
+
+        get_checkfiles_command_status = LambdaInvoke(
+            self,
+            'GetCheckfilesCommandStatus',
+            lambda_function=get_checkfiles_command_status_lambda,
+            payload=TaskInput.from_object({
+                "command_id.$": "$.command_id",
+                "instance_id.$": "$.instance_id",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update",
+                "iterator.$": "$.iterator"
+            }),
+            payload_response_only=True,
+            result_selector={
+                'checkfiles_command_status.$': '$.checkfiles_command_status',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
+                'line_count.$': '$.line_count', 
+                'instance_id_list.$': '$.instance_id_list',
+                'in_progress.$': '$.in_progress',
+                'iterator.$': '$.iterator',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
+                'instance_name_suffix.$': '$.instance_name_suffix'
+            }
+        )
+        
         check_pending_files_lambda = PythonFunction(
             self,
             'CheckPendingFilesLambda',
@@ -126,7 +259,6 @@ class RunCheckfilesStepFunction(Stack):
             timeout=Duration.seconds(30),
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
-                'BACKEND_URI': self.props.backend_uri
             }
         )
 
@@ -136,20 +268,33 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'CheckPendingFiles',
             lambda_function=check_pending_files_lambda,
+            payload=TaskInput.from_object({
+                "query.$": "$.query",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "backend_uri.$": "$.backend_uri",
+                "update.$": "$.update"
+            }),
             payload_response_only=True,
             result_selector={
                 'files_pending.$': '$.files_pending',
-                'number_of_files_pending.$': '$.number_of_files_pending'
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                "update.$": "$.update"
             }
         )
 
         initialize_counter = Pass(
             self,
             'InitializeCounter',
-
             parameters={
-                'iterator': {'index': 0, 'step': 1, 'count': 23},
+                'iterator': {'index': 0, 'step': 1, 'count': 144, 'continue': True},
                 'number_of_files_pending.$': '$.number_of_files_pending',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
             }
         )
 
@@ -167,8 +312,27 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'IncrementCounter',
             lambda_function=increment_counter_lambda,
+            payload=TaskInput.from_object({
+                "iterator.$": "$.iterator",
+                "instance_id.$": "$.instance_id",
+                "command_id.$": "$.command_id",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update",
+                "number_of_files_pending.$": "$.number_of_files_pending"
+            }),
             payload_response_only=True,
-            result_path='$.iterator'
+            result_selector={
+                'iterator.$': '$.iterator',
+                'instance_id.$': '$.instance_id',
+                'command_id.$': '$.command_id',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update',
+                'number_of_files_pending.$': '$.number_of_files_pending'
+            }
         )
 
         create_checkfiles_instance_lambda = PythonFunction(
@@ -217,11 +381,24 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'CreateCheckfilesInstance',
             lambda_function=create_checkfiles_instance_lambda,
+            payload=TaskInput.from_object({
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
+                "iterator.$": "$.iterator",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update"
+            }),
             payload_response_only=True,
             result_selector={
                 'instance_id.$': '$.instance_id',
                 'instance_type.$': '$.instance_type',
-                'iterator.$': '$.iterator'
+                'iterator.$': '$.iterator',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
             }
         )
 
@@ -243,7 +420,6 @@ class RunCheckfilesStepFunction(Stack):
             timeout=Duration.seconds(60),
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
-                'BACKEND_URI': self.props.backend_uri
             }
         )
 
@@ -259,61 +435,106 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
-        run_checkfiles_command_lambda.add_to_role_policy(
-            PolicyStatement(
-                actions=[
-                    'logs:CreateLogGroup',
-                    'logs:CreateLogStream',
-                    'logs:PutLogEvents',
-                    'logs:DescribeLogStreams',
-                ],
-                resources=['*'],
-            )
-        )
-
         run_checkfiles_command = LambdaInvoke(
             self,
             'RunCheckFilesCommand',
             lambda_function=run_checkfiles_command_lambda,
+            payload=TaskInput.from_object({
+                "instance_id.$": "$.instance_id",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "number_of_files_pending.$": "$.number_of_files_pending",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update",
+                "iterator.$": "$.iterator"
+            }),
             payload_response_only=True,
             result_selector={
                 'instance_id.$': '$.instance_id',
                 'command_id.$': '$.command_id',
-                'iterator.$': '$.iterator'
+                'iterator.$': '$.iterator',
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'number_of_files_pending.$': '$.number_of_files_pending',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
             }
         )
 
-        get_checkfiles_command_status_lambda = PythonFunction(
-            self,
-            'GetCheckfilesCommandStatusLambda',
-            entry='checkfiles_runner/lambdas/get_status',
-            runtime=Runtime.PYTHON_3_11,
-            index='main.py',
-            handler='get_checkfiles_command_status',
-            timeout=Duration.seconds(180),
+        send_progress_notification = self.make_slack_notification_task(
+            'SendProgressSlackNotification'
         )
 
-        get_checkfiles_command_status_lambda.add_to_role_policy(
+        upload_report_lambda = PythonFunction(
+            self,
+            'UploadReportLambda',
+            entry='checkfiles_runner/lambdas/upload_report',
+            runtime=Runtime.PYTHON_3_11,
+            index='main.py',
+            handler='upload_report_to_slack',
+            timeout=Duration.seconds(300),
+            environment={
+                'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
+                'SLACK_TOKEN_ARN': self.props.slack_token_arn,
+                'SLACK_CHANNEL_ID_ARN': self.props.slack_channel_id_arn,
+                'S3_BUCKET_NAME': self.props.s3_bucket_name
+            }
+        )
+        slack_token_secret = SMSecret.from_secret_complete_arn(
+            self,
+            'SlackTokenSecret',
+            secret_complete_arn=self.props.slack_token_arn
+        )
+        slack_channel_secret = SMSecret.from_secret_complete_arn(
+            self,
+            'SlackChannelSecret',
+            secret_complete_arn=self.props.slack_channel_id_arn
+        )
+
+        slack_token_secret.grant_read(upload_report_lambda)
+        slack_channel_secret.grant_read(upload_report_lambda)
+        self.portal_secrets.grant_read(upload_report_lambda)
+
+        upload_report_lambda.add_to_role_policy(
             PolicyStatement(
                 actions=[
+                    'ssm:SendCommand',
                     'ssm:GetCommandInvocation'
                 ],
                 resources=['*'],
             )
         )
 
-        get_checkfiles_command_status = LambdaInvoke(
+        upload_report_lambda.add_to_role_policy(
+            PolicyStatement(
+                actions=[
+                    's3:PutObject'
+                ],
+                resources=[f'arn:aws:s3:::{self.props.s3_bucket_name}/*'],
+            )
+        )
+
+        upload_report = LambdaInvoke(  # This is the LambdaInvoke task
             self,
-            'GetCheckfilesCommandStatus',
-            lambda_function=get_checkfiles_command_status_lambda,
+            'UploadReport',
+            lambda_function=upload_report_lambda,
+            payload=TaskInput.from_object({
+                "instance_id.$": "$.instance_id",
+                "instance_name_suffix.$": "$.instance_name_suffix",
+                "instance_id_list.$": "$.instance_id_list",
+                "backend_uri.$": "$.backend_uri",
+                "query.$": "$.query",
+                "update.$": "$.update"
+            }),
             payload_response_only=True,
             result_selector={
-                'checkfiles_command_status.$': '$.checkfiles_command_status',
+                'status.$': '$.status',
                 'instance_id.$': '$.instance_id',
-                'command_id.$': '$.command_id',
                 'instance_id_list.$': '$.instance_id_list',
-                'in_progress.$': '$.in_progress',
-                'iterator.$': '$.iterator'
+                'instance_name_suffix.$': '$.instance_name_suffix',
+                'backend_uri.$': '$.backend_uri',
+                'query.$': '$.query',
+                'update.$': '$.update'
             }
         )
 
@@ -342,10 +563,21 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
+        wait_for_ten_minutes = Wait(
+            self,
+            'WaitTenMinutes',
+            time=WaitTime.duration(
+                Duration.minutes(10)
+            )
+        )
+
+        send_checkfiles_started_notification = self.make_slack_notification_task(
+            'SendCheckfilesStartedSlackNotification')
         send_pending_files_slack_notification = self.make_slack_notification_task(
             'SendPendingFilesCheckedSlackNotification')
         send_checkfiles_finished_slack_notification = self.make_slack_notification_task(
             'SendCheckfilesFinishedSlackNotification')
+
 
         definition = check_pending_files.next(
             make_pending_files_checked_message
@@ -357,7 +589,11 @@ class RunCheckfilesStepFunction(Stack):
                 Condition.boolean_equals(
                     '$.files_pending', False), no_files_to_process
             ).otherwise(
-                initialize_counter.next(
+                make_checkfiles_started_message.next(
+                    send_checkfiles_started_notification
+                ).next(                                     
+                    initialize_counter
+                ).next(
                     create_checkfiles_instance
                 ).next(
                     wait_instance_ssm_registration
@@ -366,9 +602,13 @@ class RunCheckfilesStepFunction(Stack):
                 ).next(
                     increment_counter
                 ).next(
-                    wait_for_sixty_minutes
+                    wait_for_ten_minutes
                 ).next(
                     get_checkfiles_command_status
+                ).next(
+                    make_progress_message
+                ).next(
+                    send_progress_notification
                 ).next(
                     Choice(self, 'Should continue?')
                     .when(
@@ -384,7 +624,9 @@ class RunCheckfilesStepFunction(Stack):
                         make_checkfiles_finished_message.next(
                             send_checkfiles_finished_slack_notification
                         ).next(
-                            terminate_instance
+                            upload_report.next(
+                                terminate_instance
+                            )
                         )
                     )
                 )

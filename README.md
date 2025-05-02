@@ -1,6 +1,9 @@
+[![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/checkfiles/badge.svg?branch=main)](https://coveralls.io/github/Lattice-Data/checkfiles?branch=main)
+
 # Checkfiles
 
 A scalable system for processing and validating file uploads in a cloud environment. This project provides infrastructure and automation for file processing workflows.
+
 
 ## Overview
 
@@ -176,3 +179,14 @@ For support, please:
 - [ ] Additional file format support
 - [ ] Performance optimizations
 - [ ] Extended test coverage
+
+## Supported File Formats
+
+Checkfiles can validate various file formats including:
+
+- FASTQ (DNA/RNA sequence reads)
+- BAM (Binary Alignment Map)
+- CRAM (Compressed Reference-oriented Alignment Map)
+- And more...
+
+Each file type has specific validators that check for format compliance, data integrity, and other format-specific requirements.

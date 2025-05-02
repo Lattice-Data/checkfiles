@@ -50,24 +50,45 @@ def get_instance_type_from_number_of_files_pending(number_of_files_pending: int)
 
 
 def create_checkfiles_instance(event, context):
-    number_of_files_pending = event['number_of_files_pending']
-    instance_name = get_instance_name()
+    base_instance_name = os.environ.get("INSTANCE_NAME", "default-instance")
+    instance_name_suffix = event.get("instance_name_suffix", "")
+    number_of_files_pending = event.get('number_of_files_pending')
+    iterator = event.get('iterator', {})
+    backend_uri = event.get('backend_uri')
+    query = event.get('query')
+    update = event.get('update')
+    instance_name = f"{base_instance_name}-{instance_name_suffix}" if instance_name_suffix else base_instance_name
     ami_id = get_ami_id()
     instance_type = get_instance_type_from_number_of_files_pending(
         number_of_files_pending)
     instance_profile_arn = get_instance_profile_arn()
     security_group = get_security_group()
     tag = get_checkfiles_tag()
-    # clone checkfiles code and build the virtual environment
+    
+    # Enhanced installation script that explicitly installs required packages
     user_data = f'''#!/bin/bash
+    set -ex  # Enable debugging and exit on error
+    
+    echo "==== Starting checkfiles runtime setup ===="
     cd /home/ubuntu
-    git clone https://github.com/IGVF-DACC/checkfiles.git --branch {tag} --single-branch
+    
+    # Clone repository with specific tag
+    echo "==== Cloning checkfiles repository ===="
+    git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
     cd checkfiles
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r src/checkfiles/requirements.txt
-    cd ..
+    
+    # Create environment file for Checkfiles
+    echo "==== Setting up environment variables ===="
+    echo 'export PYTHONPATH=/home/ubuntu/checkfiles:' > /home/ubuntu/.env_checkfiles
+    echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
+    chmod +x /home/ubuntu/.env_checkfiles
+    
+    # Set proper permissions
+    echo "==== Setting permissions ===="
+    cd /home/ubuntu
     chown -R ubuntu:ubuntu checkfiles/
+    
+    echo "==== Runtime setup complete ===="
     '''
 
     ec2 = boto3.resource('ec2')
@@ -109,9 +130,14 @@ def create_checkfiles_instance(event, context):
     instance = instances[0]
 
     instance.wait_until_running()
-    iterator = event['iterator']
 
-    return {'instance_id': instance.id,
-            'instance_type': instance.instance_type,
-            'iterator': iterator
-            }
+    return {
+        'instance_id': instance.id,
+        'instance_type': instance.instance_type,
+        'iterator': iterator,
+        'instance_name_suffix': instance_name_suffix,
+        'number_of_files_pending': number_of_files_pending,
+        'backend_uri': backend_uri,
+        'query': query,
+        'update': update
+    }

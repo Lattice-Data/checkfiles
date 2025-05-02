@@ -1,0 +1,13 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: Sets documentation requirements for Python code, including requiring docstrings and following the Google Python Style Guide.
+globs: **/*.py
+---
+- Require documentation for all code.
+- Use docstrings for documentation.
+- Follow the Google Python Style Guide for documentation.
+- Use Google-style or NumPy-style docstrings for all modules, classes, methods, and functions.

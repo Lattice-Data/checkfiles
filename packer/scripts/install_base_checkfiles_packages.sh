@@ -1,7 +1,10 @@
 #!/bin/bash
 set -ex
 
+# Update package lists
 sudo apt-get update
+
+# Install base packages (removed fuse-specific packages)
 sudo apt-get -y install \
     python3-pip \
     python3-venv \
@@ -11,6 +14,9 @@ sudo apt-get -y install \
     curl \
     zlib1g-dev \
     libsqlite3-dev \
-    fuse \
     awscli \
-    jq
+    jq \
+    pkg-config \
+    libssl-dev
+
+echo "Base package installation completed."

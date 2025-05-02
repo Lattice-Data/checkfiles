@@ -35,6 +35,11 @@ MANIFEST
 *.manifest
 *.spec
 
+logs/
+.cursor/rules/*
+.cursor/rules/
+.cursor/*
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -144,3 +149,4 @@ key.json
 
 packer/templates/manifest.json
 
+validation_progress.log
