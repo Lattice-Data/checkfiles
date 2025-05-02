@@ -288,9 +288,8 @@ class RunCheckfilesStepFunction(Stack):
         initialize_counter = Pass(
             self,
             'InitializeCounter',
-
             parameters={
-                'iterator': {'index': 0, 'step': 1, 'count': 223, 'continue': True},
+                'iterator': {'index': 0, 'step': 1, 'count': 144, 'continue': True},
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
@@ -564,11 +563,11 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
-        wait_for_one_minute = Wait(
+        wait_for_ten_minutes = Wait(
             self,
-            'WaitOneMinute',
+            'WaitTenMinutes',
             time=WaitTime.duration(
-                Duration.seconds(10)
+                Duration.minutes(10)
             )
         )
 
@@ -603,7 +602,7 @@ class RunCheckfilesStepFunction(Stack):
                 ).next(
                     increment_counter
                 ).next(
-                    wait_for_one_minute
+                    wait_for_ten_minutes
                 ).next(
                     get_checkfiles_command_status
                 ).next(
