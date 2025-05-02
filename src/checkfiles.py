@@ -159,7 +159,7 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
     auth = (portal_key, portal_secret_key)
     
     # Construct the full query URL
-    query_url = urljoin(backend_uri, query.replace('report', 'search') + '&format=json&limit=all&field=accession')
+    query_url = urljoin(backend_uri, query.replace('report', 'search') + '&format=json&limit=all')
     
     try:
         # Make the request to the backend

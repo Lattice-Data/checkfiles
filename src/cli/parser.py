@@ -3,6 +3,8 @@
 import argparse
 import multiprocessing
 from typing import Any
+from src.backend.patch import fetch_etag_for_uuid
+from src.core.validation import create_validation_record
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for checkfiles utility.
@@ -50,5 +52,9 @@ def parse_arguments() -> argparse.Namespace:
                         help='Backend URI for API calls')
     parser.add_argument('--query',
                         help='Query string for filtering files')
+    parser.add_argument('--update', action='store_true',
+                      help='Update the backend with validation results (only applies when using --backend-uri and --query)')
+    parser.add_argument('--ignore-active-credentials', action='store_true',
+                      help='Ignore upload credential expiration status when updating')
     
     return parser.parse_args() 
