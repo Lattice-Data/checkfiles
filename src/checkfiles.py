@@ -505,17 +505,14 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 sys.exit(1)
                 
             for file_path in local_files:
-                # Create a new validator instance for each file to ensure thread safety
-                file_validator = initialize_validator(file_format)
-                
-                # For local files, we may not have identifiers
+                # Don't create validator here, let the worker function create it
                 futures.append(
                     executor.submit(
                         validate_local_file,
                         file_path,
                         file_format,
                         debug,
-                        file_validator,  # Pass a unique validator instance
+                        None,  # Pass None instead of validator instance
                         progress_tracker
                     )
                 )
@@ -543,8 +540,8 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                     s3_file_format = file_format
                 
                 try:
-                    # Create a new validator instance for each file to ensure thread safety
-                    file_validator = initialize_validator(s3_file_format)
+                    # Test if the format is valid, but don't create the validator instance here
+                    initialize_validator(s3_file_format)
                 except (ValueError, ImportError) as e:
                     print(f"Error initializing validator for S3 file {s3_path} with format '{s3_file_format}': {str(e)}")
                     # Skip this file and continue with others
@@ -559,7 +556,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         s3_path,
                         s3_file_format,  # Use the format for this specific file
                         debug,
-                        file_validator,  # Pass a unique validator instance
+                        None,  # Pass None instead of validator instance
                         progress_tracker,
                         identifier  # Pass the identifier if available
                     )
