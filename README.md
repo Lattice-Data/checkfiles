@@ -1,4 +1,4 @@
-[![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/checkfiles/badge.svg?branch=cdk-step-function)](https://coveralls.io/github/Lattice-Data/checkfiles?branch=cdk-step-function)
+[![Coverage Status](https://coveralls.io/repos/github/Lattice-Data/checkfiles/badge.svg?branch=main)](https://coveralls.io/github/Lattice-Data/checkfiles?branch=main)
 
 # Checkfiles
 
