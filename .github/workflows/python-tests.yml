@@ -35,7 +35,7 @@ jobs:
     
     - name: Run tests
       run: |
-        pytest src/tests/ --cov=src
+        pytest src/tests/ --cov=src --ignore=cdk/
     
     - name: Upload coverage report
       uses: codecov/codecov-action@v3
