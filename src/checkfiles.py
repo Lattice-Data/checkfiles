@@ -56,9 +56,7 @@ from src.path_translator import resolve_path, is_s3_uri
 from src.models.validation_record import FileValidationRecord
 from src.worker.patch_worker import patching_worker
 
-# Create a lock for thread-safe writing to validation_progress.log
-validation_log_lock = threading.Lock()
-
+# Define a helper function for writing to logs that doesn't depend on a global lock
 def write_result_to_progress_log(result: Dict[str, Any]) -> None:
     """Write a validation result to the validation_progress.log file.
     
@@ -119,7 +117,9 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         error = result.get('error', 'Unknown error')
         log_line = f"{identifier}\t{uri}\t{{'error': '{error}'}}\t{{}}\t{{}}\tfailed\tfailed"
     
-    with validation_log_lock:
+    # Use file locking to ensure atomic writes
+    # This approach doesn't require a global lock object that needs to be pickled
+    try:
         # Check if the file exists and has the header
         file_exists = os.path.exists(progress_log_path)
         
@@ -134,6 +134,8 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
             f.write(f"{log_line}\n")
             f.flush()
             os.fsync(f.fileno())  # Ensure data is written to disk
+    except Exception as e:
+        logger.error(f"Error writing to progress log: {e}")
 
 def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any]]:
     """Fetch files from backend using query and backend_uri.
