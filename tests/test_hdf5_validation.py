@@ -36,7 +36,11 @@ class TestHdf5Validation(unittest.TestCase):
             os.environ.pop('SCRATCH_DIR', None)
         
         # Clean up temp directory
-        os.rmdir(self.temp_dir)
+        try:
+            os.rmdir(self.temp_dir)
+        except OSError:
+            # Directory might not be empty if tests failed and left files
+            pass
 
     @patch('src.utils.helpers.subprocess.run')
     def test_download_s3_file_to_scratch(self, mock_run):
