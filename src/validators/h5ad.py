@@ -113,55 +113,14 @@ class H5adValidator(Hdf5Validator):
                 stats=stats
             )
             
-        # Create a temporary file from the stream for scanpy to read if not seekable
+        # We need to create a temporary file for scanpy to read regardless of seekability
         temp_path = None
         try:
-            # Check if the stream is seekable
-            is_seekable = self.is_stream_seekable(input_stream)
-            
-            if not is_seekable:
-                # Use our parent class method to create a temp file
-                temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
-                validation_result = self._validate_h5ad_file(temp_path)
-                # Close the temp file here - it will be deleted in finally block
-                temp_file.close()
-            else:
-                # For seekable streams, we can use stream position management
-                original_pos = input_stream.tell()
-                input_stream.seek(0)  # Reset stream position
-                
-                # Use a temporary file just for AnnData since it expects a file path
-                # Use the scratch directory if available
-                scratch_dir = os.environ.get('SCRATCH_DIR', '/mnt/scratch')
-                if not os.path.exists(scratch_dir):
-                    try:
-                        os.makedirs(scratch_dir, exist_ok=True)
-                    except (PermissionError, OSError):
-                        scratch_dir = tempfile.gettempdir()
-                        logger.warning(f"Could not create or access scratch directory. Using system temp: {scratch_dir}")
-                
-                # Create a temporary file with a proper prefix in the scratch directory
-                prefix = "h5ad_temp_"
-                suffix = ".h5ad"
-                fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=scratch_dir)
-                os.close(fd)  # Close the file descriptor
-                
-                try:
-                    # Copy the stream to the temporary file
-                    with open(temp_path, 'wb') as temp_file:
-                        buffer_size = 1024 * 1024  # 1MB buffer
-                        import shutil
-                        shutil.copyfileobj(input_stream, temp_file, buffer_size)
-                
-                    # Now validate the temporary file
-                    validation_result = self._validate_h5ad_file(temp_path)
-                    
-                    # Restore original stream position
-                    input_stream.seek(original_pos)
-                except Exception as e:
-                    logger.error(f"Error processing H5AD file: {e}")
-                    errors['h5ad_processing_error'] = f"Error processing H5AD data: {str(e)}"
-                    validation_result = {'errors': errors, 'warnings': warnings, 'stats': stats}
+            logger.info("Creating temporary file for H5AD validation")
+            temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
+            # Close the temp file - scanpy will open it directly by path
+            temp_file.close()
+            validation_result = self._validate_h5ad_file(temp_path)
                 
             # Merge results with base validation
             errors.update(validation_result.get('errors', {}))

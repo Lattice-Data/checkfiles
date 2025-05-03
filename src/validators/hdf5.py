@@ -119,28 +119,44 @@ class Hdf5Validator(BaseValidator):
         
         # Create a temporary file in the scratch directory
         prefix = "hdf5_temp_"
-        suffix = ".gz" if is_gzipped else ""
+        suffix = ".h5ad"  # Always use .h5ad extension for compatibility
         fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=scratch_dir)
         os.close(fd)  # Close the file descriptor
         
         logger.debug(f"Created temporary file at {temp_path}")
         
         try:
-            # Store current position if seekable
-            original_pos = None
-            if self.is_stream_seekable(stream):
-                original_pos = stream.tell()
-                stream.seek(0)
+            # Reset stream position to beginning if possible
+            try:
+                if hasattr(stream, 'seek') and hasattr(stream, 'tell'):
+                    current_pos = stream.tell()
+                    stream.seek(0)
+                    logger.debug(f"Reset stream position from {current_pos} to 0")
+            except Exception as e:
+                logger.warning(f"Could not reset stream position: {e}")
             
             # Copy the stream to the temporary file using file objects
             with open(temp_path, 'wb') as temp_file:
                 # Use larger buffer for better performance
                 buffer_size = 1024 * 1024  # 1MB buffer
-                shutil.copyfileobj(stream, temp_file, buffer_size)
+                
+                # Read and write in chunks to avoid memory issues with large files
+                data = stream.read(buffer_size)
+                while data:
+                    temp_file.write(data)
+                    data = stream.read(buffer_size)
+                
+                # Ensure all data is written to disk
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
             
-            # Restore original position if we changed it and stream is seekable
-            if original_pos is not None and self.is_stream_seekable(stream):
-                stream.seek(original_pos)
+            # Try to reset the stream position if possible
+            try:
+                if hasattr(stream, 'seek'):
+                    stream.seek(0)
+                    logger.debug("Reset stream position to 0 after reading")
+            except Exception as e:
+                logger.warning(f"Could not reset stream position after reading: {e}")
             
             # Reopen the file in binary read mode
             reopened_file = open(temp_path, 'rb')
@@ -193,27 +209,23 @@ class Hdf5Validator(BaseValidator):
         logger.debug(f"Stream seekable: {is_seekable}")
         
         try:
-            # For non-seekable streams, we need to create a temporary file
-            if not is_seekable:
-                logger.info("Stream is not seekable, creating temporary file for HDF5 validation")
-                temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
-                h5file_input = temp_file
-            else:
-                # For seekable streams, use directly
-                h5file_input = input_stream
-                # Make sure we're at the beginning of the stream
-                if hasattr(h5file_input, 'seek'):
-                    h5file_input.seek(0)
+            # For h5py, we always need to use a physical file path
+            # Create a temporary file regardless of whether the stream is seekable
+            logger.info("Creating temporary file for HDF5 validation")
+            temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
             
-            # Try to validate the HDF5 data
+            # Close the file handle since h5py will open it separately
+            temp_file.close()
+            
+            # Try to validate the HDF5 data using the physical file path
             try:
-                with h5py.File(h5file_input, 'r') as f:
+                with h5py.File(temp_path, 'r') as f:
                     # Collect basic statistics
                     stats["groups"] = self._count_groups(f)
                     stats["datasets"] = self._count_datasets(f)
                     stats["attributes"] = self._count_attributes(f)
             except Exception as e:
-                errors["validation_error"] = f"Invalid HDF5 structure or stream error: {str(e)}"
+                errors["validation_error"] = f"Invalid HDF5 structure: {str(e)}"
                 logger.error(f"HDF5 validation failed: {str(e)}")
                 return self.format_validation_result(valid=False, errors=errors, stats=stats)
             
@@ -223,11 +235,6 @@ class Hdf5Validator(BaseValidator):
             return self.format_validation_result(valid=False, errors=errors)
         finally:
             # Clean up temporary file if we created one
-            if temp_file:
-                try:
-                    temp_file.close()
-                except Exception:
-                    pass
             if temp_path:
                 try:
                     os.unlink(temp_path)

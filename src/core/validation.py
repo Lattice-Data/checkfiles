@@ -342,8 +342,36 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         progress_tracker.init_file(s3_path)
         progress_tracker.update_progress(s3_path, status="Preparing to download file for validation")
     
+    temp_file_path = None
+    
     try:
+        # Initialize validator if not provided
+        if validator is None:
+            try:
+                validator = initialize_validator(file_format, s3_path)
+                if progress_tracker:
+                    progress_tracker.update_progress(s3_path, status="Validator initialized")
+            except (ValueError, ImportError) as e:
+                error_msg = f"Failed to initialize validator: {str(e)}"
+                logger.error(error_msg)
+                if progress_tracker:
+                    progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+                
+                result_dict = {
+                    "file_path": s3_path,
+                    "error": error_msg,
+                    "success": False,
+                    "identifier": identifier
+                }
+                
+                if return_record:
+                    return create_validation_record(result_dict, s3_path, identifier, etag)
+                return result_dict
+        
         # Use the helper function to download the file
+        if progress_tracker:
+            progress_tracker.update_progress(s3_path, status="Downloading file from S3")
+        
         temp_file_path, download_status = download_s3_file_to_scratch(s3_path, file_format)
         
         if not download_status.get('success', False):
@@ -370,34 +398,40 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         # Calculate S3 object hash separately as we've already downloaded the file
         track_validation_progress(s3_path, progress_tracker, "Calculating hashes from downloaded file")
         hash_stats = {}
+        
+        # Use a separate file handle for calculating hashes to avoid issues
         with open(temp_file_path, 'rb') as file_stream:
             is_gzipped = has_gz_extension(s3_path)
             hash_stats = calculate_hashes_for_stream(file_stream, is_gzipped)
+        
         track_validation_progress(s3_path, progress_tracker, "Hashes calculated")
         
-        # Now validate the local file
-        local_result = validate_local_file(
-            temp_file_path, 
-            file_format, 
-            debug, 
-            validator,
-            progress_tracker,
-            identifier,  # Pass the original identifier
-            return_record=False  # We'll create our own record later
-        )
-        
-        # Make sure to update the file_path to the original S3 path in the result
-        local_result["file_path"] = s3_path
+        # For HDF5/H5AD files, use a fresh file stream for validation 
+        # to ensure the stream is properly closed before validator uses the file
+        with open(temp_file_path, 'rb') as validation_stream:
+            if progress_tracker:
+                validation_stream = ProgressTrackingStream(validation_stream, progress_tracker, update_interval_mb=50)
+                validation_stream.file_path = s3_path
+            
+            # For h5ad/hdf5 files, the validator will create its own temporary file,
+            # so we just pass the stream and let it handle the file operations
+            validation_results = validator.validate_stream(validation_stream, is_gzipped=is_gzipped)
         
         # Combine hash stats with validation results
-        if local_result.get("success", False) and "results" in local_result:
-            if "stats" not in local_result["results"]:
-                local_result["results"]["stats"] = {}
-            local_result["results"]["stats"].update(hash_stats)
+        if "stats" not in validation_results:
+            validation_results["stats"] = {}
+        validation_results["stats"].update(hash_stats)
+        
+        # Create the final result
+        local_result = {
+            "file_path": s3_path,  # Use the original S3 path
+            "results": validation_results,
+            "success": validation_results.get("valid", False),  
+            "identifier": identifier
+        }
         
         if progress_tracker:
-            progress_tracker.complete_file(s3_path, local_result.get("success", False), 
-                                          local_result.get("results", {"error": local_result.get("error", "Unknown error")}))
+            progress_tracker.complete_file(s3_path, local_result["success"], validation_results)
         
         # Convert to structured record if requested
         if return_record:
@@ -426,7 +460,7 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
     finally:
         # Clean up the temporary file
         try:
-            if 'temp_file_path' in locals() and temp_file_path and os.path.exists(temp_file_path):
+            if temp_file_path and os.path.exists(temp_file_path):
                 logger.info(f"Cleaning up temporary file: {temp_file_path}")
                 os.remove(temp_file_path)
         except Exception as e:
