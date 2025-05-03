@@ -97,7 +97,20 @@ done
 # Check Python environment and version
 echo "Checking Python environment..."
 PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-if [[ "$PYTHON_VERSION" < "3.8" ]]; then
+
+# Proper version comparison using version comparison function
+function version_compare() {
+    # This function compares version strings
+    # Returns 0 if version1 >= version2, 1 otherwise
+    if [[ $(echo -e "$1\n$2" | sort -V | head -n1) = "$2" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check if Python version is at least 3.8
+if ! version_compare "$PYTHON_VERSION" "3.8"; then
     echo "ERROR: Python version must be at least 3.8, found $PYTHON_VERSION"
     exit 1
 fi
