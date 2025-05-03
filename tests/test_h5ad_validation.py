@@ -72,8 +72,13 @@ class TestH5adValidation(unittest.TestCase):
     @patch('src.validators.hdf5.Hdf5Validator.validate_stream')
     @patch('src.validators.h5ad.sc')
     @patch('tempfile.mkstemp')
-    @patch('builtins.open', new_callable=MagicMock)
-    def test_validate_stream_seekable(self, mock_open, mock_mkstemp, mock_sc, mock_base_validate):
+    @patch('os.close')
+    @patch('os.path.exists')
+    @patch('os.environ.get')
+    @patch('builtins.open')
+    @patch('shutil.copyfileobj')  # Mock shutil.copyfileobj directly
+    def test_validate_stream_seekable(self, mock_copyfileobj, mock_open, mock_environ_get, mock_path_exists, 
+                                     mock_os_close, mock_mkstemp, mock_sc, mock_base_validate):
         """Test validation with a seekable stream."""
         # Mock base HDF5 validation to return valid result
         mock_base_validate.return_value = {
@@ -83,29 +88,42 @@ class TestH5adValidation(unittest.TestCase):
             'stats': {}
         }
         
+        # Mock environment and path checks
+        mock_environ_get.return_value = '/tmp/scratch'
+        mock_path_exists.return_value = True
+        
         # Mock a seekable stream
         seekable_stream = MagicMock()
         seekable_stream.tell.return_value = 0
         
+        # Mock file operations
+        mock_temp_path = '/tmp/test_h5ad_file.h5ad'
+        mock_mkstemp.return_value = (1, mock_temp_path)
+        
+        # Mock file context manager
+        mock_file_cm = MagicMock()
+        mock_open.return_value.__enter__.return_value = mock_file_cm
+        
         # Make is_stream_seekable return True
         with patch.object(self.validator, 'is_stream_seekable', return_value=True):
-            # Mock the tempfile creation
-            mock_mkstemp.return_value = (1, '/tmp/test_h5ad_file.h5ad')
-            
-            # Mock file open
-            mock_file = MagicMock()
-            mock_open.return_value.__enter__.return_value = mock_file
-            
             # Mock the _validate_h5ad_file method to return a simple valid result
             with patch.object(self.validator, '_validate_h5ad_file', return_value={
                 'errors': {},
                 'warnings': {},
                 'stats': {'observation_count': 200}
             }):
-                result = self.validator.validate_stream(seekable_stream, is_gzipped=False)
+                # Mock os.unlink to prevent file deletion attempts
+                with patch('os.unlink') as mock_unlink:
+                    result = self.validator.validate_stream(seekable_stream, is_gzipped=False)
             
             # Verify the stream's position was reset
-            seekable_stream.seek.assert_called_with(0)
+            seekable_stream.seek.assert_any_call(0)
+            
+            # Verify mock calls
+            mock_mkstemp.assert_called_once()
+            mock_os_close.assert_called_once_with(1)
+            mock_open.assert_called_once()
+            mock_copyfileobj.assert_called_once()
             
             # Verify the result is valid
             self.assertTrue(result['valid'])
