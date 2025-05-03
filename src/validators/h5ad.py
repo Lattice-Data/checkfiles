@@ -8,12 +8,16 @@ containing single-cell expression data, checking features like:
 - Cell ID validation
 - Metadata structure validation
 
+Important: H5AD files require random access for validation and cannot be 
+directly validated from a stream without creating a temporary file.
+
 Note: This validator is used for both files with 'h5ad' format and files with 'hdf5' format
 that have the .h5ad extension.
 """
 
 import logging
 import os
+import tempfile
 from typing import Dict, Any, BinaryIO, Optional, List, Tuple, Set
 
 import numpy as np
@@ -50,6 +54,9 @@ class H5adValidator(Hdf5Validator):
     - Validating genome annotations
     - Extracting metadata for database consistency
     
+    Important: H5AD files require random access for validation. When validating from a
+    stream, the data will be written to a temporary file in the scratch directory.
+    
     Note: This validator is used for both files with explicit 'h5ad' format
     and files with 'hdf5' format that have the .h5ad extension.
     """
@@ -71,6 +78,9 @@ class H5adValidator(Hdf5Validator):
     def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
         Validate an H5AD data stream.
+        
+        Important: H5AD validation requires random access. This method will create
+        a temporary file in the scratch directory if the stream is not seekable.
         
         Args:
             input_stream: Binary stream containing H5AD data
@@ -121,19 +131,37 @@ class H5adValidator(Hdf5Validator):
                 input_stream.seek(0)  # Reset stream position
                 
                 # Use a temporary file just for AnnData since it expects a file path
-                import tempfile
-                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                    temp_path = temp_file.name
-                    # Write the stream to the temporary file
-                    buffer_size = 1024 * 1024  # 1MB buffer
-                    import shutil
-                    shutil.copyfileobj(input_stream, temp_file, buffer_size)
+                # Use the scratch directory if available
+                scratch_dir = os.environ.get('SCRATCH_DIR', '/mnt/scratch')
+                if not os.path.exists(scratch_dir):
+                    try:
+                        os.makedirs(scratch_dir, exist_ok=True)
+                    except (PermissionError, OSError):
+                        scratch_dir = tempfile.gettempdir()
+                        logger.warning(f"Could not create or access scratch directory. Using system temp: {scratch_dir}")
                 
-                # Now validate the temporary file
-                validation_result = self._validate_h5ad_file(temp_path)
+                # Create a temporary file with a proper prefix in the scratch directory
+                prefix = "h5ad_temp_"
+                suffix = ".h5ad"
+                fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=scratch_dir)
+                os.close(fd)  # Close the file descriptor
                 
-                # Restore original stream position
-                input_stream.seek(original_pos)
+                try:
+                    # Copy the stream to the temporary file
+                    with open(temp_path, 'wb') as temp_file:
+                        buffer_size = 1024 * 1024  # 1MB buffer
+                        import shutil
+                        shutil.copyfileobj(input_stream, temp_file, buffer_size)
+                
+                    # Now validate the temporary file
+                    validation_result = self._validate_h5ad_file(temp_path)
+                    
+                    # Restore original stream position
+                    input_stream.seek(original_pos)
+                except Exception as e:
+                    logger.error(f"Error processing H5AD file: {e}")
+                    errors['h5ad_processing_error'] = f"Error processing H5AD data: {str(e)}"
+                    validation_result = {'errors': errors, 'warnings': warnings, 'stats': stats}
                 
             # Merge results with base validation
             errors.update(validation_result.get('errors', {}))
@@ -178,6 +206,7 @@ class H5adValidator(Hdf5Validator):
         
         try:
             # Read the file with scanpy
+            logger.info(f"Reading H5AD file with scanpy: {file_path}")
             adata = sc.read_h5ad(file_path, backed='r')
             
             # Extract basic statistics

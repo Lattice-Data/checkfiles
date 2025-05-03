@@ -6,7 +6,9 @@ import gzip
 import subprocess
 import zlib
 import shlex
-from typing import Optional, BinaryIO, IO, Any
+import tempfile
+import uuid
+from typing import Optional, BinaryIO, IO, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,74 @@ def validate_gzip_format(file_path: str) -> dict:
         error = {'gzip_error': f'Unexpected error checking gzip format: {str(e)}'}
         
     return error
+
+def download_s3_file_to_scratch(s3_path: str, file_format: str = None) -> Tuple[str, dict]:
+    """
+    Download a file from S3 to the scratch directory.
+    
+    This is particularly useful for file formats that require random access,
+    such as HDF5 and H5AD files, which cannot be validated by streaming.
+    
+    Args:
+        s3_path: S3 path in the format s3://bucket/key
+        file_format: Optional file format for specialized naming
+    
+    Returns:
+        Tuple containing (local_file_path, status_dict) where status_dict
+        contains information about the download operation
+    """
+    status = {}
+    
+    # Use the /mnt/scratch directory if available, otherwise use system temp directory
+    scratch_dir = os.environ.get('SCRATCH_DIR', '/mnt/scratch')
+    if not os.path.exists(scratch_dir):
+        try:
+            os.makedirs(scratch_dir, exist_ok=True)
+        except (PermissionError, OSError):
+            scratch_dir = tempfile.gettempdir()
+            logger.warning(f"Could not create or access scratch directory. Using system temp: {scratch_dir}")
+    
+    # Create a unique filename in the scratch directory
+    file_name = os.path.basename(s3_path)
+    prefix = ""
+    if file_format:
+        prefix = f"{file_format.lower()}_"
+    unique_suffix = str(uuid.uuid4())[:8]
+    temp_file_path = os.path.join(scratch_dir, f"{prefix}{unique_suffix}_{file_name}")
+    
+    try:
+        # Download the file using AWS CLI
+        cmd = f"aws s3 cp {s3_path} {temp_file_path}"
+        logger.info(f"Downloading file: {cmd}")
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            error_msg = f"Failed to download file from {s3_path}: {result.stderr}"
+            logger.error(error_msg)
+            status['success'] = False
+            status['error'] = error_msg
+            return None, status
+        
+        # Check if file was downloaded successfully
+        if not os.path.exists(temp_file_path):
+            error_msg = f"File was not downloaded to {temp_file_path}"
+            logger.error(error_msg)
+            status['success'] = False
+            status['error'] = error_msg
+            return None, status
+            
+        status['success'] = True
+        status['local_path'] = temp_file_path
+        status['original_s3_path'] = s3_path
+        return temp_file_path, status
+        
+    except Exception as e:
+        error_msg = f"Error downloading file from {s3_path}: {str(e)}"
+        logger.error(error_msg)
+        status['success'] = False
+        status['error'] = error_msg
+        return None, status
 
 def stream_local_file(file_path: str, decompress: Optional[bool] = None) -> BinaryIO:
     """

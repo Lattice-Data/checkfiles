@@ -8,10 +8,11 @@ import hashlib
 import crcmod.predefined
 import tempfile
 import subprocess
+import uuid
 from typing import Dict, Any, Optional, BinaryIO, Tuple, Union
 
 from src.tracking.progress import SimpleActivityTracker, ProgressTrackingStream
-from src.utils.helpers import has_gz_extension, stream_s3_file, stream_local_file
+from src.utils.helpers import has_gz_extension, stream_s3_file, stream_local_file, download_s3_file_to_scratch
 from src.validators.base import HashCalculatingStream, GzipHashCalculatingStream
 from src.models.validation_record import FileValidationRecord
 
@@ -316,6 +317,121 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         
         return result
 
+def download_and_validate_random_access_file(s3_path: str, file_format: str, debug: bool = False,
+                                           validator: Optional[Any] = None,
+                                           progress_tracker: Optional[SimpleActivityTracker] = None,
+                                           identifier: str = "", return_record: bool = False,
+                                           etag: Optional[str] = None) -> Union[Dict[str, Any], FileValidationRecord]:
+    """
+    Download an S3 file that requires random access (like HDF5/H5AD) to the scratch directory and validate it.
+    
+    Args:
+        s3_path: Path to the S3 file (s3://bucket/key)
+        file_format: Format of the file (e.g., 'hdf5', 'h5ad')
+        debug: Whether to enable debug output
+        validator: Validator instance to use (will be created if None)
+        progress_tracker: Activity tracker instance or None if tracking is disabled
+        identifier: Optional identifier for the file (e.g., accession number)
+        return_record: Whether to return a FileValidationRecord instead of a dictionary
+        etag: Optional ETag value for concurrency control
+        
+    Returns:
+        Dictionary with validation results or FileValidationRecord
+    """
+    if progress_tracker:
+        progress_tracker.init_file(s3_path)
+        progress_tracker.update_progress(s3_path, status="Preparing to download file for validation")
+    
+    try:
+        # Use the helper function to download the file
+        temp_file_path, download_status = download_s3_file_to_scratch(s3_path, file_format)
+        
+        if not download_status.get('success', False):
+            error_msg = download_status.get('error', 'Unknown download error')
+            logger.error(error_msg)
+            if progress_tracker:
+                progress_tracker.update_progress(s3_path, status=f"Download failed: {error_msg}")
+                progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+            
+            result_dict = {
+                "file_path": s3_path,
+                "error": error_msg,
+                "success": False,
+                "identifier": identifier
+            }
+            
+            if return_record:
+                return create_validation_record(result_dict, s3_path, identifier, etag)
+            return result_dict
+        
+        if progress_tracker:
+            progress_tracker.update_progress(s3_path, status=f"File downloaded successfully to {temp_file_path}, starting validation")
+        
+        # Calculate S3 object hash separately as we've already downloaded the file
+        track_validation_progress(s3_path, progress_tracker, "Calculating hashes from downloaded file")
+        hash_stats = {}
+        with open(temp_file_path, 'rb') as file_stream:
+            is_gzipped = has_gz_extension(s3_path)
+            hash_stats = calculate_hashes_for_stream(file_stream, is_gzipped)
+        track_validation_progress(s3_path, progress_tracker, "Hashes calculated")
+        
+        # Now validate the local file
+        local_result = validate_local_file(
+            temp_file_path, 
+            file_format, 
+            debug, 
+            validator,
+            progress_tracker,
+            identifier,  # Pass the original identifier
+            return_record=False  # We'll create our own record later
+        )
+        
+        # Make sure to update the file_path to the original S3 path in the result
+        local_result["file_path"] = s3_path
+        
+        # Combine hash stats with validation results
+        if local_result.get("success", False) and "results" in local_result:
+            if "stats" not in local_result["results"]:
+                local_result["results"]["stats"] = {}
+            local_result["results"]["stats"].update(hash_stats)
+        
+        if progress_tracker:
+            progress_tracker.complete_file(s3_path, local_result.get("success", False), 
+                                          local_result.get("results", {"error": local_result.get("error", "Unknown error")}))
+        
+        # Convert to structured record if requested
+        if return_record:
+            return create_validation_record(local_result, s3_path, identifier, etag)
+        
+        return local_result
+    
+    except Exception as e:
+        error_msg = f"Error validating {s3_path} (via download): {str(e)}"
+        logger.error(error_msg)
+        
+        if progress_tracker:
+            progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+        
+        result_dict = {
+            "file_path": s3_path,
+            "error": error_msg,
+            "success": False,
+            "identifier": identifier
+        }
+        
+        if return_record:
+            return create_validation_record(result_dict, s3_path, identifier, etag)
+        return result_dict
+    
+    finally:
+        # Clean up the temporary file
+        try:
+            if 'temp_file_path' in locals() and temp_file_path and os.path.exists(temp_file_path):
+                logger.info(f"Cleaning up temporary file: {temp_file_path}")
+                os.remove(temp_file_path)
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
+
 def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
                    validator: Optional[Any] = None, 
                    progress_tracker: Optional[SimpleActivityTracker] = None,
@@ -336,6 +452,21 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
     Returns:
         Dictionary with validation results or FileValidationRecord
     """
+    # Special handling for file formats that require random access (HDF5, H5AD)
+    if file_format.lower() in ['hdf5', 'h5ad']:
+        logger.info(f"File format {file_format} requires random access. Downloading file for validation.")
+        return download_and_validate_random_access_file(
+            s3_path=s3_path,
+            file_format=file_format,
+            debug=debug,
+            validator=validator,
+            progress_tracker=progress_tracker,
+            identifier=identifier,
+            return_record=return_record,
+            etag=etag
+        )
+    
+    # For formats that can be streamed, use the existing streaming approach
     process = None
     
     if progress_tracker:

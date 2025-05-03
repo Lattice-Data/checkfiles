@@ -3,6 +3,9 @@ HDF5 file and stream validator.
 
 This module provides validation for HDF5 files to ensure they are properly formatted
 and conform to expected standards.
+
+Note: HDF5 files require random access for validation and cannot be 
+directly validated from a stream without creating a temporary file.
 """
 
 import os
@@ -29,6 +32,9 @@ class Hdf5Validator(BaseValidator):
     
     This validator ensures that HDF5 files are properly formatted and 
     can be opened without errors.
+    
+    Important: HDF5 files require random access for validation. When validating from a 
+    stream, the data will be written to a temporary file in the scratch directory.
     
     Note: For H5AD files (a specialized form of HDF5 for single-cell data),
     the H5adValidator should be used instead. Files with 'hdf5' format
@@ -102,9 +108,20 @@ class Hdf5Validator(BaseValidator):
         """
         import gzip
         
-        # Create a temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False)
-        temp_path = temp_file.name
+        # Use the /mnt/scratch directory if available, otherwise use system temp directory
+        scratch_dir = os.environ.get('SCRATCH_DIR', '/mnt/scratch')
+        if not os.path.exists(scratch_dir):
+            try:
+                os.makedirs(scratch_dir, exist_ok=True)
+            except (PermissionError, OSError):
+                scratch_dir = tempfile.gettempdir()
+                logger.warning(f"Could not create or access scratch directory. Using system temp: {scratch_dir}")
+        
+        # Create a temporary file in the scratch directory
+        prefix = "hdf5_temp_"
+        suffix = ".gz" if is_gzipped else ""
+        fd, temp_path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=scratch_dir)
+        os.close(fd)  # Close the file descriptor
         
         logger.debug(f"Created temporary file at {temp_path}")
         
@@ -115,22 +132,14 @@ class Hdf5Validator(BaseValidator):
                 original_pos = stream.tell()
                 stream.seek(0)
             
-            # Copy the stream to the temporary file
-            # Use larger buffer for better performance
-            buffer_size = 1024 * 1024  # 1MB buffer
-            
-            # If the stream is gzipped but we need raw data
-            # (decompression will be handled by h5py)
-            if is_gzipped:
+            # Copy the stream to the temporary file using file objects
+            with open(temp_path, 'wb') as temp_file:
+                # Use larger buffer for better performance
+                buffer_size = 1024 * 1024  # 1MB buffer
                 shutil.copyfileobj(stream, temp_file, buffer_size)
-            else:
-                shutil.copyfileobj(stream, temp_file, buffer_size)
-            
-            temp_file.flush()
-            temp_file.close()
             
             # Restore original position if we changed it and stream is seekable
-            if original_pos is not None:
+            if original_pos is not None and self.is_stream_seekable(stream):
                 stream.seek(original_pos)
             
             # Reopen the file in binary read mode
@@ -139,16 +148,18 @@ class Hdf5Validator(BaseValidator):
             
         except Exception as e:
             # Clean up on error
-            temp_file.close()
             try:
                 os.unlink(temp_path)
-            except:
+            except Exception:
                 pass
             raise RuntimeError(f"Failed to create temporary file: {str(e)}")
     
     def validate_stream(self, input_stream: BinaryIO, is_gzipped: bool = False) -> Dict[str, Any]:
         """
         Validate an HDF5 data stream.
+        
+        Important: HDF5 validation requires random access. This method will create
+        a temporary file in the scratch directory if the stream is not seekable.
         
         Args:
             input_stream: Binary stream containing HDF5 data
@@ -182,10 +193,9 @@ class Hdf5Validator(BaseValidator):
         logger.debug(f"Stream seekable: {is_seekable}")
         
         try:
-            # For non-seekable streams (like process.stdout from S3), 
-            # we need to create a temporary file
+            # For non-seekable streams, we need to create a temporary file
             if not is_seekable:
-                logger.debug("Stream is not seekable, creating temporary file")
+                logger.info("Stream is not seekable, creating temporary file for HDF5 validation")
                 temp_path, temp_file = self.create_temp_file_from_stream(input_stream, is_gzipped)
                 h5file_input = temp_file
             else:
@@ -216,7 +226,7 @@ class Hdf5Validator(BaseValidator):
             if temp_file:
                 try:
                     temp_file.close()
-                except:
+                except Exception:
                     pass
             if temp_path:
                 try:
