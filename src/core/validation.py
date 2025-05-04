@@ -247,11 +247,15 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         # Check if local file is gzipped
         is_gzipped = has_gz_extension(file_path)
         
+        # Special handling for HDF5 and H5AD files which need random access
+        requires_random_access = file_format.lower() in ['hdf5', 'h5ad']
+        
         try:
             # Step 1: Calculate Hashes
             track_validation_progress(file_path, progress_tracker, "Calculating hashes")
             hash_stats = {}
-            # Open first stream for hash calculation
+            
+            # For hash calculation, always use a fresh file handle
             with open(file_path, 'rb') as file_stream:
                 hash_stats = calculate_hashes_for_stream(file_stream, is_gzipped)
             track_validation_progress(file_path, progress_tracker, "Hashes calculated")
@@ -259,7 +263,9 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
             # Step 2: Validate Format
             track_validation_progress(file_path, progress_tracker, "Running format validation")
             validation_results = {}
-            # Open a second stream for the validator
+            
+            # For file format validation, use another fresh file handle
+            # This ensures no problems with stream position/seeking
             with open(file_path, 'rb') as validation_stream:
                 if progress_tracker:
                     # Wrap the validation stream for progress tracking
@@ -522,7 +528,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         track_validation_progress(s3_path, progress_tracker, "Calculating hashes via S3 stream")
         hash_stats = {}
         # Get first stream for hash calculation (do not decompress here)
-        hash_stream = stream_s3_file(s3_path, decompress=False)
+        hash_stream = stream_s3_file(s3_path, decompress=False, file_format=file_format)
         try:
             hash_stats = calculate_hashes_for_stream(hash_stream, is_gzipped)
         finally:
@@ -533,7 +539,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         track_validation_progress(s3_path, progress_tracker, "Running format validation via S3 stream")
         validation_results = {}
         # Get a second stream for the validator (do not decompress here)
-        validation_stream_raw = stream_s3_file(s3_path, decompress=False)
+        validation_stream_raw = stream_s3_file(s3_path, decompress=False, file_format=file_format)
         try:
             if progress_tracker:
                 tracking_stream = ProgressTrackingStream(validation_stream_raw, progress_tracker, update_interval_mb=100)

@@ -9,6 +9,7 @@ import shlex
 import tempfile
 import uuid
 from typing import Optional, BinaryIO, IO, Any, Tuple
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -203,17 +204,22 @@ def stream_local_file(file_path: str, decompress: Optional[bool] = None) -> Bina
         logger.debug(f"Opening non-compressed file directly: {file_path}")
         return open(file_path, 'rb')
 
-def stream_s3_file(s3_path: str, decompress: Optional[bool] = None) -> BinaryIO:
+def stream_s3_file(s3_path: str, decompress: Optional[bool] = None, file_format: Optional[str] = None) -> BinaryIO:
     """
     Create a stream from an S3 file using AWS CLI.
     
     Args:
         s3_path: S3 path in the format s3://bucket/key
         decompress: Whether to decompress the file. If None, will be determined by file extension.
+        file_format: Optional file format to handle format-specific streaming requirements
     
     Returns:
         A file-like object containing the file content
     """
+    # Warn about non-seekable streams for HDF5/H5AD files
+    if file_format and file_format.lower() in ['hdf5', 'h5ad']:
+        logger.warning(f"Using stream_s3_file with {file_format} format. This format requires random access and should use download_s3_file_to_scratch instead.")
+    
     # Determine if we should decompress based on file extension if not specified
     if decompress is None:
         decompress = has_gz_extension(s3_path)
@@ -240,4 +246,13 @@ def stream_s3_file(s3_path: str, decompress: Optional[bool] = None) -> BinaryIO:
         stderr = process.stderr.read().decode('utf-8')
         raise RuntimeError(f"Failed to start S3 stream: {stderr}")
     
-    return process.stdout 
+    # Create a BytesIO object that's more compatible with most validation operations
+    # This is especially important for small files that can fit in memory
+    if file_format and file_format.lower() in ['hdf5', 'h5ad']:
+        logger.info("For HDF5/H5AD files, reading entire content to BytesIO for better compatibility")
+        content = process.stdout.read()
+        process.wait()  # Make sure the process completes
+        return io.BytesIO(content)
+    else:
+        # For other formats, return the raw stream
+        return process.stdout 
