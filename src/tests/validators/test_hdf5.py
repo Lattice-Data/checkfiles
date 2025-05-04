@@ -120,8 +120,9 @@ def test_validate_invalid_file(validator):
         result = validator.validate_file(temp_path)
         
         assert result["valid"] is False
-        # Updated error message check
-        assert "Invalid HDF5 structure or stream error" in result["errors"]["validation_error"]
+        # Updated error message check for new format
+        assert "validation_error" in result["errors"]
+        assert "Invalid HDF5 structure" in result["errors"]["validation_error"] 
         assert "file signature not found" in result["errors"]["validation_error"] # More specific h5py error
     finally:
         # Clean up
@@ -141,8 +142,10 @@ def test_validate_stream(validator):
     assert result["valid"] is False
     assert "validation_error" in result["errors"]
     # Check the specific error message from h5py for invalid stream/signature
-    assert "Invalid HDF5 structure or stream error" in result["errors"]["validation_error"]
-    assert "file signature not found" in result["errors"]["validation_error"]
+    # The error message format has changed in our recent updates
+    error_message = result["errors"]["validation_error"]
+    assert "Invalid HDF5 structure" in error_message
+    assert "file signature not found" in error_message
     
     # Hashes are no longer calculated here
     # assert "file_size" in result["stats"] # No longer calculated here

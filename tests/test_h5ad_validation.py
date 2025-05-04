@@ -6,10 +6,14 @@ on handling the random access requirements.
 """
 
 import os
+import sys
 import unittest
 import tempfile
 from unittest.mock import patch, MagicMock, PropertyMock
 import io
+
+# Add the project root to the path to make imports work
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.validators.h5ad import H5adValidator
 from src.validators.hdf5 import Hdf5Validator
@@ -77,9 +81,14 @@ class TestH5adValidation(unittest.TestCase):
     @patch('os.environ.get')
     @patch('builtins.open')
     @patch('shutil.copyfileobj')  # Mock shutil.copyfileobj directly
-    def test_validate_stream_seekable(self, mock_copyfileobj, mock_open, mock_environ_get, mock_path_exists, 
-                                     mock_os_close, mock_mkstemp, mock_sc, mock_base_validate):
-        """Test validation with a seekable stream."""
+    def test_validate_stream_seekable_legacy(self, mock_copyfileobj, mock_open, mock_environ_get, 
+                                     mock_path_exists, mock_os_close, mock_mkstemp, 
+                                     mock_sc, mock_base_validate):
+        """
+        Legacy test for validation with a seekable stream.
+        This test is kept for compatibility but adapted to the new implementation
+        that always uses a temporary file.
+        """
         # Mock base HDF5 validation to return valid result
         mock_base_validate.return_value = {
             'valid': True,
@@ -88,24 +97,17 @@ class TestH5adValidation(unittest.TestCase):
             'stats': {}
         }
         
-        # Mock environment and path checks
-        mock_environ_get.return_value = '/tmp/scratch'
-        mock_path_exists.return_value = True
-        
-        # Mock a seekable stream
-        seekable_stream = MagicMock()
-        seekable_stream.tell.return_value = 0
-        
-        # Mock file operations
-        mock_temp_path = '/tmp/test_h5ad_file.h5ad'
-        mock_mkstemp.return_value = (1, mock_temp_path)
-        
-        # Mock file context manager
-        mock_file_cm = MagicMock()
-        mock_open.return_value.__enter__.return_value = mock_file_cm
-        
-        # Make is_stream_seekable return True
-        with patch.object(self.validator, 'is_stream_seekable', return_value=True):
+        # Mock the create_temp_file_from_stream method to avoid depending on its implementation
+        with patch.object(self.validator, 'create_temp_file_from_stream') as mock_create_temp:
+            # Set up a temp file
+            mock_temp_file = MagicMock()
+            mock_temp_path = '/tmp/test_h5ad_file.h5ad'
+            mock_create_temp.return_value = (mock_temp_path, mock_temp_file)
+            
+            # Mock seekable stream - note that in new implementation, 
+            # seekability doesn't matter as we always create a temp file
+            seekable_stream = MagicMock()
+            
             # Mock the _validate_h5ad_file method to return a simple valid result
             with patch.object(self.validator, '_validate_h5ad_file', return_value={
                 'errors': {},
@@ -113,21 +115,67 @@ class TestH5adValidation(unittest.TestCase):
                 'stats': {'observation_count': 200}
             }):
                 # Mock os.unlink to prevent file deletion attempts
-                with patch('os.unlink') as mock_unlink:
+                with patch('os.unlink'):
                     result = self.validator.validate_stream(seekable_stream, is_gzipped=False)
             
-            # Verify the stream's position was reset
-            seekable_stream.seek.assert_any_call(0)
-            
-            # Verify mock calls
-            mock_mkstemp.assert_called_once()
-            mock_os_close.assert_called_once_with(1)
-            mock_open.assert_called_once()
-            mock_copyfileobj.assert_called_once()
+            # Verify the temp file was created (always happens now)
+            mock_create_temp.assert_called_once_with(seekable_stream, False)
             
             # Verify the result is valid
             self.assertTrue(result['valid'])
             self.assertEqual(result['stats'].get('observation_count'), 200)
+    
+    @patch('src.validators.h5ad.H5PY_AVAILABLE', True)
+    @patch('src.validators.h5ad.SCANPY_AVAILABLE', True)
+    @patch('src.validators.hdf5.Hdf5Validator.validate_stream')
+    @patch('src.validators.h5ad.sc')
+    def test_validate_stream_with_temp_file(self, mock_sc, mock_base_validate):
+        """Test validation with a temporary file."""
+        # Mock base HDF5 validation to return valid result
+        mock_base_validate.return_value = {
+            'valid': True,
+            'errors': {},
+            'warnings': {},
+            'stats': {}
+        }
+        
+        # Mock the stream
+        mock_stream = MagicMock()
+        mock_stream.read.return_value = b"test data"
+        
+        # Mock the create_temp_file_from_stream method
+        with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as temp_file:
+            temp_path = temp_file.name
+            temp_file.write(b"test h5ad data")
+        
+        try:
+            # Create a test-specific patch for create_temp_file_from_stream
+            with patch.object(self.validator, 'create_temp_file_from_stream') as mock_create_temp:
+                # Set up the mock to return our test file
+                mock_temp_file = open(temp_path, 'rb')
+                mock_create_temp.return_value = (temp_path, mock_temp_file)
+                
+                # Mock the _validate_h5ad_file method
+                with patch.object(self.validator, '_validate_h5ad_file', return_value={
+                    'errors': {},
+                    'warnings': {},
+                    'stats': {'observation_count': 200}
+                }):
+                    # Run the validation
+                    result = self.validator.validate_stream(mock_stream, is_gzipped=False)
+                    
+                    # Verify the result is valid
+                    self.assertTrue(result['valid'])
+                    self.assertEqual(result['stats'].get('observation_count'), 200)
+                    
+                    # Verify the temp file was created
+                    mock_create_temp.assert_called_once_with(mock_stream, False)
+        finally:
+            # Clean up
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
     
     def test_validates_feature_types(self):
         """Test validation of feature types."""
