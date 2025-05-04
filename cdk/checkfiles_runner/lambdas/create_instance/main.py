@@ -106,7 +106,7 @@ def create_checkfiles_instance(event, context):
             'DeleteOnTermination': True,
             'Encrypted': False,
             'VolumeSize': 500,
-            'VolumeType': 'gp2',
+            'VolumeType': 'gp3',
         }
     }
 
