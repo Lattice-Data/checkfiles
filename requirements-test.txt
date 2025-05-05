@@ -1,20 +1,8 @@
-# Test dependencies
-pytest>=7.0.0
-pytest-cov>=4.0.0
+# Test-specific dependencies
+pytest>=7.3.1
+pytest-cov>=4.1.0
 coverage>=7.0.0
 requests-mock>=1.11.0
 
-# Core dependencies needed for imports to work
-numpy>=1.22.0
-pandas>=1.5.0
-h5py>=3.8.0
-scanpy>=1.9.0
-
-# Other dependencies that might be imported directly
-scipy>=1.10.0
-matplotlib>=3.7.0
-anndata>=0.8.0
-
-# Mock these if needed, but install if possible
-# pysam
-# pybigwig 
+# Note: Core dependencies are installed from src/requirements.txt
+# This file only contains additional dependencies needed for testing 
