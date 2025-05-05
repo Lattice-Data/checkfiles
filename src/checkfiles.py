@@ -14,6 +14,7 @@ import threading
 from typing import List, Dict, Any, Tuple
 from urllib.parse import urljoin
 import requests
+import json
 
 # Configure logging
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -118,10 +119,18 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         # Add validation status explicitly
         json_patch['validated'] = validation_results.get('valid', False)
 
-        log_line = f"{identifier}\t{uri}\t{errors}\t{stats}\t{json_patch}\tsuccess\tsuccess"
+        # Ensure dicts are properly JSON formatted for the log line
+        errors_str = json.dumps(errors)
+        stats_str = json.dumps(stats)
+        patch_str = json.dumps(json_patch)
+
+        log_line = f"{identifier}\t{uri}\t{errors_str}\t{stats_str}\t{patch_str}\tsuccess\tsuccess"
     else:
         error = result.get('error', 'Unknown error')
-        log_line = f"{identifier}\t{uri}\t{{'error': '{error}'}}\t{{}}\t{{}}\tfailed\tfailed"
+        # Ensure error dict is JSON formatted
+        error_dict_str = json.dumps({'error': error})
+        empty_dict_str = json.dumps({})
+        log_line = f"{identifier}\t{uri}\t{error_dict_str}\t{empty_dict_str}\t{empty_dict_str}\tfailed\tfailed"
     
     # Use file locking to ensure atomic writes
     # This approach doesn't require a global lock object that needs to be pickled

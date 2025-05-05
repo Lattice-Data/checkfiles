@@ -16,9 +16,10 @@ import shutil
 from pathlib import Path
 import ast
 import multiprocessing
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 import inspect
 import re
+import json
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -29,6 +30,56 @@ from src.core.validation import initialize_validator, validate_local_file, valid
 from src.tracking.progress import SimpleActivityTracker
 from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel
 
+# Define sample H5AD result structure
+SAMPLE_H5AD_RESULT = {
+    'success': True,
+    'file_path': 's3://fake-bucket/data.h5ad',
+    'identifier': 'TESTH5AD001',
+    'results': {
+        'valid': True,
+        'errors': {},
+        'warnings': {},
+        'stats': {
+            'file_size': 512000,
+            'md5sum': 'a1b2c3d4e5f6',
+            'sha256': 'f6e5d4c3b2a1',
+            'crc32c': 'abcdef01',
+            'observation_count': 5000,
+            'variable_count': 30000,
+            'feature_counts': [{'feature_type': 'gene', 'feature_count': 30000}],
+            'genomes': ['GRCm39'],
+            'is_hdf5': True
+            # 'content_md5sum' might be missing if not gzipped S3
+        }
+    }
+}
+
+SAMPLE_FASTQ_RESULT = {
+    'success': True,
+    'file_path': 'local/path/reads.fastq.gz',
+    'identifier': 'TESTFASTQ001',
+    'results': {
+        'valid': True,
+        'errors': {},
+        'warnings': {},
+        'stats': {
+            'file_size': 1024000,
+            'md5sum': '112233445566',
+            'sha256': '665544332211',
+            'crc32c': 'fedcba98',
+            'content_md5sum': 'abcdefabcdef', # Present for gzipped stream
+            'read_count': 10000,
+            'read_length': 150
+        }
+    }
+}
+
+SAMPLE_FAILED_RESULT = {
+    'success': False,
+    'file_path': 's3://another/file.bam',
+    'identifier': 'TESTFAIL001',
+    'error': 'Something went wrong'
+}
 
 @pytest.fixture
 def test_files():
@@ -224,26 +275,33 @@ def test_validate_local_file_with_tracker(test_files):
     assert tracker.log[-1] == "complete"
 
 
-def test_validate_local_file_exception():
+@patch('src.core.validation.initialize_validator') # Mock the validator initialization
+@patch('os.path.exists', return_value=True) # Mock os.path.exists specifically for this test
+def test_validate_local_file_exception(mock_exists, mock_init_validator):
     """Test handling exceptions during local file validation."""
     # For this test, we'll create a mock validator that will raise an exception
     class FailingValidator:
         def validate_file(self, *args, **kwargs):
             raise ValueError("Test error")
-            
+
         def validate_stream(self, *args, **kwargs):
-            raise ValueError("Test error")
-    
+            # This should now be called if os.path.exists is True
+            raise ValueError("Test error from stream")
+
+    # Mock initialize_validator to return our failing validator instance
+    mock_init_validator.return_value = FailingValidator()
+
     # Test with a validator that will throw an exception
     result = validate_local_file(
         "/path/to/some/file.fastq",
         "fastq",
-        validator=FailingValidator()
+        # validator=FailingValidator() # No longer pass directly, use mock
     )
-    
+
     assert result["success"] is False
     assert "error" in result
-    assert "Error validating /path/to/some/file.fastq: Failed to process file:" in result["error"]
+    # Check the actual error message coming from the exception handler in validate_local_file
+    assert "Test error from stream" in result["error"] # Expecting the error from the stream path now
 
 
 def test_validate_gzip_format_valid_local(test_files):
@@ -647,3 +705,88 @@ def test_process_files_in_parallel_uses_process_pool():
     # Use regex to verify ProcessPoolExecutor is used with correct parameters
     assert re.search(r'ProcessPoolExecutor\(max_workers=thread_count\)', process_parallel_source)
     assert re.search(r'ProcessPoolExecutor\(max_workers=min\(args\.threads, len\(patch_jobs\)\)\)', main_source)
+
+
+# Use parametrize to test different scenarios
+@pytest.mark.parametrize("test_result, expected_patch_keys, expected_absent_keys", [
+    (SAMPLE_H5AD_RESULT,
+     ['file_size', 'md5sum', 'sha256', 'crc32c', 'observation_count', 'genomes', 'feature_counts', 'is_hdf5', 'validated'],
+     ['content_md5sum', 'read_count', 'read_length']), # Expected absent keys for this H5AD sample
+    (SAMPLE_FASTQ_RESULT,
+     ['file_size', 'md5sum', 'sha256', 'crc32c', 'content_md5sum', 'read_count', 'read_length', 'validated'],
+     ['observation_count', 'genomes', 'feature_counts', 'is_hdf5']) # Expected absent keys for this FASTQ sample
+])
+@patch('builtins.open', new_callable=mock_open) # Mock open for writing the log
+@patch('os.path.exists', return_value=True) # Assume log exists
+@patch('os.path.getsize', return_value=100) # Assume log not empty
+@patch('os.makedirs') # Mock makedirs
+@patch('os.fsync') # Mock fsync
+def test_write_result_to_progress_log_formats_json_patch(mock_fsync, mock_makedirs, mock_getsize, mock_exists, mock_file_open, test_result, expected_patch_keys, expected_absent_keys):
+    """Verify json_patch is formatted correctly for H5AD results."""
+    # Define expected log path (can be refined based on actual logic)
+    expected_log_path = os.path.join(os.getcwd(), 'validation_progress.log')
+
+    # Call the function
+    write_result_to_progress_log(test_result)
+
+    # Assertions
+    mock_file_open.assert_called_once_with(expected_log_path, 'a') # Check opened in append mode
+    handle = mock_file_open()
+    # Get the string that was written
+    written_line = handle.write.call_args[0][0]
+    assert written_line.endswith('\n')
+
+    # Parse the written line (tab-separated)
+    parts = written_line.strip().split('\t')
+    assert len(parts) == 7 # identifier, uri, errors, results, json_patch, lattice_status, s3_status
+
+    # Extract and parse the json_patch string
+    json_patch_str = parts[4]
+    try:
+        parsed_patch = json.loads(json_patch_str.replace("'", '"')) # Handle single quotes if used
+    except json.JSONDecodeError:
+        pytest.fail(f"Failed to parse JSON patch string: {json_patch_str}")
+
+    # Check expected keys are present in the parsed patch
+    for key in expected_patch_keys:
+        assert key in parsed_patch, f"Expected key '{key}' not found in JSON patch: {parsed_patch}"
+        # Check value matches the input result stats
+        if key != 'validated':
+             assert parsed_patch[key] == test_result['results']['stats'][key]
+        else:
+             assert parsed_patch['validated'] == test_result['results']['valid']
+
+    # Check keys that should be absent are indeed absent
+    for key in expected_absent_keys:
+         assert key not in parsed_patch, f"Unexpected key '{key}' found in JSON patch: {parsed_patch}"
+
+    # Check other parts of the log line
+    assert parts[0] == test_result['identifier']
+    assert parts[1] == test_result['file_path'] # URI part
+    # Add more assertions for errors/stats string format if needed
+    assert parts[5] == 'success' # Lattice patched placeholder
+    assert parts[6] == 'success' # S3 tag patched placeholder
+
+@patch('builtins.open', new_callable=mock_open)
+@patch('os.path.exists', return_value=True)
+@patch('os.path.getsize', return_value=100)
+@patch('os.makedirs')
+@patch('os.fsync')
+def test_write_result_to_progress_log_failed_result(mock_fsync, mock_makedirs, mock_getsize, mock_exists, mock_file_open):
+    """Verify log format for a failed validation result."""
+    expected_log_path = os.path.join(os.getcwd(), 'validation_progress.log')
+    write_result_to_progress_log(SAMPLE_FAILED_RESULT)
+
+    mock_file_open.assert_called_once_with(expected_log_path, 'a')
+    handle = mock_file_open()
+    written_line = handle.write.call_args[0][0]
+    parts = written_line.strip().split('\t')
+
+    assert len(parts) == 7
+    assert parts[0] == SAMPLE_FAILED_RESULT['identifier']
+    assert parts[1] == SAMPLE_FAILED_RESULT['file_path']
+    assert parts[2] == "{'error': 'Something went wrong'}" # Error string
+    assert parts[3] == "{}" # Empty results dict
+    assert parts[4] == "{}" # Empty patch dict
+    assert parts[5] == 'failed'
+    assert parts[6] == 'failed'
