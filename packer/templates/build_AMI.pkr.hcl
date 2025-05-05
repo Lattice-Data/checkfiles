@@ -46,7 +46,7 @@ locals { timestamp = regex_replace(timestamp(), "[- TZ:]", "") }
 source "amazon-ebs" "builder" {
   profile       = "${var.aws_profile_name}"
   ami_name      = "packer-ami-build ${local.timestamp}"
-  instance_type = "m3.medium"
+  instance_type = "t4g.medium"
   region        = "${var.aws_region}"
   ssh_username  = "${var.ssh_username}"
   tags = {
@@ -57,6 +57,7 @@ source "amazon-ebs" "builder" {
       virtualization-type = "hvm"
       name = "${var.source_ami_name}"
       root-device-type = "ebs"
+      architecture = "arm64"
     }
     owners = ["099720109477"]
     most_recent = true

@@ -1,7 +1,7 @@
 config = {
     'region': 'us-west-1',
     'account_production': '585222078325',  # lattice-prod
-    'ami_id_production': 'ami-0709a5ad822ebfc7c', # latest checkfiles AMI 
+    'ami_id_production': 'ami-07186f2a3056b88a9', # latest checkfiles AMI 
     'portal_secrets_arn_production': 'arn:aws:secretsmanager:us-west-1:585222078325:secret:checkfiles-portal-secret-5A1cNL',
     'slack_channel_id_arn': 'arn:aws:secretsmanager:us-west-1:585222078325:secret:slack-channel-id-lWBvOZ',
     'slack_token_arn': 'arn:aws:secretsmanager:us-west-1:585222078325:secret:bot-token-Z0jak9',
