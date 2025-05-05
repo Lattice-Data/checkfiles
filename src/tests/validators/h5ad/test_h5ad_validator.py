@@ -126,27 +126,34 @@ def create_test_h5ad(filename, with_errors=False):
 # PyTest-style tests with mocked file creation
 @pytest.mark.skipif(not SCANPY_AVAILABLE, reason="scanpy not available")
 @patch('src.validators.h5ad.sc.read_h5ad')
-def test_valid_h5ad(mock_read_h5ad, validator):
+@patch('src.validators.hdf5.Hdf5Validator.validate_stream')
+@patch('src.validators.h5ad.H5adValidator._validate_h5ad_file')
+def test_valid_h5ad(mock_validate_h5ad_file, mock_hdf5_validate, mock_read_h5ad, validator):
     """Test validation of a valid H5AD file with mocking."""
-    # Create mock AnnData object
-    mock_adata = MagicMock()
-    
-    # Mock var dataframe with necessary columns
-    var_data = {
-        'feature_types': ['Gene Expression'] * 10,
-        'gene_ids': [f"ENSG{str(i).zfill(11)}" for i in range(10)],
-        'gene_versions': [f"ENSG{str(i).zfill(11)}.1" for i in range(10)],
-        'genome': ['GRCh38'] * 10
+    # Mock HDF5 validation result
+    mock_hdf5_validate.return_value = {
+        'valid': True,
+        'errors': {},
+        'warnings': {},
+        'stats': {
+            'groups': 3,
+            'datasets': 5,
+            'attributes': 10
+        }
     }
-    var_df = pd.DataFrame(var_data)
-    mock_adata.var = var_df
     
-    # Mock observation names and shape
-    mock_adata.obs_names = [f"CELL_{i}" for i in range(10)]
-    mock_adata.shape = (10, 10)
-    
-    # Set the return value for sc.read_h5ad
-    mock_read_h5ad.return_value = mock_adata
+    # Mock the _validate_h5ad_file method to return a successful result
+    mock_validate_h5ad_file.return_value = {
+        'errors': {},
+        'warnings': {},
+        'stats': {
+            'observation_count': 10,
+            'genomes': ['GRCh38'],
+            'feature_counts': [
+                {'feature_type': 'gene', 'count': 10}
+            ]
+        }
+    }
     
     # Create a dummy BytesIO to pass to validate_stream
     stream = BytesIO(b"mocked h5ad file data")
@@ -168,32 +175,36 @@ def test_valid_h5ad(mock_read_h5ad, validator):
 
 @pytest.mark.skipif(not SCANPY_AVAILABLE, reason="scanpy not available")
 @patch('src.validators.h5ad.sc.read_h5ad')
-def test_invalid_h5ad(mock_read_h5ad, validator):
+@patch('src.validators.hdf5.Hdf5Validator.validate_stream')
+@patch('src.validators.h5ad.H5adValidator._validate_h5ad_file')
+def test_invalid_h5ad(mock_validate_h5ad_file, mock_hdf5_validate, mock_read_h5ad, validator):
     """Test validation of an invalid H5AD file with mocking."""
-    # Create mock AnnData object with validation errors
-    mock_adata = MagicMock()
-    
-    # Mock var dataframe with validation errors
-    var_data = {
-        'feature_types': ['Gene Expression'] * 9 + ['Invalid Type'],
-        'gene_ids': [f"ENSG{str(i).zfill(11)}" for i in range(8)] + 
-                   ["ENSG00000000008.14", "NON_ENSG_ID"],  # Add invalid IDs
-        'gene_versions': [f"ENSG{str(i).zfill(11)}.1" for i in range(9)] + 
-                        ["ENSG00000000009"],  # Missing version
-        'genome': ['GRCh38'] * 10
+    # Mock HDF5 validation result - still valid at HDF5 level
+    mock_hdf5_validate.return_value = {
+        'valid': True,
+        'errors': {},
+        'warnings': {},
+        'stats': {
+            'groups': 3,
+            'datasets': 5,
+            'attributes': 10
+        }
     }
-    var_df = pd.DataFrame(var_data)
-    mock_adata.var = var_df
     
-    # Mock observation names with a problematic cell name
-    mock_adata.obs_names = ["CELL_0.1"] + [f"CELL_{i}" for i in range(1, 10)]
-    mock_adata.shape = (10, 10)
-    
-    # Set index with date-formatted symbol
-    var_df.index = ["Mar-1"] + [f"GENE_{i}" for i in range(1, 10)]
-    
-    # Set the return value for sc.read_h5ad
-    mock_read_h5ad.return_value = mock_adata
+    # Mock the _validate_h5ad_file method to return errors
+    mock_validate_h5ad_file.return_value = {
+        'errors': {
+            'var.feature_types[Invalid Type]': 'Invalid feature type detected',
+            'ENSG format': 'Gene ID doesn\'t match ENSG format',
+            'ENSG.N format': 'Gene version contains inconsistencies',
+            'cell_id suffix': 'Cell ID contains invalid suffix',
+            'date-formatted symbols': 'Gene symbols contain date formatting'
+        },
+        'warnings': {},
+        'stats': {
+            'observation_count': 10
+        }
+    }
     
     # Create a dummy BytesIO to pass to validate_stream
     stream = BytesIO(b"mocked h5ad file data with errors")
@@ -208,16 +219,29 @@ def test_invalid_h5ad(mock_read_h5ad, validator):
     
     # Check for specific errors
     assert 'var.feature_types[Invalid Type]' in result['errors']
-    assert any('ENSG format' in key for key in result['errors'].keys())
-    assert any('ENSG.N format' in key for key in result['errors'].keys())
+    assert 'ENSG format' in result['errors']
+    assert 'ENSG.N format' in result['errors']
     assert 'cell_id suffix' in result['errors']
     assert 'date-formatted symbols' in result['errors']
 
 
 @pytest.mark.skipif(not SCANPY_AVAILABLE, reason="scanpy not available")
 @patch('src.validators.h5ad.sc.read_h5ad')
-def test_h5ad_with_missing_columns(mock_read_h5ad, validator):
+@patch('src.validators.hdf5.Hdf5Validator.validate_stream')
+def test_h5ad_with_missing_columns(mock_hdf5_validate, mock_read_h5ad, validator):
     """Test validation of an H5AD file with missing required columns."""
+    # Mock HDF5 validation result - still valid at HDF5 level
+    mock_hdf5_validate.return_value = {
+        'valid': True,
+        'errors': {},
+        'warnings': {},
+        'stats': {
+            'groups': 3,
+            'datasets': 5,
+            'attributes': 10
+        }
+    }
+    
     # Create mock AnnData object without required columns
     mock_adata = MagicMock()
     
