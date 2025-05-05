@@ -108,19 +108,12 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         errors = validation_results.get('errors', {})
         stats = validation_results.get('stats', {})
 
-        # IMPORTANT: Special handling for h5ad validation - explicitly check for critical errors
-        h5ad_critical_errors = [
-            'var.feature_types', 
-            'var.gene_ids'
-        ]
-        
-        # Force validation to fail if critical errors are found
-        validation_success = validation_results.get('valid', False)
-        if any(error in errors for error in h5ad_critical_errors):
-            validation_success = False
-            # Ensure the validated flag is explicitly set in stats
-            stats['validated'] = False
-            logger.warning(f"H5AD validation failed due to critical errors: {[e for e in h5ad_critical_errors if e in errors]}")
+        # Debug logging for validation results
+        logger.debug(f"Validation results for {result.get('file_path', 'unknown')}:")
+        logger.debug(f"  Success: {result.get('success', False)}")
+        logger.debug(f"  Valid: {validation_results.get('valid', False)}")
+        logger.debug(f"  Errors: {errors}")
+        logger.debug(f"  Stats: {stats}")
         
         # Create a json_patch dictionary dynamically based on available stats
         json_patch = {}
@@ -145,8 +138,8 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
             if key in stats:
                 json_patch[key] = stats[key]
 
-        # Add validation status explicitly - use our determined validation_success value
-        json_patch['validated'] = validation_success
+        # Add validation status explicitly
+        json_patch['validated'] = validation_results.get('valid', False)
 
         # Ensure dicts are properly JSON formatted for the log line
         errors_str = json.dumps(errors)
@@ -598,9 +591,14 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
     if backend_uri and s3_uri_to_file_format:
         logger.info("Checking file formats from backend for compatibility")
         for s3_uri, format_name in list(s3_uri_to_file_format.items()):
+            logger.debug(f"Processing format for {s3_uri}:")
+            logger.debug(f"  Original format from backend: {format_name}")
+            
             if format_name and format_name.lower() == "hdf5":
                 # Check S3 file extension to determine if it's h5 or h5ad
                 file_name = os.path.basename(s3_uri).lower()
+                logger.debug(f"  File extension check for {file_name}")
+                
                 if file_name.endswith('.h5ad'):
                     logger.info(f"Converting format 'hdf5' to 'h5ad' for {s3_uri}")
                     print(f"Converting format 'hdf5' to 'h5ad' for {s3_uri}")
@@ -624,6 +622,8 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 s3_uri_to_file_format.pop(s3_uri)
                 if s3_uri in s3_files:
                     s3_files.remove(s3_uri)
+            
+            logger.debug(f"  Final format after processing: {s3_uri_to_file_format.get(s3_uri, 'removed')}")
     
     # Debug the format mapping for S3 files
     if s3_uri_to_file_format:

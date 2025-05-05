@@ -95,24 +95,31 @@ class H5adValidator(BaseValidator): # Changed inheritance
         stats = {}
         adata = None # Initialize AnnData object
 
+        logger.debug(f"Starting H5adValidator validation for {file_path}")
+        
         # --- Initial Checks ---
         if not os.path.exists(file_path):
             errors['file_existence'] = f"File not found at path: {file_path}"
+            logger.debug(f"File existence check failed: {errors['file_existence']}")
             return self.format_validation_result(valid=False, errors=errors)
             
         if not self.has_h5py:
             warnings['h5py_missing'] = "h5py module not available. Cannot perform HDF5 structure checks."
+            logger.debug("h5py module not available, skipping HDF5 structure checks")
             # Continue validation with scanpy if available, but skip h5py specific checks
         else:
             # Check if it's a valid HDF5 file format
             try:
                 is_hdf5 = h5py.is_hdf5(file_path)
+                logger.debug(f"HDF5 format check result: {is_hdf5}")
                 if not is_hdf5:
                     errors['is_hdf5'] = "File is not a valid HDF5 format."
+                    logger.debug("File failed HDF5 format check")
                     return self.format_validation_result(valid=False, errors=errors)
                 else:
                     # Add is_hdf5 flag to stats if check passes
                     stats['is_hdf5'] = True
+                    logger.debug("File passed HDF5 format check")
             except Exception as e:
                 errors['is_hdf5_check_error'] = f"Error checking HDF5 format: {str(e)}"
                 logger.error(f"Error during h5py.is_hdf5 check on {file_path}: {e}", exc_info=True)
@@ -130,6 +137,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
 
         if not self.has_scanpy:
             warnings['scanpy_missing'] = "scanpy module not available. Cannot perform AnnData content validation."
+            logger.debug("scanpy module not available, skipping AnnData content validation")
             # If h5py checks passed, consider valid but incomplete
             return self.format_validation_result(valid=len(errors) == 0, errors=errors, warnings=warnings)
 
@@ -146,12 +154,15 @@ class H5adValidator(BaseValidator): # Changed inheritance
             else:
                 # Should not happen if initial HDF5 checks passed, but handle defensively
                 errors['file_extension'] = "File extension is neither .h5 nor .h5ad."
+                logger.debug(f"Invalid file extension: {file_path}")
                 return self.format_validation_result(valid=False, errors=errors)
                 
             logger.info(f"Successfully read file with scanpy: {file_path}")
+            logger.debug(f"AnnData object shape: {adata.shape}")
 
         except FileNotFoundError:
              errors['file_not_found'] = f"Scanpy could not find file: {file_path}"
+             logger.debug(f"Scanpy file not found error: {errors['file_not_found']}")
              return self.format_validation_result(valid=False, errors=errors)
         except Exception as e:
             errors['scanpy_read_error'] = f"Error reading file with scanpy: {str(e)}"
@@ -161,10 +172,12 @@ class H5adValidator(BaseValidator): # Changed inheritance
         # --- AnnData Content Validation ---
         if adata:
             try:
+                logger.debug("Starting AnnData content validation")
                 content_results = self._validate_anndata_content(adata)
                 errors.update(content_results.get('errors', {}))
                 warnings.update(content_results.get('warnings', {}))
                 stats.update(content_results.get('stats', {}))
+                logger.debug(f"AnnData content validation results - Errors: {errors}, Warnings: {warnings}")
             except Exception as e:
                 errors['anndata_validation_error'] = f"Unexpected error during AnnData content validation: {str(e)}"
                 logger.error(f"Error during AnnData content validation for {file_path}: {e}", exc_info=True)
@@ -172,18 +185,16 @@ class H5adValidator(BaseValidator): # Changed inheritance
         # --- Compression Check ---
         if adata: # Only check compression if adata loaded successfully
              try:
+                 logger.debug("Starting compression check")
                  self._check_compression(file_path, adata, errors)
+                 logger.debug("Compression check completed")
              except Exception as e:
                  errors['compression_check_error'] = f"Error during compression check: {str(e)}"
                  logger.error(f"Error during compression check for {file_path}: {e}", exc_info=True)
 
         # Determine overall validity
         valid = len(errors) == 0
-        
-        # Critical check - override validation status if we have 'validated' explicitly set in stats
-        if 'validated' in stats and stats['validated'] is False:
-            valid = False
-            logger.warning(f"Forcing validation to fail due to critical errors in {file_path}")
+        logger.debug(f"Final validation result - Valid: {valid}, Error count: {len(errors)}")
         
         return self.format_validation_result(
             valid=valid,
