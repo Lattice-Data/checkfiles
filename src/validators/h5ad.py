@@ -180,6 +180,11 @@ class H5adValidator(BaseValidator): # Changed inheritance
         # Determine overall validity
         valid = len(errors) == 0
         
+        # Critical check - override validation status if we have 'validated' explicitly set in stats
+        if 'validated' in stats and stats['validated'] is False:
+            valid = False
+            logger.warning(f"Forcing validation to fail due to critical errors in {file_path}")
+        
         return self.format_validation_result(
             valid=valid,
             errors=errors,
@@ -286,8 +291,13 @@ class H5adValidator(BaseValidator): # Changed inheritance
             errors: Dictionary to add errors to
             stats: Dictionary to add statistics to
         """
+        # CRITICAL CHECK - ALWAYS ENFORCE
+        # This is a required field for all h5ad files
         if 'feature_types' not in adata.var.columns:
             errors['var.feature_types'] = 'is missing'
+            logger.warning("Required field 'feature_types' is missing in var columns")
+            # Still add stats for file size, observation count etc.
+            stats['validated'] = False
             return
             
         feature_counts = []
@@ -314,8 +324,13 @@ class H5adValidator(BaseValidator): # Changed inheritance
             warnings: Dictionary to add warnings to
             stats: Dictionary to add statistics to
         """
+        # CRITICAL CHECK - ALWAYS ENFORCE
+        # This is a required field for all h5ad files
         if 'gene_ids' not in adata.var.columns:
             errors['var.gene_ids'] = 'is missing'
+            logger.warning("Required field 'gene_ids' is missing in var columns")
+            # Ensure validation status is captured
+            stats['validated'] = False
             # Check if index itself might contain gene IDs
             if all(g.startswith('ENS') for g in adata.var.index):
                  warnings['var.gene_ids_missing_but_index_ok'] = 'var.gene_ids is missing, but var.index contains ENS IDs.'
@@ -540,6 +555,11 @@ class H5adValidator(BaseValidator): # Changed inheritance
             # Validate the downloaded file
             logger.info(f"Validating downloaded file: {temp_file}")
             validation_result = self.validate_file(temp_file)
+            
+            # Ensure errors are surfaced properly
+            if not validation_result.get('valid', False) and validation_result.get('errors'):
+                logger.warning(f"Validation failed for {s3_uri}: {validation_result['errors']}")
+            
             logger.info(f"Validation complete for {s3_uri}")
             
             # Return the result

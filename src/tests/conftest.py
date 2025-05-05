@@ -18,6 +18,13 @@ MODULES_TO_MOCK = [
     'h5py', 
     'pysam',
     'pybigwig',
+    'numpy',
+    'pandas',
+    'scipy',
+    'scipy.sparse',
+    'scipy.io',
+    'scipy.io.hdf5',
+    
 ]
 
 @pytest.fixture(autouse=True)
