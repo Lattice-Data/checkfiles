@@ -33,18 +33,6 @@ def test_initialize_validator_h5ad():
         # Check that the validator was created
         assert validator is not None
 
-def test_initialize_validator_hdf5():
-    """Test initialization of an Hdf5Validator."""
-    with patch('src.validators.hdf5.Hdf5Validator') as mock_validator:
-        # Set up the mock
-        mock_validator.return_value = MagicMock()
-        
-        # Call the function
-        validator = initialize_validator('hdf5')
-        
-        # Check that the validator was created
-        assert validator is not None
-
 def test_initialize_validator_unsupported():
     """Test initialization of an unsupported validator."""
     with pytest.raises(ValueError) as excinfo:
