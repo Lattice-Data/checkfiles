@@ -580,6 +580,37 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         scratch_dir = tempfile.gettempdir()
         logger.warning(f"Could not create/access scratch directory, using system temp: {scratch_dir}")
     
+    # Fix file formats from backend if they are "hdf5"
+    if backend_uri and s3_uri_to_file_format:
+        logger.info("Checking file formats from backend for compatibility")
+        for s3_uri, format_name in list(s3_uri_to_file_format.items()):
+            if format_name and format_name.lower() == "hdf5":
+                # Check S3 file extension to determine if it's h5 or h5ad
+                file_name = os.path.basename(s3_uri).lower()
+                if file_name.endswith('.h5ad'):
+                    logger.info(f"Converting format 'hdf5' to 'h5ad' for {s3_uri}")
+                    print(f"Converting format 'hdf5' to 'h5ad' for {s3_uri}")
+                    s3_uri_to_file_format[s3_uri] = 'h5ad'
+                elif file_name.endswith('.h5'):
+                    logger.info(f"Converting format 'hdf5' to 'h5' for {s3_uri}")
+                    print(f"Converting format 'hdf5' to 'h5' for {s3_uri}")
+                    s3_uri_to_file_format[s3_uri] = 'h5'
+                else:
+                    error_msg = f"Error: File with format 'hdf5' has unrecognized extension: {file_name}"
+                    logger.error(error_msg)
+                    print(error_msg)
+                    # Remove this file from processing
+                    s3_uri_to_file_format.pop(s3_uri)
+                    s3_files.remove(s3_uri)
+            elif format_name and format_name.lower() not in ['fastq', 'h5', 'h5ad']:
+                error_msg = f"Error: Unsupported file format from backend: {format_name}"
+                logger.error(error_msg)
+                print(error_msg)
+                # Remove this file from processing
+                s3_uri_to_file_format.pop(s3_uri)
+                if s3_uri in s3_files:
+                    s3_files.remove(s3_uri)
+    
     # Debug the format mapping for S3 files
     if s3_uri_to_file_format:
         logger.debug(f"S3 file format mapping: {s3_uri_to_file_format}")
@@ -652,7 +683,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 print(f"Using format '{s3_file_format}' for S3 file: {s3_path}")
                 
                 # For H5AD files, add additional logging
-                if s3_file_format and s3_file_format.lower() in ['h5ad', 'hdf5']:
+                if s3_file_format and s3_file_format.lower() in ['h5ad', 'h5']:
                     logger.info(f"H5AD/HDF5 file detected: {s3_path}")
                     logger.info("This format requires file download before validation")
                 
@@ -808,33 +839,15 @@ def detect_format_from_filename(file_path: str) -> str:
     elif file_name.endswith('.zip'):
         file_name = file_name[:-4]
     
-    # Check for known extensions
+    # Check for supported extensions ONLY (fastq, h5, h5ad)
     if file_name.endswith('.fastq') or file_name.endswith('.fq'):
         return 'fastq'
-    elif file_name.endswith('.fasta') or file_name.endswith('.fa'):
-        return 'fasta'
-    elif file_name.endswith('.bam'):
-        return 'bam'
-    elif file_name.endswith('.sam'):
-        return 'sam'
     elif file_name.endswith('.h5ad'):
         return 'h5ad'
     elif file_name.endswith('.h5'):
         return 'h5'
-    elif file_name.endswith('.bed'):
-        return 'bed'
-    elif file_name.endswith('.vcf'):
-        return 'vcf'
-    elif file_name.endswith('.tsv') or file_name.endswith('.txt'):
-        return 'tsv'
-    elif file_name.endswith('.csv'):
-        return 'csv'
-    elif file_name.endswith('.json'):
-        return 'json'
-    elif file_name.endswith('.gtf') or file_name.endswith('.gff'):
-        return 'gtf'
     
-    # Unknown format
+    # Unknown/unsupported format
     return ''
 
 def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress_tracker=None, identifier=""):
@@ -955,13 +968,14 @@ def robust_initialize_validator(file_format, file_path):
         'fastq': 'src.validators.fastq_validator.FastqValidator',
         'h5ad': 'src.validators.h5ad_validator.H5adValidator',
         'h5': 'src.validators.h5_validator.H5Validator',
-        'bam': 'src.validators.bam_validator.BamValidator',
         'fasta': 'src.validators.fasta_validator.FastaValidator'
     }
     
-    module_path = validator_map.get(file_format.lower())
-    if not module_path:
+    # Check if we support this file format
+    if file_format.lower() not in validator_map:
         raise ValueError(f"Unsupported file format: {file_format}")
+    
+    module_path = validator_map.get(file_format.lower())
     
     # Try to import the validator directly
     try:
