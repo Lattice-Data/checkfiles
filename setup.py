@@ -13,6 +13,11 @@ setup(
     install_requires=[
         "boto3",
         "crcmod",
+        "scipy>=1.11.0",  # Required for H5AD validation
+        "h5py>=3.13.0",   # Required for HDF5/H5AD files
+        "scanpy",         # Required for H5AD validation
+        "pandas",         # Required for data handling
+        "numpy",          # Required for numerical operations
     ],
     entry_points={
         "console_scripts": [

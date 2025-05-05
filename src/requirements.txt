@@ -6,7 +6,9 @@ crcmod>=1.7
 pytest>=7.3.1
 pytest-cov>=4.1.0
 h5py==3.13.0
-# Add scanpy and pandas for H5AD validation
-scanpy
-pandas
-numpy
+
+# Scientific computing dependencies
+scipy>=1.11.0
+scanpy>=1.9.0
+pandas>=2.0.0
+numpy>=1.24.0

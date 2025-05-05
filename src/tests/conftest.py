@@ -9,6 +9,7 @@ This module provides:
 import pytest
 import sys
 from unittest.mock import MagicMock
+import scipy.io
 
 # Register custom markers
 def pytest_configure(config):
@@ -32,9 +33,6 @@ CORE_MODULES = [
     'numpy',
     'pandas',
     'scipy',
-    'scipy.sparse',
-    'scipy.io',
-    'scipy.io.hdf5',
 ]
 
 @pytest.fixture(autouse=True)
