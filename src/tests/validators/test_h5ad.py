@@ -327,3 +327,66 @@ def test_par_y_suffix_logic_directly(validator):
     assert 'PAR_Y_id_suffix[ENSG00000000001_PAR_Y]' not in errors
     # Assert that the non-PAR-Y gene didn't cause issues
     assert len(errors) == 1 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_default_invalid_state(validator, valid_h5ad_file):
+    """Test that validation starts with invalid state by default."""
+    # Create a temporary file that doesn't exist
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        non_existent_file = tmp.name
+    os.unlink(non_existent_file)  # Delete it to ensure it doesn't exist
+    
+    result = validator.validate_file(non_existent_file)
+    assert result['valid'] is False
+    assert 'validated' in result['stats']
+    assert result['stats']['validated'] is False
+    assert 'file_existence' in result['errors']
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validation_state_tracking(validator, valid_h5ad_file):
+    """Test that validation state is properly tracked."""
+    result = validator.validate_file(valid_h5ad_file)
+    assert result['valid'] is True
+    assert 'validated' in result['stats']
+    assert result['stats']['validated'] is True
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_missing_scanpy_handling(validator, valid_h5ad_file):
+    """Test handling of missing scanpy module."""
+    with patch('src.validators.h5ad.SCANPY_AVAILABLE', False):
+        result = validator.validate_file(valid_h5ad_file)
+        assert result['valid'] is True  # Valid if HDF5 checks pass
+        assert 'scanpy_missing' in result['warnings']
+        assert 'validated' in result['stats']
+        assert result['stats']['validated'] is True
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_missing_h5py_handling(validator, valid_h5ad_file):
+    """Test handling of missing h5py module."""
+    with patch('src.validators.h5ad.H5PY_AVAILABLE', False):
+        result = validator.validate_file(valid_h5ad_file)
+        assert result['valid'] is True  # Valid if scanpy can read it
+        assert 'h5py_missing' in result['warnings']
+        assert 'validated' in result['stats']
+        assert result['stats']['validated'] is True
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validation_consistency(validator, valid_h5ad_file):
+    """Test that validation behavior is consistent between environments."""
+    # Test with all modules available
+    result1 = validator.validate_file(valid_h5ad_file)
+    
+    # Test with scanpy unavailable
+    with patch('src.validators.h5ad.SCANPY_AVAILABLE', False):
+        result2 = validator.validate_file(valid_h5ad_file)
+    
+    # Both should be valid but for different reasons
+    assert result1['valid'] is True  # Valid with all checks
+    assert result2['valid'] is True  # Valid with HDF5 checks only
+    assert 'scanpy_missing' in result2['warnings']
+    
+    # Both should have validated state tracked
+    assert 'validated' in result1['stats']
+    assert 'validated' in result2['stats']
+    assert result1['stats']['validated'] is True
+    assert result2['stats']['validated'] is True 
