@@ -13,7 +13,8 @@ from unittest.mock import patch, MagicMock, PropertyMock
 import io
 
 # Add the project root to the path to make imports work
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Update path to point to the correct project root from the new location
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../')))
 
 from src.validators.h5ad import H5adValidator
 from src.validators.hdf5 import Hdf5Validator
