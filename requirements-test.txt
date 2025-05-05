@@ -2,6 +2,7 @@
 pytest>=7.0.0
 pytest-cov>=4.0.0
 coverage>=7.0.0
+requests-mock>=1.11.0
 
 # Core dependencies needed for imports to work
 numpy>=1.22.0
