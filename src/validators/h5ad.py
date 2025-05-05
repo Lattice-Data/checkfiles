@@ -556,9 +556,24 @@ class H5adValidator(BaseValidator): # Changed inheritance
             logger.info(f"Validating downloaded file: {temp_file}")
             validation_result = self.validate_file(temp_file)
             
-            # Ensure errors are surfaced properly
-            if not validation_result.get('valid', False) and validation_result.get('errors'):
-                logger.warning(f"Validation failed for {s3_uri}: {validation_result['errors']}")
+            # IMPORTANT: Re-validate the critical errors to ensure consistent behavior
+            # Explicitly check for critical validation errors
+            critical_errors = ['var.feature_types', 'var.gene_ids']
+            errors = validation_result.get('errors', {})
+            
+            if any(error in errors for error in critical_errors):
+                logger.warning(f"Critical errors found in S3 validation for {s3_uri}: {[e for e in critical_errors if e in errors]}")
+                validation_result['valid'] = False
+                if 'stats' in validation_result:
+                    validation_result['stats']['validated'] = False
+                else:
+                    validation_result['stats'] = {'validated': False}
+                
+                # Log very explicitly to help with debugging
+                logger.error(f"H5AD VALIDATION FAILED - MISSING REQUIRED FIELDS: {[e for e in critical_errors if e in errors]}")
+                logger.error(f"File will be marked as invalid: {s3_uri}")
+                print(f"H5AD VALIDATION FAILED - MISSING REQUIRED FIELDS: {[e for e in critical_errors if e in errors]}")
+                print(f"File will be marked as invalid: {s3_uri}")
             
             logger.info(f"Validation complete for {s3_uri}")
             
@@ -582,7 +597,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
                     logger.info(f"Cleaning up temporary file: {temp_file}")
                     os.remove(temp_file)
             except Exception as e:
-                logger.warning(f"Failed to remove temporary file {temp_file}: {str(e)}") 
+                logger.warning(f"Failed to remove temporary file {temp_file}: {str(e)}")
 
     def format_validation_result(self, valid: bool, errors: Dict[str, str] = None, 
                               warnings: Dict[str, str] = None, stats: Dict[str, Any] = None) -> Dict[str, Any]:
