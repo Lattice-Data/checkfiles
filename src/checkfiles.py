@@ -86,8 +86,10 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
             except (IndexError, AttributeError):
                 pass
     
-    uri = file_path if file_path.startswith('s3://') else ''
-    
+    # Use file_path for URI, handle if missing
+    uri = result.get('file_path', 'unknown')
+    # uri = file_path if file_path.startswith('s3://') else ''
+
     if result.get('success', False):
         validation_results = result.get('results', {})
         errors = validation_results.get('errors', {})

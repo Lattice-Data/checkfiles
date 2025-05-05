@@ -277,11 +277,16 @@ def test_validate_local_file_with_tracker(test_files):
 
 @patch('src.core.validation.initialize_validator') # Mock the validator initialization
 @patch('os.path.exists', return_value=True) # Mock os.path.exists specifically for this test
-def test_validate_local_file_exception(mock_exists, mock_init_validator):
+@patch('src.core.validation.stream_local_file') # Mock the file streaming
+def test_validate_local_file_exception(mock_stream, mock_exists, mock_init_validator):
     """Test handling exceptions during local file validation."""
+    # Mock the stream to simulate successful opening but allow validator to fail
+    mock_stream.return_value.__enter__.return_value = MagicMock() # Simulate context manager
+
     # For this test, we'll create a mock validator that will raise an exception
     class FailingValidator:
         def validate_file(self, *args, **kwargs):
+            # This shouldn't be called for fastq
             raise ValueError("Test error")
 
         def validate_stream(self, *args, **kwargs):
@@ -785,7 +790,7 @@ def test_write_result_to_progress_log_failed_result(mock_fsync, mock_makedirs, m
     assert len(parts) == 7
     assert parts[0] == SAMPLE_FAILED_RESULT['identifier']
     assert parts[1] == SAMPLE_FAILED_RESULT['file_path']
-    assert parts[2] == "{'error': 'Something went wrong'}" # Error string
+    assert parts[2] == '{"error": "Something went wrong"}' # Expect double quotes from json.dumps
     assert parts[3] == "{}" # Empty results dict
     assert parts[4] == "{}" # Empty patch dict
     assert parts[5] == 'failed'

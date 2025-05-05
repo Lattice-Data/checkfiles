@@ -482,15 +482,16 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
             logger.debug(f"Calling validate_file for {file_format} on downloaded file: {temp_file_path}")
             validation_results = validator.validate_file(temp_file_path)
 
-        # Combine hash stats with validation results
-        validation_results["stats"] = {}
+        # Combine hash stats with validation results BEFORE creating local_result
+        if "stats" not in validation_results:
+            validation_results["stats"] = {}
         validation_results["stats"].update(hash_stats)
-        
+
         # Create the final result
         local_result = {
             "file_path": s3_path,  # Use the original S3 path
-            "results": validation_results,
-            "success": validation_results.get("valid", False),  
+            "results": validation_results, # Now includes merged stats
+            "success": validation_results.get("valid", False),
             "identifier": identifier
         }
         
