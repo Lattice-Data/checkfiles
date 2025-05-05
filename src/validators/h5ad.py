@@ -110,6 +110,9 @@ class H5adValidator(BaseValidator): # Changed inheritance
                 if not is_hdf5:
                     errors['is_hdf5'] = "File is not a valid HDF5 format."
                     return self.format_validation_result(valid=False, errors=errors)
+                else:
+                    # Add is_hdf5 flag to stats if check passes
+                    stats['is_hdf5'] = True
             except Exception as e:
                 errors['is_hdf5_check_error'] = f"Error checking HDF5 format: {str(e)}"
                 logger.error(f"Error during h5py.is_hdf5 check on {file_path}: {e}", exc_info=True)

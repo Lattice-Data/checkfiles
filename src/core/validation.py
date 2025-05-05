@@ -259,10 +259,34 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         if file_format.lower() == 'h5ad':
             logger.debug(f"Using file-based validation for h5ad: {file_path}")
             track_validation_progress(file_path, progress_tracker, "Validating (file)", None)
+
+            # Calculate hashes for local H5AD/H5 file first
+            hash_stats = {}
+            local_is_gzipped = has_gz_extension(file_path)
+            try:
+                track_validation_progress(file_path, progress_tracker, "Calculating hashes")
+                with open(file_path, 'rb') as f:
+                    # Note: For H5AD/H5, even if the original file is .gz, scanpy reads the uncompressed data.
+                    # We calculate hash on the file as it is on disk.
+                    hash_stats = calculate_hashes_for_stream(f, local_is_gzipped)
+                track_validation_progress(file_path, progress_tracker, "Hashes calculated")
+            except Exception as e:
+                logger.error(f"Error calculating hashes for {file_path}: {str(e)}", exc_info=True)
+                # Don't fail validation just for hash calculation error, but log it.
+                error_result = {"file_path": file_path, "success": False, "error": f"Hash calculation failed: {str(e)}"}
+                track_validation_progress(file_path, progress_tracker, f"Error: Hash calculation failed", False, error_result)
+                # Potentially return error if hashes are strictly required?
+                # For now, proceed to validation, hashes will be missing.
+
             try:
                 # Call validate_file directly
                 validation_results = validator.validate_file(file_path)
-                
+
+                # Merge calculated hashes into stats
+                if "stats" not in validation_results:
+                    validation_results["stats"] = {}
+                validation_results["stats"].update(hash_stats)
+
                 # Combine with file_path and success flag
                 result_dict = {
                     "file_path": file_path,
@@ -446,20 +470,20 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         
         track_validation_progress(s3_path, progress_tracker, "Hashes calculated")
         
-        # For HDF5/H5AD files, use a fresh file stream for validation 
+        # For HDF5/H5AD files, use a fresh file stream for validation
         # to ensure the stream is properly closed before validator uses the file
         with open(temp_file_path, 'rb') as validation_stream:
-            if progress_tracker:
-                validation_stream = ProgressTrackingStream(validation_stream, progress_tracker, update_interval_mb=50)
-                validation_stream.file_path = s3_path
-            
-            # For h5ad/hdf5 files, the validator will create its own temporary file,
-            # so we just pass the stream and let it handle the file operations
-            validation_results = validator.validate_stream(validation_stream, is_gzipped=is_gzipped)
-        
+            # We no longer need to wrap the stream for progress here, as validate_file takes the path.
+            # if progress_tracker:
+            #     validation_stream = ProgressTrackingStream(validation_stream, progress_tracker, update_interval_mb=50)
+            #     validation_stream.file_path = s3_path
+
+            # --- CHANGE: Call validate_file instead of validate_stream ---
+            logger.debug(f"Calling validate_file for {file_format} on downloaded file: {temp_file_path}")
+            validation_results = validator.validate_file(temp_file_path)
+
         # Combine hash stats with validation results
-        if "stats" not in validation_results:
-            validation_results["stats"] = {}
+        validation_results["stats"] = {}
         validation_results["stats"].update(hash_stats)
         
         # Create the final result
