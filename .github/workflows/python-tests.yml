@@ -24,6 +24,7 @@ jobs:
         pip install -e .
         pip install pytest pytest-cov
         pip install -r requirements-test.txt
+        pip install -r src/requirements.txt
 
     
     - name: Install package in development mode
