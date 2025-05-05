@@ -91,28 +91,33 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         validation_results = result.get('results', {})
         errors = validation_results.get('errors', {})
         stats = validation_results.get('stats', {})
-        
-        # Create a json_patch dictionary with key fields to update
+
+        # Create a json_patch dictionary dynamically based on available stats
         json_patch = {}
-        if stats:
-            json_patch = {
-                'file_size': stats.get('file_size', ''),
-                'md5sum': stats.get('md5sum', ''),
-                'sha256': stats.get('sha256', ''),
-                'crc32c': stats.get('crc32c', ''),
-                'content_md5sum': stats.get('content_md5sum', ''),
-                'read_count': stats.get('read_count', ''),
-                'read_length': stats.get('read_length', '')
-            }
-            # Add flowcell_details if available
-            if 'flowcell_details' in stats:
-                json_patch['flowcell_details'] = stats['flowcell_details']
-            # Add platform if available
-            if 'platform' in stats:
-                json_patch['platform'] = stats['platform']
-            # Add validation status
-            json_patch['validated'] = validation_results.get('valid', False)
-        
+        # Keys relevant for H5/H5AD and potentially other types
+        patch_keys = [
+            'file_size',
+            'md5sum',
+            'sha256',
+            'crc32c',
+            'content_md5sum', # May be present for gzipped files
+            'observation_count', # Specific to H5/H5AD
+            'genomes', # Specific to H5/H5AD
+            'feature_counts', # Specific to H5/H5AD
+            'is_hdf5', # Specific to H5/H5AD
+            'read_count', # Specific to FASTQ
+            'read_length', # Specific to FASTQ
+            'platform', # Potentially FASTQ
+            'flowcell_details' # Potentially FASTQ
+        ]
+
+        for key in patch_keys:
+            if key in stats:
+                json_patch[key] = stats[key]
+
+        # Add validation status explicitly
+        json_patch['validated'] = validation_results.get('valid', False)
+
         log_line = f"{identifier}\t{uri}\t{errors}\t{stats}\t{json_patch}\tsuccess\tsuccess"
     else:
         error = result.get('error', 'Unknown error')
