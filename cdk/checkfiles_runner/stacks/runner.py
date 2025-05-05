@@ -563,11 +563,11 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
-        wait_for_ten_minutes = Wait(
+        wait_for_five_minutes = Wait(
             self,
             'WaitTenMinutes',
             time=WaitTime.duration(
-                Duration.minutes(10)
+                Duration.minutes(5)
             )
         )
 
@@ -602,7 +602,7 @@ class RunCheckfilesStepFunction(Stack):
                 ).next(
                     increment_counter
                 ).next(
-                    wait_for_ten_minutes
+                    wait_for_five_minutes
                 ).next(
                     get_checkfiles_command_status
                 ).next(

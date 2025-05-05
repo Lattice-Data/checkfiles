@@ -583,3 +583,37 @@ class H5adValidator(BaseValidator): # Changed inheritance
                     os.remove(temp_file)
             except Exception as e:
                 logger.warning(f"Failed to remove temporary file {temp_file}: {str(e)}") 
+
+    def format_validation_result(self, valid: bool, errors: Dict[str, str] = None, 
+                              warnings: Dict[str, str] = None, stats: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Format the validation result in a standard way.
+        
+        Args:
+            valid: Whether the file content is valid
+            errors: Dictionary of validation errors (if any)
+            warnings: Dictionary of validation warnings (if any)
+            stats: Dictionary of file statistics (if any)
+            
+        Returns:
+            Dictionary with standard validation result format
+        """
+        result = {
+            'valid': valid,
+            'errors': errors or {},
+            'warnings': warnings or {},
+            'stats': stats or {}
+        }
+        
+        # CRITICAL CHECK: If certain critical errors exist, always override valid status
+        # This ensures validation always fails for missing required fields
+        critical_errors = ['var.feature_types', 'var.gene_ids']
+        if errors and any(error in errors for error in critical_errors):
+            logger.warning(f"Critical errors found: {[e for e in critical_errors if e in errors]}")
+            result['valid'] = False
+            # Ensure the validated flag is explicitly set in stats
+            if 'stats' in result and result['stats'] is not None:
+                result['stats']['validated'] = False
+            else:
+                result['stats'] = {'validated': False}
+        
+        return result 

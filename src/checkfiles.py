@@ -108,6 +108,20 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         errors = validation_results.get('errors', {})
         stats = validation_results.get('stats', {})
 
+        # IMPORTANT: Special handling for h5ad validation - explicitly check for critical errors
+        h5ad_critical_errors = [
+            'var.feature_types', 
+            'var.gene_ids'
+        ]
+        
+        # Force validation to fail if critical errors are found
+        validation_success = validation_results.get('valid', False)
+        if any(error in errors for error in h5ad_critical_errors):
+            validation_success = False
+            # Ensure the validated flag is explicitly set in stats
+            stats['validated'] = False
+            logger.warning(f"H5AD validation failed due to critical errors: {[e for e in h5ad_critical_errors if e in errors]}")
+        
         # Create a json_patch dictionary dynamically based on available stats
         json_patch = {}
         # Keys relevant for H5/H5AD and potentially other types
@@ -131,8 +145,8 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
             if key in stats:
                 json_patch[key] = stats[key]
 
-        # Add validation status explicitly
-        json_patch['validated'] = validation_results.get('valid', False)
+        # Add validation status explicitly - use our determined validation_success value
+        json_patch['validated'] = validation_success
 
         # Ensure dicts are properly JSON formatted for the log line
         errors_str = json.dumps(errors)
