@@ -354,7 +354,8 @@ def test_validation_state_tracking(validator, valid_h5ad_file):
 def test_missing_scanpy_handling(validator, valid_h5ad_file):
     """Test handling of missing scanpy module."""
     with patch('src.validators.h5ad.SCANPY_AVAILABLE', False):
-        result = validator.validate_file(valid_h5ad_file)
+        validator_no_scanpy = H5adValidator()  # Reinitialize to use patched constant
+        result = validator_no_scanpy.validate_file(valid_h5ad_file)
         assert result['valid'] is True  # Valid if HDF5 checks pass
         assert 'scanpy_missing' in result['warnings']
         assert 'validated' in result['stats']
@@ -364,7 +365,8 @@ def test_missing_scanpy_handling(validator, valid_h5ad_file):
 def test_missing_h5py_handling(validator, valid_h5ad_file):
     """Test handling of missing h5py module."""
     with patch('src.validators.h5ad.H5PY_AVAILABLE', False):
-        result = validator.validate_file(valid_h5ad_file)
+        validator_no_h5py = H5adValidator()  # Reinitialize to use patched constant
+        result = validator_no_h5py.validate_file(valid_h5ad_file)
         assert result['valid'] is True  # Valid if scanpy can read it
         assert 'h5py_missing' in result['warnings']
         assert 'validated' in result['stats']
@@ -378,7 +380,8 @@ def test_validation_consistency(validator, valid_h5ad_file):
     
     # Test with scanpy unavailable
     with patch('src.validators.h5ad.SCANPY_AVAILABLE', False):
-        result2 = validator.validate_file(valid_h5ad_file)
+        validator_no_scanpy = H5adValidator()  # Reinitialize to use patched constant
+        result2 = validator_no_scanpy.validate_file(valid_h5ad_file)
     
     # Both should be valid but for different reasons
     assert result1['valid'] is True  # Valid with all checks

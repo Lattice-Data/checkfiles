@@ -102,7 +102,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
         if not os.path.exists(file_path):
             errors['file_existence'] = f"File not found at path: {file_path}"
             logger.debug(f"File existence check failed: {errors['file_existence']}")
-            return self.format_validation_result(valid=False, errors=errors, stats=stats)
+            return self.format_validation_result(valid=False, errors=errors, warnings=warnings, stats=stats)
             
         if not self.has_h5py:
             warnings['h5py_missing'] = "h5py module not available. Cannot perform HDF5 structure checks."
@@ -116,7 +116,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
                 if not is_hdf5:
                     errors['is_hdf5'] = "File is not a valid HDF5 format."
                     logger.debug("File failed HDF5 format check")
-                    return self.format_validation_result(valid=False, errors=errors, stats=stats)
+                    return self.format_validation_result(valid=False, errors=errors, warnings=warnings, stats=stats)
                 else:
                     # Add is_hdf5 flag to stats if check passes
                     stats['is_hdf5'] = True
@@ -124,7 +124,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
             except Exception as e:
                 errors['is_h5py_check_error'] = f"Error checking HDF5 format: {str(e)}"
                 logger.error(f"Error during h5py.is_hdf5 check on {file_path}: {e}", exc_info=True)
-                return self.format_validation_result(valid=False, errors=errors, stats=stats)
+                return self.format_validation_result(valid=False, errors=errors, warnings=warnings, stats=stats)
 
             # Try opening with h5py to catch basic corruption
             try:
@@ -134,7 +134,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
             except Exception as e:
                 errors['h5py_open_error'] = f"Failed to open file with h5py: {str(e)}"
                 logger.error(f"Error opening {file_path} with h5py: {e}", exc_info=True)
-                return self.format_validation_result(valid=False, errors=errors, stats=stats)
+                return self.format_validation_result(valid=False, errors=errors, warnings=warnings, stats=stats)
 
         if not self.has_scanpy:
             warnings['scanpy_missing'] = "scanpy module not available. Cannot perform AnnData content validation."
@@ -159,7 +159,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
                 # Should not happen if initial HDF5 checks passed, but handle defensively
                 errors['file_extension'] = "File extension is neither .h5 nor .h5ad."
                 logger.debug(f"Invalid file extension: {file_path}")
-                return self.format_validation_result(valid=False, errors=errors, stats=stats)
+                return self.format_validation_result(valid=False, errors=errors, warnings=warnings, stats=stats)
                 
             logger.info(f"Successfully read file with scanpy: {file_path}")
             logger.debug(f"AnnData object shape: {adata.shape}")
@@ -167,7 +167,7 @@ class H5adValidator(BaseValidator): # Changed inheritance
         except FileNotFoundError:
              errors['file_not_found'] = f"Scanpy could not find file: {file_path}"
              logger.debug(f"Scanpy file not found error: {errors['file_not_found']}")
-             return self.format_validation_result(valid=False, errors=errors, stats=stats)
+             return self.format_validation_result(valid=False, errors=errors, warnings=warnings, stats=stats)
         except Exception as e:
             errors['scanpy_read_error'] = f"Error reading file with scanpy: {str(e)}"
             logger.error(f"Error reading file {file_path} with scanpy: {e}", exc_info=True)
