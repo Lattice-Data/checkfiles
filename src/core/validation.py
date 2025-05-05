@@ -242,68 +242,102 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
             except (ValueError, ImportError) as e:
                 raise e
                 
-        print(f"Validating local file: {file_path}")
+        logger.debug(f"Validating local file: {file_path}")
         
-        # Check if local file is gzipped
+        # Initialize validator if not provided
+        if not validator:
+            try:
+                # Pass file_path to help initialize_validator handle .h5ad vs .h5 cases
+                validator = initialize_validator(file_format, file_path)
+            except (ValueError, ImportError) as e:
+                logger.error(f"Failed to initialize validator for {file_format}: {str(e)}")
+                error_result = {"file_path": file_path, "success": False, "error": f"Validator initialization failed: {str(e)}"}
+                track_validation_progress(file_path, progress_tracker, "Error: Validator init failed", False, error_result)
+                return error_result if not return_record else FileValidationRecord.from_dict(error_result)
+            
+        # --- Handle H5AD format separately (requires file path) ---
+        if file_format.lower() == 'h5ad':
+            logger.debug(f"Using file-based validation for h5ad: {file_path}")
+            track_validation_progress(file_path, progress_tracker, "Validating (file)", None)
+            try:
+                # Call validate_file directly
+                validation_results = validator.validate_file(file_path)
+                
+                # Combine with file_path and success flag
+                result_dict = {
+                    "file_path": file_path,
+                    "identifier": identifier if identifier else os.path.basename(file_path),
+                    "success": True, # validate_file returns results, success is implied if no exception
+                    "results": validation_results
+                }
+                
+                track_validation_progress(file_path, progress_tracker, "Completed", True, validation_results)
+                
+                if return_record:
+                    # Use UUID if available, else create one based on path? (Needs clarification if UUID is needed here)
+                    temp_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"file://{file_path}"))
+                    return create_validation_record(result_dict, file_path, temp_uuid, etag)
+                else:
+                    return result_dict
+                
+            except Exception as e:
+                logger.error(f"Error validating {file_path} with validate_file: {str(e)}", exc_info=True)
+                error_result = {"file_path": file_path, "success": False, "error": f"Validation failed: {str(e)}"}
+                track_validation_progress(file_path, progress_tracker, f"Error: {str(e)}", False, error_result)
+                return error_result if not return_record else FileValidationRecord.from_dict(error_result)
+            
+        # --- Proceed with stream-based validation for other formats ---
+        
+        # Check if file exists before proceeding
+        if not os.path.exists(file_path):
+            logger.error(f"Local file not found: {file_path}")
+            error_result = {"file_path": file_path, "success": False, "error": "File not found"}
+            track_validation_progress(file_path, progress_tracker, "Error: File not found", False, error_result)
+            return error_result if not return_record else FileValidationRecord.from_dict(error_result)
+        
         is_gzipped = has_gz_extension(file_path)
-        
-        # Special handling for HDF5 and H5AD files which need random access
-        requires_random_access = file_format.lower() in ['hdf5', 'h5ad']
+        logger.debug(f"File is gzipped: {is_gzipped}")
         
         try:
-            # Step 1: Calculate Hashes
-            track_validation_progress(file_path, progress_tracker, "Calculating hashes")
-            hash_stats = {}
-            
-            # For hash calculation, always use a fresh file handle
-            with open(file_path, 'rb') as file_stream:
-                hash_stats = calculate_hashes_for_stream(file_stream, is_gzipped)
-            track_validation_progress(file_path, progress_tracker, "Hashes calculated")
-
-            # Step 2: Validate Format
-            track_validation_progress(file_path, progress_tracker, "Running format validation")
-            validation_results = {}
-            
-            # For file format validation, use another fresh file handle
-            # This ensures no problems with stream position/seeking
-            with open(file_path, 'rb') as validation_stream:
+            track_validation_progress(file_path, progress_tracker, "Opening stream", None)
+            # Open stream for the local file
+            with stream_local_file(file_path) as file_stream:
+                logger.debug(f"Successfully opened stream for {file_path}")
+                
+                # Wrap stream for progress tracking if enabled
                 if progress_tracker:
-                    # Wrap the validation stream for progress tracking
-                    tracking_stream = ProgressTrackingStream(validation_stream, progress_tracker, update_interval_mb=100)
-                    tracking_stream.file_path = file_path
-                    stream = tracking_stream
+                    file_size = os.path.getsize(file_path)
+                    tracked_stream = ProgressTrackingStream(file_stream, file_path, file_size, progress_tracker)
+                    stream_to_validate = tracked_stream
                 else:
-                    stream = validation_stream
+                    stream_to_validate = file_stream
                     
-                # The validator now only performs format validation
-                # It should return format-specific results (valid, errors, warnings, other stats)
-                validation_results = validator.validate_stream(stream, is_gzipped=is_gzipped)
+                # Validate the stream content
+                track_validation_progress(file_path, progress_tracker, "Validating (stream)", None)
+                logger.debug("Calling validator.validate_stream")
+                
+                # --- THIS IS THE CORE CHANGE: pass is_gzipped only to validate_stream ---
+                validation_results = validator.validate_stream(stream_to_validate, is_gzipped=is_gzipped) 
+                
+                # Combine results
+                result_dict = {
+                    "file_path": file_path,
+                    "results": validation_results,
+                    "success": True,
+                    "identifier": identifier
+                }
+                
+                track_validation_progress(file_path, progress_tracker, "Completed", True, validation_results)
+                
+                if return_record:
+                    return create_validation_record(result_dict, file_path, identifier, etag)
+                else:
+                    return result_dict
                 
         except Exception as e:
-            logger.error(f"Error processing file {file_path}: {e}")
+            logger.error(f"Error validating {file_path}: {str(e)}")
             raise RuntimeError(f"Failed to process file: {str(e)}")
             
-        # Combine results: validation details + hash stats
-        # Ensure 'stats' dictionary exists in validation_results
-        if 'stats' not in validation_results:
-            validation_results['stats'] = {}
-        validation_results['stats'].update(hash_stats) # Add hashes to the stats dict
-        
-        track_validation_progress(file_path, progress_tracker, "Validation complete", True, validation_results)
-            
-        result = {
-            "file_path": file_path,
-            "results": validation_results, # Return combined results
-            "success": True,
-            "identifier": identifier
-        }
-        
-        # Convert to structured record if requested
-        if return_record:
-            return create_validation_record(result, file_path, identifier, etag)
-        
-        return result
-        
     except Exception as e:
         error_msg = f"Error validating {file_path}: {str(e)}"
         print(error_msg)
