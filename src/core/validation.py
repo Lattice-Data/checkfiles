@@ -412,9 +412,11 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         # Initialize validator if not provided
         if validator is None:
             try:
+                logger.info(f"Initializing {file_format} validator for S3 file: {s3_path}")
                 validator = initialize_validator(file_format, s3_path)
                 if progress_tracker:
                     progress_tracker.update_progress(s3_path, status="Validator initialized")
+                logger.info(f"Successfully initialized validator: {type(validator).__name__}")
             except (ValueError, ImportError) as e:
                 error_msg = f"Failed to initialize validator: {str(e)}"
                 logger.error(error_msg)
@@ -436,6 +438,7 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         if progress_tracker:
             progress_tracker.update_progress(s3_path, status="Downloading file from S3")
         
+        logger.info(f"Downloading S3 file for validation: {s3_path}")
         temp_file_path, download_status = download_s3_file_to_scratch(s3_path, file_format)
         
         if not download_status.get('success', False):
@@ -456,6 +459,7 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
                 return create_validation_record(result_dict, s3_path, identifier, etag)
             return result_dict
         
+        logger.info(f"S3 file downloaded successfully to: {temp_file_path}")
         if progress_tracker:
             progress_tracker.update_progress(s3_path, status=f"File downloaded successfully to {temp_file_path}, starting validation")
         
@@ -470,17 +474,30 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         
         track_validation_progress(s3_path, progress_tracker, "Hashes calculated")
         
-        # For HDF5/H5AD files, use a fresh file stream for validation
-        # to ensure the stream is properly closed before validator uses the file
-        with open(temp_file_path, 'rb') as validation_stream:
-            # We no longer need to wrap the stream for progress here, as validate_file takes the path.
-            # if progress_tracker:
-            #     validation_stream = ProgressTrackingStream(validation_stream, progress_tracker, update_interval_mb=50)
-            #     validation_stream.file_path = s3_path
-
-            # --- CHANGE: Call validate_file instead of validate_stream ---
-            logger.debug(f"Calling validate_file for {file_format} on downloaded file: {temp_file_path}")
+        # For HDF5/H5AD files, use validate_file directly on the downloaded file
+        logger.debug(f"Calling validate_file for {file_format} on downloaded file: {temp_file_path}")
+        try:
             validation_results = validator.validate_file(temp_file_path)
+            logger.info(f"File validation completed successfully: {s3_path}")
+        except Exception as e:
+            error_msg = f"Error during validation of downloaded file: {str(e)}"
+            logger.error(error_msg)
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            if progress_tracker:
+                progress_tracker.complete_file(s3_path, False, {"error": error_msg})
+            
+            result_dict = {
+                "file_path": s3_path,
+                "error": error_msg,
+                "success": False,
+                "identifier": identifier
+            }
+            
+            if return_record:
+                return create_validation_record(result_dict, s3_path, identifier, etag)
+            return result_dict
 
         # Combine hash stats with validation results BEFORE creating local_result
         if "stats" not in validation_results:
@@ -507,6 +524,8 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
     except Exception as e:
         error_msg = f"Error validating {s3_path} (via download): {str(e)}"
         logger.error(error_msg)
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         
         if progress_tracker:
             progress_tracker.complete_file(s3_path, False, {"error": error_msg})
@@ -551,9 +570,12 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
     Returns:
         Dictionary with validation results or FileValidationRecord
     """
+    # Add more detailed logging to help diagnose issues
+    logger.info(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
+    
     # Special handling for file formats that require random access (HDF5, H5AD)
     if file_format.lower() in ['hdf5', 'h5ad']:
-        logger.info(f"File format {file_format} requires random access. Downloading file for validation.")
+        logger.info(f"File format {file_format} requires random access. Using download_and_validate_random_access_file.")
         return download_and_validate_random_access_file(
             s3_path=s3_path,
             file_format=file_format,
@@ -578,7 +600,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
             if progress_tracker:
                 progress_tracker.update_progress(s3_path, status="Validator initialized")
             
-        print(f"Validating S3 file: {s3_path}")
+        logger.info(f"Validating S3 file (streaming): {s3_path}")
         
         # Determine if file is gzipped
         is_gzipped = has_gz_extension(s3_path)

@@ -103,12 +103,20 @@ def download_s3_file_to_scratch(s3_path: str, file_format: str = None) -> Tuple[
     """
     status = {}
     
+    if not s3_path.startswith("s3://"):
+        error_msg = f"Invalid S3 path: {s3_path}. Path must start with s3://"
+        logger.error(error_msg)
+        status['success'] = False
+        status['error'] = error_msg
+        return None, status
+    
     # Use the /mnt/scratch directory if available, otherwise use system temp directory
     scratch_dir = os.environ.get('SCRATCH_DIR', '/mnt/scratch')
     if not os.path.exists(scratch_dir):
         try:
+            logger.info(f"Creating scratch directory: {scratch_dir}")
             os.makedirs(scratch_dir, exist_ok=True)
-        except (PermissionError, OSError):
+        except (PermissionError, OSError) as e:
             scratch_dir = tempfile.gettempdir()
             logger.warning(f"Could not create or access scratch directory. Using system temp: {scratch_dir}")
     
@@ -124,6 +132,19 @@ def download_s3_file_to_scratch(s3_path: str, file_format: str = None) -> Tuple[
         # Download the file using AWS CLI
         cmd = f"aws s3 cp {s3_path} {temp_file_path}"
         logger.info(f"Downloading file: {cmd}")
+        
+        # Check if we need to create the parent directory
+        parent_dir = os.path.dirname(temp_file_path)
+        if not os.path.exists(parent_dir):
+            try:
+                logger.info(f"Creating parent directory: {parent_dir}")
+                os.makedirs(parent_dir, exist_ok=True)
+            except (PermissionError, OSError) as e:
+                error_msg = f"Failed to create parent directory {parent_dir}: {str(e)}"
+                logger.error(error_msg)
+                status['success'] = False
+                status['error'] = error_msg
+                return None, status
         
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
@@ -141,15 +162,34 @@ def download_s3_file_to_scratch(s3_path: str, file_format: str = None) -> Tuple[
             status['success'] = False
             status['error'] = error_msg
             return None, status
+        
+        # Check file size
+        file_size = os.path.getsize(temp_file_path)
+        if file_size == 0:
+            error_msg = f"Downloaded file is empty (0 bytes): {temp_file_path}"
+            logger.error(error_msg)
+            status['success'] = False
+            status['error'] = error_msg
+            # Delete the empty file
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+            return None, status
             
+        # Log success information
+        logger.info(f"Successfully downloaded {s3_path} to {temp_file_path} ({file_size} bytes)")
         status['success'] = True
         status['local_path'] = temp_file_path
         status['original_s3_path'] = s3_path
+        status['file_size'] = file_size
         return temp_file_path, status
         
     except Exception as e:
         error_msg = f"Error downloading file from {s3_path}: {str(e)}"
         logger.error(error_msg)
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         status['success'] = False
         status['error'] = error_msg
         return None, status

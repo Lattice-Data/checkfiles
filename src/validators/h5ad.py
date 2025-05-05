@@ -494,3 +494,72 @@ class H5adValidator(BaseValidator): # Changed inheritance
         except Exception as e:
              errors['date_symbol_check_error'] = f"Error checking for date-formatted symbols: {str(e)}"
              logger.warning(f"Error checking date symbols: {e}", exc_info=True) 
+
+    def validate_s3_file(self, s3_uri: str, debug: bool = False) -> Dict[str, Any]:
+        """
+        Validate an S3-stored H5AD file.
+        
+        Args:
+            s3_uri: S3 URI of the file to validate
+            debug: Whether to enable debug output
+            
+        Returns:
+            Dictionary with validation results
+        """
+        import os
+        import tempfile
+        import subprocess
+        import uuid
+        
+        logger.info(f"H5AD validation of S3 file: {s3_uri}")
+        
+        # Create a temporary filename with a recognizable pattern
+        filename = os.path.basename(s3_uri)
+        prefix = "h5ad_" + str(hash(s3_uri) % 100000000) + "_"
+        temp_dir = "/mnt/scratch" if os.path.exists("/mnt/scratch") else tempfile.gettempdir()
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_file = os.path.join(temp_dir, prefix + filename)
+        
+        try:
+            # Use AWS CLI to download the file
+            logger.info(f"Downloading file: aws s3 cp {s3_uri} {temp_file}")
+            cmd = f"aws s3 cp {s3_uri} {temp_file}"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                error_msg = f"Failed to download file: {result.stderr}"
+                logger.error(error_msg)
+                return self.format_validation_result(
+                    valid=False,
+                    errors={"download_error": error_msg}
+                )
+            
+            if debug:
+                logger.debug(f"AWS CLI output: {result.stdout}")
+            
+            # Validate the downloaded file
+            logger.info(f"Validating downloaded file: {temp_file}")
+            validation_result = self.validate_file(temp_file)
+            logger.info(f"Validation complete for {s3_uri}")
+            
+            # Return the result
+            return validation_result
+            
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"Error validating S3 file {s3_uri}: {str(e)}")
+            logger.error(f"Traceback: {error_traceback}")
+            
+            return self.format_validation_result(
+                valid=False, 
+                errors={"validation_error": f"Error validating file: {str(e)}"}
+            )
+        finally:
+            # Clean up the temporary file
+            try:
+                if os.path.exists(temp_file):
+                    logger.info(f"Cleaning up temporary file: {temp_file}")
+                    os.remove(temp_file)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {temp_file}: {str(e)}") 
