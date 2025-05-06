@@ -1,21 +1,15 @@
 #!/bin/bash
-set -e
+set -ex
 
 echo "==== Setting up checkfiles environment file ===="
 
-# Create environment file
-echo "Creating .env_checkfiles file..."
-cat > /home/ubuntu/.env_checkfiles << 'EOL'
-export PYTHONPATH=/home/ubuntu/checkfiles:$PYTHONPATH
-export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles
-EOL
+# Set up environment variables
+echo 'export PYTHONPATH="${PYTHONPATH}:/home/ubuntu/checkfiles"' | sudo tee -a /etc/profile.d/checkfiles.sh
+echo 'export PYTHONUNBUFFERED=1' | sudo tee -a /etc/profile.d/checkfiles.sh
+echo 'export DEBIAN_FRONTEND=noninteractive' | sudo tee -a /etc/profile.d/checkfiles.sh
+echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' | sudo tee -a /etc/profile.d/checkfiles.sh
 
-# Set proper permissions
-chown ubuntu:ubuntu /home/ubuntu/.env_checkfiles
-chmod 644 /home/ubuntu/.env_checkfiles
+# Set permissions
+sudo chmod 644 /etc/profile.d/checkfiles.sh
 
-# Add to .bashrc to source it automatically 
-grep -q "source /home/ubuntu/.env_checkfiles" /home/ubuntu/.bashrc || \
-    echo "source /home/ubuntu/.env_checkfiles" >> /home/ubuntu/.bashrc
-
-echo "Environment setup complete!"
+echo "Environment setup completed."

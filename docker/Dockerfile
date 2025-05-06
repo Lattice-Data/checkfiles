@@ -53,19 +53,21 @@ COPY setup.py pyproject.toml /app/
 
 # Create path wrapper script
 RUN echo '#!/bin/bash\n\
-python /app/src/checkfiles.py "$@"\n\
+python3 /app/src/checkfiles.py "$@"\n\
 ' > /app/run.sh && chmod +x /app/run.sh
 
 # Install Python dependencies
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -e .
+RUN pip3 install --upgrade pip setuptools wheel && \
+    pip3 install --no-cache-dir numpy && \
+    pip3 install --no-cache-dir h5py scanpy && \
+    pip3 install --no-cache-dir -e .
 
 # Make the script executable
 RUN chmod +x /app/src/checkfiles.py
 
 # Add healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0 if __import__('importlib').util.find_spec('src') else 1)"
+    CMD python3 -c "import sys; sys.exit(0 if __import__('importlib').util.find_spec('src') else 1)"
 
 # Command to run when container starts
 ENTRYPOINT ["/app/run.sh"]

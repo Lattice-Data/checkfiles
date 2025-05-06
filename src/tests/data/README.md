@@ -4,35 +4,22 @@ This directory contains test data for validating various file formats.
 
 ## Directory Structure
 
-- `bam/` - BAM (Binary Alignment Map) test files
-  - `valid/` - Valid BAM files that should pass validation
-  - `invalid/` - Invalid BAM files that should fail validation
-- `cram/` - CRAM test files
-  - `valid/` - Valid CRAM files that should pass validation
-  - `invalid/` - Invalid CRAM files that should fail validation
 - `fastq/` - FASTQ test files
   - `valid/` - Valid FASTQ files that should pass validation
   - `invalid/` - Invalid FASTQ files that should fail validation
 
 ## Test Files
 
-### BAM Files
+### FASTQ Files
 
 - Valid:
-  - `small.bam` - A small valid BAM file from ENA
+  - `small.fastq` - A small valid FASTQ file
+  - `small.fastq.gz` - A small valid gzipped FASTQ file
 
 - Invalid:
-  - `corrupted_header.bam` - A BAM file with a corrupted header
-  - `truncated.bam` - A truncated BAM file
-
-### CRAM Files
-
-- Valid:
-  - `small.cram` - A small valid CRAM file from ENA
-
-- Invalid:
-  - `corrupted_header.cram` - A CRAM file with a corrupted header
-  - `truncated.cram` - A truncated CRAM file
+  - `corrupted_header.fastq` - A FASTQ file with a corrupted header
+  - `truncated.fastq` - A truncated FASTQ file
+  - `invalid_quality.fastq` - A FASTQ file with invalid quality scores
 
 ## Generating Test Data
 

@@ -11,15 +11,17 @@ setup(
     packages=find_packages(),
     python_requires=">=3.8",
     install_requires=[
-        "boto3>=1.26.0",
+        "h5py>=3.1.0",
+        "numpy>=1.19.0",
+        "scanpy>=1.8.0",
+        "anndata>=0.7.8",
+        "requests>=2.25.0",
+        "boto3>=1.17.0",
+        "botocore>=1.20.0",
+        "tqdm>=4.60.0",
+        "python-magic>=0.4.24",
+        "python-magic-bin>=0.4.14; sys_platform == 'win32'",
         "crcmod>=1.7",
-        "requests>=2.28.1",
-        "pysam>=0.21.0",
-        "scipy>=1.11.0",  # Required for H5AD validation
-        "h5py>=3.13.0",   # Required for HDF5/H5AD files
-        "scanpy>=1.9.0",  # Required for H5AD validation
-        "pandas>=2.0.0",  # Required for data handling
-        "numpy>=1.24.0",  # Required for numerical operations
     ],
     entry_points={
         "console_scripts": [

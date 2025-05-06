@@ -8,5 +8,7 @@ description: Specifies requirements for testing Python code, including requiring
 globs: **/test_*.py
 ---
 - Require tests for all code.
-- Aim for 80% test coverage.
+- Aim for 90% test coverage.
 - Include unit and integration tests.
+- After code changes ALWAYS run "python -m pytest src/tests/"
+- Always initiate conda lattice environment before code execution in terminal.

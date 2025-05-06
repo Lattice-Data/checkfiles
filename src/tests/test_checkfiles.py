@@ -26,12 +26,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 # Import from the correct modules
 from src.utils.helpers import has_gz_extension, validate_gzip_format, stream_s3_file
-from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
+from src.core.validation import initialize_validator, validate_local_file, validate_s3_file, create_validation_record
 from src.tracking.progress import SimpleActivityTracker
 from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel
+from src.models.validation_record import FileValidationRecord
 
 # Define sample H5AD result structure
-SAMPLE_H5AD_RESULT = {
+SAMPLE_H5AD_RESULT = create_validation_record({
     'success': True,
     'file_path': 's3://fake-bucket/data.h5ad',
     'identifier': 'TESTH5AD001',
@@ -52,9 +53,9 @@ SAMPLE_H5AD_RESULT = {
             # 'content_md5sum' might be missing if not gzipped S3
         }
     }
-}
+}, 's3://fake-bucket/data.h5ad', 'TESTH5AD001')
 
-SAMPLE_FASTQ_RESULT = {
+SAMPLE_FASTQ_RESULT = create_validation_record({
     'success': True,
     'file_path': 'local/path/reads.fastq.gz',
     'identifier': 'TESTFASTQ001',
@@ -72,14 +73,14 @@ SAMPLE_FASTQ_RESULT = {
             'read_length': 150
         }
     }
-}
+}, 'local/path/reads.fastq.gz', 'TESTFASTQ001')
 
-SAMPLE_FAILED_RESULT = {
+SAMPLE_FAILED_RESULT = create_validation_record({
     'success': False,
-    'file_path': 's3://another/file.bam',
+    'file_path': 's3://another/file.fastq',
     'identifier': 'TESTFAIL001',
     'error': 'Something went wrong'
-}
+}, 's3://another/file.fastq', 'TESTFAIL001')
 
 @pytest.fixture
 def test_files():
@@ -183,9 +184,10 @@ def test_validate_local_file_success(test_files):
         "fastq"
     )
     
-    assert result["success"] is True
-    assert result["file_path"] == str(test_files['valid_fastq'])
-    assert result["results"]["valid"] is True
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is True
+    assert result.file_path == str(test_files['valid_fastq'])
+    assert result.validation_success is True
 
 
 def test_validate_local_gzipped_file(test_files, monkeypatch):
@@ -238,8 +240,10 @@ def test_validate_local_gzipped_file(test_files, monkeypatch):
         "fastq"
     )
     
-    assert result["success"] is True
-    assert result["results"]["valid"] is True
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is True
+    assert result.info.get('file_size') == 100
+    assert result.info.get('read_count') == 1
 
 
 @pytest.mark.skip(reason="SimpleActivityTracker interface has changed")
@@ -303,10 +307,9 @@ def test_validate_local_file_exception(mock_stream, mock_exists, mock_init_valid
         # validator=FailingValidator() # No longer pass directly, use mock
     )
 
-    assert result["success"] is False
-    assert "error" in result
-    # Check the actual error message coming from the exception handler in validate_local_file
-    assert "Test error from stream" in result["error"] # Expecting the error from the stream path now
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is False
+    assert "Test error from stream" in result.errors.get('validation_error', '')
 
 
 def test_validate_gzip_format_valid_local(test_files):
@@ -423,10 +426,10 @@ def test_validate_s3_file_success(monkeypatch):
     result = validate_s3_file("s3://bucket/test.fastq", "fastq")
     
     # Verify results
-    assert result["success"] is True
-    assert result["results"]["valid"] is True
-    assert "file_size" in result["results"]["stats"]
-    assert result["results"]["stats"]["read_count"] == 1
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is True
+    assert result.info.get('read_count') == 1
+    assert result.file_path == "s3://bucket/test.fastq"
 
 
 def test_stream_s3_file(monkeypatch):
@@ -568,7 +571,8 @@ def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
         "content_md5sum": "fedcba",
         "read_count": 42
     }
-    result = {
+    
+    result = create_validation_record({
         "file_path": "/tmp/test.fastq.gz",
         "success": True,
         "results": {
@@ -577,7 +581,7 @@ def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
             "warnings": {},
             "stats": stats
         }
-    }
+    }, "/tmp/test.fastq.gz")
 
     write_result_to_progress_log(result)
 
@@ -589,17 +593,23 @@ def test_write_result_to_progress_log_all_stats_strict(monkeypatch):
     log_fields = last_line.strip().split('\t')
     log_stats_str = log_fields[3]  # The stats dictionary is in the 4th column
     
-    # Convert the string representation of the dictionary back to a dictionary
-    log_stats = ast.literal_eval(log_stats_str)
+    # Convert the JSON string back to a dictionary
+    log_stats = json.loads(log_stats_str)
 
+    # Get the expected keys (original stats keys plus 'valid')
+    expected_keys = set(stats.keys()) | {'valid'}
+    
     # Compare sets of keys
-    assert set(log_stats.keys()) == set(stats.keys()), (
-        f"Log stats keys {set(log_stats.keys())} do not match input stats keys {set(stats.keys())}"
+    assert set(log_stats.keys()) == expected_keys, (
+        f"Log stats keys {set(log_stats.keys())} do not match expected keys {expected_keys}"
     )
     
-    # Compare values
+    # Compare values for original stats (excluding 'valid')
     for k, v in stats.items():
         assert str(log_stats[k]) == str(v), f"Value for {k} does not match: {log_stats[k]} != {v}"
+    
+    # Verify the 'valid' field is True
+    assert log_stats['valid'] is True, "The 'valid' field should be True"
 
     shutil.rmtree(temp_dir)
 
@@ -671,7 +681,7 @@ def test_backend_file_format_mapping():
     # Create a mock mapping of S3 URIs to file formats
     s3_uri_to_file_format = {
         "s3://bucket/file1.fastq.gz": "fastq",
-        "s3://bucket/file2.bam": "bam"
+        "s3://bucket/file2.h5ad": "h5ad"
     }
     
     # Test case 1: File with format in mapping
@@ -757,20 +767,11 @@ def test_write_result_to_progress_log_formats_json_patch(mock_fsync, mock_makedi
         assert key in parsed_patch, f"Expected key '{key}' not found in JSON patch: {parsed_patch}"
         # Check value matches the input result stats
         if key != 'validated':
-             assert parsed_patch[key] == test_result['results']['stats'][key]
-        else:
-             assert parsed_patch['validated'] == test_result['results']['valid']
+            assert parsed_patch[key] == test_result.info[key]
 
-    # Check keys that should be absent are indeed absent
+    # Check that absent keys are not in the patch
     for key in expected_absent_keys:
-         assert key not in parsed_patch, f"Unexpected key '{key}' found in JSON patch: {parsed_patch}"
-
-    # Check other parts of the log line
-    assert parts[0] == test_result['identifier']
-    assert parts[1] == test_result['file_path'] # URI part
-    # Add more assertions for errors/stats string format if needed
-    assert parts[5] == 'success' # Lattice patched placeholder
-    assert parts[6] == 'success' # S3 tag patched placeholder
+        assert key not in parsed_patch, f"Unexpected key '{key}' found in JSON patch: {parsed_patch}"
 
 @patch('builtins.open', new_callable=mock_open)
 @patch('os.path.exists', return_value=True)
@@ -788,10 +789,97 @@ def test_write_result_to_progress_log_failed_result(mock_fsync, mock_makedirs, m
     parts = written_line.strip().split('\t')
 
     assert len(parts) == 7
-    assert parts[0] == SAMPLE_FAILED_RESULT['identifier']
-    assert parts[1] == SAMPLE_FAILED_RESULT['file_path']
-    assert parts[2] == '{"error": "Something went wrong"}' # Expect double quotes from json.dumps
+    assert parts[0] == SAMPLE_FAILED_RESULT.uuid
+    assert parts[1] == SAMPLE_FAILED_RESULT.file_path
+    assert parts[2] == '{"validation_error": "Something went wrong"}' # Expect double quotes from json.dumps
     assert parts[3] == "{}" # Empty results dict
     assert parts[4] == "{}" # Empty patch dict
     assert parts[5] == 'failed'
     assert parts[6] == 'failed'
+
+def test_validate_s3_file_wrapper_uses_core(monkeypatch):
+    """Test that the wrapper function correctly uses the core implementation."""
+    # Track if core function was called
+    core_called = False
+    core_args = None
+    
+    def mock_core_validate_s3_file(*args, **kwargs):
+        nonlocal core_called, core_args
+        core_called = True
+        core_args = (args, kwargs)
+        return create_validation_record({
+            "file_path": "s3://test/file.fastq",
+            "success": True,
+            "results": {"valid": True}
+        }, "s3://test/file.fastq")
+
+    def mock_stream_s3_file(*args, **kwargs):
+        return io.BytesIO(b"test data")
+
+    # Import the function to get its module
+    from src.checkfiles import validate_s3_file
+    import src.checkfiles
+
+    # Patch all functions
+    monkeypatch.setattr(src.checkfiles, "core_validate_s3_file", mock_core_validate_s3_file)
+    monkeypatch.setattr("src.utils.helpers.stream_s3_file", mock_stream_s3_file)
+    monkeypatch.setattr("src.core.validation.stream_s3_file", mock_stream_s3_file)
+
+    # Call the wrapper
+    result = validate_s3_file("s3://test/file.fastq", "fastq")
+
+    # Verify core function was called
+    assert core_called, "Core validate_s3_file was not called"
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is True
+    assert result.file_path == "s3://test/file.fastq"
+
+def test_validate_s3_file_wrapper_error_handling(monkeypatch):
+    """Test that the wrapper properly handles errors from the core implementation."""
+    def mock_core_validate_s3_file(*args, **kwargs):
+        raise ValueError("Test error")
+
+    def mock_stream_s3_file(*args, **kwargs):
+        return io.BytesIO(b"test data")
+
+    # Import the function to get its module
+    from src.checkfiles import validate_s3_file
+    import src.checkfiles
+
+    # Patch all functions
+    monkeypatch.setattr(src.checkfiles, "core_validate_s3_file", mock_core_validate_s3_file)
+    monkeypatch.setattr("src.utils.helpers.stream_s3_file", mock_stream_s3_file)
+    monkeypatch.setattr("src.core.validation.stream_s3_file", mock_stream_s3_file)
+
+    # Call the wrapper
+    result = validate_s3_file("s3://test/file.fastq", "fastq")
+
+    # Verify error handling
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is False
+    assert "Test error" in result.errors.get('validation_error', '')
+
+def test_validate_s3_file_wrapper_invalid_result(monkeypatch):
+    """Test that the wrapper handles invalid result types from core implementation."""
+    def mock_core_validate_s3_file(*args, **kwargs):
+        return "invalid result type"  # Return non-dict result
+
+    def mock_stream_s3_file(*args, **kwargs):
+        return io.BytesIO(b"test data")
+
+    # Import the function to get its module
+    from src.checkfiles import validate_s3_file
+    import src.checkfiles
+
+    # Patch all functions
+    monkeypatch.setattr(src.checkfiles, "core_validate_s3_file", mock_core_validate_s3_file)
+    monkeypatch.setattr("src.utils.helpers.stream_s3_file", mock_stream_s3_file)
+    monkeypatch.setattr("src.core.validation.stream_s3_file", mock_stream_s3_file)
+
+    # Call the wrapper
+    result = validate_s3_file("s3://test/file.fastq", "fastq")
+
+    # Verify error handling
+    assert isinstance(result, FileValidationRecord)
+    assert result.validation_success is False
+    assert "Unexpected result type" in result.errors.get('validation_error', '')

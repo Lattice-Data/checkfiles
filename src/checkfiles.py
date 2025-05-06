@@ -11,11 +11,12 @@ from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import logging
 import threading
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Union
 from urllib.parse import urljoin
 import requests
 import json
 import tempfile
+import traceback
 
 # Configure logging
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -51,12 +52,17 @@ except ImportError as e:
 
 # Import internal modules
 try:
+    from src.models.validation_record import FileValidationRecord
     from src.cli.parser import parse_arguments
-    from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
+    from src.core.validation import (
+        validate_s3_file as core_validate_s3_file,
+        create_validation_record,
+        SimpleActivityTracker,
+        initialize_validator
+    )
     from src.tracking.progress import SimpleActivityTracker
     from src.utils.helpers import has_gz_extension, validate_gzip_format
     from src.path_translator import resolve_path, is_s3_uri
-    from src.models.validation_record import FileValidationRecord
     from src.worker.patch_worker import patching_worker
     from src.utils.s3_utils import set_s3_tags
 except ImportError as e:
@@ -72,49 +78,28 @@ except ImportError as e:
             logger.error(f"Could not import {module_name}: {e}")
 
 # Define a helper function for writing to logs that doesn't depend on a global lock
-def write_result_to_progress_log(result: Dict[str, Any]) -> None:
+def write_result_to_progress_log(result: FileValidationRecord) -> None:
     """Write a validation result to the validation_progress.log file.
     
     Args:
-        result: The validation result dictionary
+        result: The validation result record
     """
     log_dir = os.getenv('CHECKFILES_LOG_DIR', os.getcwd())
     os.makedirs(log_dir, exist_ok=True)
     progress_log_path = os.path.join(log_dir, 'validation_progress.log')
     print(f"Writing result to {progress_log_path}")
     
-    file_path = result.get('file_path', 'unknown')
+    # Extract fields from FileValidationRecord
+    file_path = result.file_path
+    success = result.validation_success
+    info = result.info
+    errors = result.errors
+    identifier = result.uuid or os.path.basename(file_path)
     
-    # Get identifier directly from result if available
-    identifier = result.get('identifier', '')
-    if not identifier:
-        # Fall back to extracting from file path
-        file_name = os.path.basename(file_path)
-        identifier = file_name
-        if 'accession=' in file_path:
-            try:
-                # Try to extract accession from the query string
-                accession_part = file_path.split('accession=')[1].split('&')[0]
-                identifier = accession_part
-            except (IndexError, AttributeError):
-                pass
-    
-    # Use file_path for URI, handle if missing
-    uri = result.get('file_path', 'unknown')
-    # uri = file_path if file_path.startswith('s3://') else ''
+    # Use file_path for URI
+    uri = file_path
 
-    if result.get('success', False):
-        validation_results = result.get('results', {})
-        errors = validation_results.get('errors', {})
-        stats = validation_results.get('stats', {})
-
-        # Debug logging for validation results
-        logger.debug(f"Validation results for {result.get('file_path', 'unknown')}:")
-        logger.debug(f"  Success: {result.get('success', False)}")
-        logger.debug(f"  Valid: {validation_results.get('valid', False)}")
-        logger.debug(f"  Errors: {errors}")
-        logger.debug(f"  Stats: {stats}")
-        
+    if success:
         # Create a json_patch dictionary dynamically based on available stats
         json_patch = {}
         # Keys relevant for H5/H5AD and potentially other types
@@ -135,27 +120,38 @@ def write_result_to_progress_log(result: Dict[str, Any]) -> None:
         ]
 
         for key in patch_keys:
-            if key in stats:
-                json_patch[key] = stats[key]
+            if key in info:
+                json_patch[key] = info[key]
 
         # Add validation status explicitly
-        json_patch['validated'] = validation_results.get('valid', False)
+        json_patch['validated'] = True
 
         # Ensure dicts are properly JSON formatted for the log line
         errors_str = json.dumps(errors)
-        stats_str = json.dumps(stats)
+        stats_str = json.dumps(info)
         patch_str = json.dumps(json_patch)
 
         log_line = f"{identifier}\t{uri}\t{errors_str}\t{stats_str}\t{patch_str}\tsuccess\tsuccess"
     else:
-        error = result.get('error', 'Unknown error')
-        # Ensure error dict is JSON formatted
-        error_dict_str = json.dumps({'error': error})
-        empty_dict_str = json.dumps({})
+        # For failed validations, ensure we capture all error information
+        error_dict = {}
+        if errors:
+            # If we have specific errors, use them
+            error_dict = errors
+        else:
+            # If no specific errors, use a generic error message
+            error_dict = {'validation_error': 'Validation failed'}
+            
+        # Create empty stats and patch for failed validation
+        empty_dict = {}
+        
+        # Ensure all dicts are properly JSON formatted
+        error_dict_str = json.dumps(error_dict)
+        empty_dict_str = json.dumps(empty_dict)
+        
         log_line = f"{identifier}\t{uri}\t{error_dict_str}\t{empty_dict_str}\t{empty_dict_str}\tfailed\tfailed"
     
     # Use file locking to ensure atomic writes
-    # This approach doesn't require a global lock object that needs to be pickled
     try:
         # Check if the file exists and has the header
         file_exists = os.path.exists(progress_log_path)
@@ -551,7 +547,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                               backend_files: List[Dict[str, Any]] = None,
                               s3_uri_to_file_format: Dict[str, str] = {},
                               update: bool = False,
-                              backend_uri: str = None) -> List[Dict[str, Any]]:
+                              backend_uri: str = None) -> List[FileValidationRecord]:
     """Process multiple files in parallel using a process pool.
     
     Args:
@@ -568,7 +564,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         backend_uri: The URI of the backend API
         
     Returns:
-        List of validation results
+        List of FileValidationRecord objects containing validation results
     """
     logger.info(f"Starting parallel processing with {thread_count} threads")
     print(f"Starting parallel processing with {thread_count} threads")
@@ -742,7 +738,9 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         debug,
                         None,  # Pass None instead of validator instance
                         None,  # Don't pass progress_tracker to worker processes
-                        identifier  # Pass the identifier if available
+                        identifier,  # Pass the identifier if available
+                        True,  # Return a FileValidationRecord
+                        None  # No etag for concurrency control
                     )
                 )
         
@@ -755,44 +753,47 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 
                 # Update progress tracker in the main process if it exists
                 if progress_tracker:
-                    file_path = result.get('file_path', 'unknown')
-                    if result.get('success', False):
-                        progress_tracker.complete_file(file_path, True, result.get('results', {}))
+                    file_path = result.file_path if isinstance(result, FileValidationRecord) else result.get('file_path', 'unknown')
+                    if isinstance(result, FileValidationRecord):
+                        success = result.validation_success
+                        results = {'valid': result.info.get('valid', False), 'errors': result.errors}
                     else:
-                        error_msg = result.get('error', 'Unknown error')
+                        success = result.get('success', False)
+                        results = result.get('results', {})
+                    
+                    if success:
+                        progress_tracker.complete_file(file_path, True, results)
+                    else:
+                        error_msg = results.get('errors', {}).get('validation_error', 'Unknown error')
                         logger.error(f"Validation failed for {file_path}: {error_msg}")
                         progress_tracker.complete_file(file_path, False, {"error": error_msg})
                 
                 # Write each result to validation_progress.log as it completes
                 write_result_to_progress_log(result)
             except Exception as e:
-                import traceback
                 error_traceback = traceback.format_exc()
                 logger.error(f"Error processing file: {str(e)}")
                 logger.error(f"Traceback: {error_traceback}")
                 print(f"Error processing file: {str(e)}")
                 print(f"Traceback: {error_traceback}")
-                error_result = {
-                    "file_path": "unknown",
-                    "error": str(e),
-                    "traceback": error_traceback,
-                    "success": False
-                }
+                error_result = FileValidationRecord("unknown")
+                error_result.validation_success = False
+                error_result.update_errors({'validation_error': str(e)})
                 all_results.append(error_result)
                 # Write error to validation_progress.log
                 write_result_to_progress_log(error_result)
     
     return all_results
 
-def display_summary(all_results: List[Dict[str, Any]]) -> None:
+def display_summary(all_results: List[FileValidationRecord]) -> None:
     """Display a summary of validation results.
     
     Args:
-        all_results: List of validation results
+        all_results: List of FileValidationRecord objects
     """
     total = len(all_results)
-    successful = sum(1 for r in all_results if r["success"])
-    valid = sum(1 for r in all_results if r["success"] and r["results"]["valid"])
+    successful = sum(1 for r in all_results if r.validation_success)
+    valid = sum(1 for r in all_results if r.validation_success and r.info.get('valid', False))
     
     print("\n=== Validation Summary ===")
     print(f"Total files: {total}")
@@ -804,35 +805,40 @@ def display_summary(all_results: List[Dict[str, Any]]) -> None:
     # Print detailed results
     print("\n=== Detailed Results ===")
     for result in all_results:
-        if result["success"]:
-            validity = "Valid" if result["results"]["valid"] else "Invalid"
-            print(f"{result['file_path']}: {validity}")
+        success = result.validation_success
+        file_path = result.file_path
+        info = result.info
+        errors = result.errors
+        valid = info.get('valid', False) if success else False
+
+        if success:
+            validity = "Valid" if valid else "Invalid"
+            print(f"{file_path}: {validity}")
             
             # Print hash values if they exist
-            if result["results"].get("stats"):
-                stats = result["results"]["stats"]
+            if info:
                 # Print file sizes
-                if "file_size" in stats:
-                    print(f"  File size: {stats['file_size']} bytes")
-                if "content_size" in stats:
-                    print(f"  Uncompressed size: {stats['content_size']} bytes")
+                if "file_size" in info:
+                    print(f"  File size: {info['file_size']} bytes")
+                if "content_size" in info:
+                    print(f"  Uncompressed size: {info['content_size']} bytes")
                 
                 # Print hash values
-                if "md5sum" in stats:
-                    print(f"  MD5: {stats['md5sum']}")
-                if "sha256" in stats:
-                    print(f"  SHA256: {stats['sha256']}")
-                if "crc32c" in stats:
-                    print(f"  CRC32C: {stats['crc32c']}")
-                if "content_md5sum" in stats:
-                    print(f"  Content MD5: {stats['content_md5sum']}")
+                if "md5sum" in info:
+                    print(f"  MD5: {info['md5sum']}")
+                if "sha256" in info:
+                    print(f"  SHA256: {info['sha256']}")
+                if "crc32c" in info:
+                    print(f"  CRC32C: {info['crc32c']}")
+                if "content_md5sum" in info:
+                    print(f"  Content MD5: {info['content_md5sum']}")
             
-            if not result["results"]["valid"]:
-                print(f"  Errors: {result['results'].get('errors', {})}")
-            if result["results"].get("warnings"):
-                print(f"  Warnings: {result['results'].get('warnings', {})}")
+            if not valid:
+                print(f"  Errors: {errors}")
+            if isinstance(result, dict) and result.get('results', {}).get('warnings'):
+                print(f"  Warnings: {result['results']['warnings']}")
         else:
-            print(f"{result['file_path']}: Failed - {result.get('error', 'Unknown error')}")
+            print(f"{file_path}: Failed - {errors.get('validation_error', 'Unknown error')}")
 
 def detect_format_from_filename(file_path: str) -> str:
     """Detect the likely format of a file based on its file extension.
@@ -864,8 +870,15 @@ def detect_format_from_filename(file_path: str) -> str:
     # Unknown/unsupported format
     return ''
 
-def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress_tracker=None, identifier=""):
-    """Validate an S3 file.
+def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
+                   validator: Optional[Any] = None, 
+                   progress_tracker: Optional[SimpleActivityTracker] = None,
+                   identifier: str = "", return_record: bool = False,
+                   etag: Optional[str] = None) -> FileValidationRecord:
+    """Validate an S3 file using the core validation functionality.
+    
+    This is a wrapper around the core validate_s3_file function that maintains
+    backward compatibility with the existing interface.
     
     Args:
         s3_path: S3 URI of the file to validate
@@ -874,73 +887,52 @@ def validate_s3_file(s3_path, file_format, debug=False, validator=None, progress
         validator: Validator instance or None to create one
         progress_tracker: Activity tracker instance or None if tracking is disabled
         identifier: Identifier for the file (e.g., accession)
+        return_record: Whether to return a FileValidationRecord (always True now)
+        etag: Optional ETag value for concurrency control
         
     Returns:
-        Dict with validation results
+        FileValidationRecord containing validation results
     """
     print(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
     logger.info(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
     
-    # Try to detect format from filename if not provided
-    if not file_format:
-        detected_format = detect_format_from_filename(s3_path)
-        if detected_format:
-            logger.info(f"Detected format '{detected_format}' from filename for {s3_path}")
-            print(f"Detected format '{detected_format}' from filename for {s3_path}")
-            file_format = detected_format
-        else:
-            logger.warning(f"Could not detect format from filename for {s3_path}, using default")
-    
     try:
-        # Initialize validator if not provided
-        if validator is None:
-            logger.debug(f"Initializing validator for {file_format}")
-            try:
-                validator = robust_initialize_validator(file_format, s3_path)
-            except ValueError as e:
-                logger.error(f"Failed to initialize validator: {e}")
-                # As a last resort, try to detect from the filename
-                if not file_format:
-                    detected_format = detect_format_from_filename(s3_path)
-                    if detected_format:
-                        logger.info(f"Trying detected format '{detected_format}' as last resort")
-                        print(f"Trying detected format '{detected_format}' as last resort")
-                        validator = robust_initialize_validator(detected_format, s3_path)
-                    else:
-                        raise ValueError(f"Failed to initialize validator and could not detect format: {e}")
-                else:
-                    raise
-            logger.debug(f"Validator initialization complete: {type(validator).__name__}")
+        # Call the core validation function
+        result = core_validate_s3_file(
+            s3_path=s3_path,
+            file_format=file_format,
+            debug=debug,
+            validator=validator,
+            progress_tracker=progress_tracker,
+            identifier=identifier,
+            return_record=True,  # Always return record
+            etag=etag
+        )
         
-        # Validate S3 file
-        logger.info(f"Starting validation of {s3_path}")
-        results = validator.validate_s3_file(s3_path, debug)
-        logger.info(f"Completed validation of {s3_path}")
-        logger.debug(f"Validation results: {results}")
-        
-        # Create result object
-        result = {
-            "file_path": s3_path,
-            "identifier": identifier,
-            "results": results,
-            "success": True
-        }
+        # Handle non-FileValidationRecord results
+        if not isinstance(result, FileValidationRecord):
+            error_msg = f"Unexpected result type: {type(result)}"
+            logger.error(error_msg)
+            return create_validation_record({
+                "file_path": s3_path,
+                "error": error_msg,
+                "success": False,
+                "identifier": identifier
+            }, s3_path, identifier, etag)
+            
         return result
-    except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        logger.error(f"Error validating S3 file {s3_path}: {str(e)}")
-        logger.error(f"Traceback: {error_traceback}")
-        print(f"Error validating S3 file {s3_path}: {str(e)}")
-        print(f"Traceback: {error_traceback}")
         
-        return {
+    except Exception as e:
+        error_msg = f"Error validating {s3_path}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return create_validation_record({
             "file_path": s3_path,
-            "identifier": identifier,
-            "error": str(e),
-            "traceback": error_traceback,
-            "success": False
-        }
+            "error": error_msg,
+            "success": False,
+            "identifier": identifier
+        }, s3_path, identifier, etag)
 
 # Add a new function to robustly initialize validators with better error handling
 def robust_initialize_validator(file_format, file_path):
@@ -982,7 +974,6 @@ def robust_initialize_validator(file_format, file_path):
         'fastq': 'src.validators.fastq_validator.FastqValidator',
         'h5ad': 'src.validators.h5ad_validator.H5adValidator',
         'h5': 'src.validators.h5_validator.H5Validator',
-        'fasta': 'src.validators.fasta_validator.FastaValidator'
     }
     
     # Check if we support this file format
@@ -1018,65 +1009,3 @@ def robust_initialize_validator(file_format, file_path):
 
 if __name__ == "__main__":
     main()
-    
-# Add this function to test serialization with multiprocessing
-def test_multiprocessing_serialization():
-    """
-    Test function to diagnose serialization issues with multiprocessing.
-    
-    Run this directly to test if objects can be properly serialized:
-    python -c "from src.checkfiles import test_multiprocessing_serialization; test_multiprocessing_serialization()"
-    """
-    import multiprocessing
-    from concurrent.futures import ProcessPoolExecutor
-    
-    def worker_function(data):
-        """Simple worker function that returns its input."""
-        print(f"Worker received: {data}")
-        return data
-        
-    print("Testing basic multiprocessing serialization...")
-    
-    # Test with different types of data
-    test_data = [
-        {"type": "dict", "value": 123},
-        "simple string",
-        42,
-        [1, 2, 3]
-    ]
-    
-    # Test using ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=2) as executor:
-        futures = []
-        for data in test_data:
-            futures.append(executor.submit(worker_function, data))
-            
-        # Collect results
-        results = []
-        for future in futures:
-            try:
-                result = future.result()
-                print(f"Successfully processed: {result}")
-                results.append(result)
-            except Exception as e:
-                print(f"Error in worker: {str(e)}")
-                
-    print(f"Successfully processed {len(results)} out of {len(test_data)} items")
-    
-    # Try to initialize a progress tracker in isolation
-    try:
-        from src.tracking.progress import SimpleActivityTracker
-        tracker = SimpleActivityTracker(10)
-        print(f"Created tracker: {type(tracker)}")
-        print(f"Tracker attributes: {dir(tracker)}")
-        
-        # Test if tracker can be serialized directly
-        import pickle
-        try:
-            pickle_data = pickle.dumps(tracker)
-            print(f"Successfully pickled tracker: {len(pickle_data)} bytes")
-        except Exception as e:
-            print(f"Failed to pickle tracker: {str(e)}")
-            
-    except ImportError:
-        print("Could not import SimpleActivityTracker for testing")

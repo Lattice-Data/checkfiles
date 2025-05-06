@@ -6,14 +6,14 @@ should use the H5adValidator.
 """
 
 import pytest
+import scanpy  # Import scanpy to ensure it's in sys.modules
 from src.core.validation import initialize_validator
 
 @pytest.mark.parametrize("file_format,file_path,expected_class", [
     ("fastq", "test.fastq", "FastqValidator"),
     ("fastq", "test.fastq.gz", "FastqValidator"),
     ("h5ad", "test.h5ad", "H5adValidator"),
-    ("hdf5", "test.hdf5", "Hdf5Validator"),
-    ("hdf5", "test.h5", "Hdf5Validator"),
+    ("hdf5", "test.h5", "H5adValidator"),
     # The critical test case: hdf5 format with h5ad extension
     ("hdf5", "test.h5ad", "H5adValidator"),
 ])

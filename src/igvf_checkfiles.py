@@ -15,9 +15,15 @@ import tempfile
 import zlib
 from collections import namedtuple
 from math import floor
-from typing import Optional
+from typing import Optional, Dict, Any, List, Union
+from pathlib import Path
+import hashlib
+import boto3
+from botocore.exceptions import ClientError
+import h5py
+import numpy as np
+from tqdm import tqdm
 
-import pysam
 from FastaValidator import fasta_validator
 from frictionless import system, validate, describe, Schema, Dialect
 from seqspec.utils import load_spec as seqspec_load_spec
@@ -582,6 +588,24 @@ def validate_gzip_format(file_path, is_s3=False):
         error = {'gzip_error': f'Unexpected error checking gzip format: {str(e)}'}
         
     return error
+
+
+def validate_file(local_file_path: str, file_format: str) -> Dict[str, Any]:
+    """Validate a file using the appropriate validator.
+    
+    Args:
+        local_file_path: Path to the local file to validate
+        file_format: Format of the file
+        
+    Returns:
+        Dictionary with validation results
+    """
+    if file_format.lower() == 'fastq':
+        return fastq_check(local_file_path)
+    elif file_format.lower() in ['h5ad', 'h5']:
+        return h5ad_check(local_file_path)
+    else:
+        raise ValueError(f"Unsupported file format: {file_format}")
 
 
 def main(args):

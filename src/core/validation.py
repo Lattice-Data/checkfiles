@@ -43,10 +43,13 @@ def initialize_validator(file_format: str, file_path: str = None) -> Any:
         elif file_path.lower().endswith('.h5'):
             logger.info(f"File {file_path} has .h5 extension with format 'hdf5'.")
             # file_format remains "hdf5"
+        elif file_path.lower().endswith('.hdf5'):
+            logger.info(f"File {file_path} has .hdf5 extension with format 'hdf5'.")
+            # file_format remains "hdf5"
         else:
             # This is an error case - hdf5 format with unrecognized extension
             logger.error(f"File {file_path} has unrecognized extension for format 'hdf5'.")
-            raise ValueError(f"File {file_path} has unrecognized extension for format 'hdf5'. Supported extensions: .h5, .h5ad")
+            raise ValueError(f"File {file_path} has unrecognized extension for format 'hdf5'. Supported extensions: .h5, .h5ad, .hdf5")
     
     if file_format.lower() == "fastq":
         try:
@@ -207,9 +210,13 @@ def create_validation_record(result: Dict[str, Any], file_path: str, uuid: str =
     # Add any platform, read_count, read_length, flowcell_details etc. from results
     if 'results' in result:
         for key in ['platform', 'read_count', 'read_length', 'flowcell_details', 'md5sum', 
-                   'sha256', 'crc32c', 'content_md5sum', 'file_size']:
+                   'sha256', 'crc32c', 'content_md5sum', 'file_size', 'valid']:
             if key in result['results']:
                 validation_record.update_info({key: result['results'][key]})
+    
+    # Explicitly set valid flag in info if it exists in results
+    if 'results' in result and 'valid' in result['results']:
+        validation_record.update_info({'valid': result['results']['valid']})
     
     # Add errors
     if 'error' in result:
@@ -223,7 +230,7 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                       validator: Optional[Any] = None, 
                       progress_tracker: Optional[SimpleActivityTracker] = None,
                       identifier: str = "", return_record: bool = False, 
-                      etag: Optional[str] = None) -> Union[Dict[str, Any], FileValidationRecord]:
+                      etag: Optional[str] = None) -> FileValidationRecord:
     """Validate a local file.
     
     Args:
@@ -233,11 +240,11 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         identifier: Optional identifier for the file (e.g., accession number)
-        return_record: Whether to return a FileValidationRecord instead of a dictionary
+        return_record: Deprecated parameter, kept for backward compatibility
         etag: Optional ETag value for concurrency control
         
     Returns:
-        Dictionary with validation results or FileValidationRecord
+        FileValidationRecord containing validation results
     """
     try:
         if progress_tracker:
@@ -263,7 +270,10 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                 logger.error(f"Failed to initialize validator for {file_format}: {str(e)}")
                 error_result = {"file_path": file_path, "success": False, "error": f"Validator initialization failed: {str(e)}"}
                 track_validation_progress(file_path, progress_tracker, "Error: Validator init failed", False, error_result)
-                return error_result if not return_record else FileValidationRecord.from_dict(error_result)
+                record = FileValidationRecord(file_path, identifier, etag)
+                record.validation_success = False
+                record.update_errors({'validation_error': str(e)})
+                return record
             
         # --- Handle H5AD format separately (requires file path) ---
         if file_format.lower() == 'h5ad':
@@ -297,28 +307,23 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                     validation_results["stats"] = {}
                 validation_results["stats"].update(hash_stats)
 
-                # Combine with file_path and success flag
-                result_dict = {
-                    "file_path": file_path,
-                    "identifier": identifier if identifier else os.path.basename(file_path),
-                    "success": True, # validate_file returns results, success is implied if no exception
-                    "results": validation_results
-                }
+                # Create validation record
+                record = FileValidationRecord(file_path, identifier, etag)
+                record.validation_success = True
+                record.update_info(validation_results.get('stats', {}))
+                record.update_errors(validation_results.get('errors', {}))
                 
                 track_validation_progress(file_path, progress_tracker, "Completed", True, validation_results)
-                
-                if return_record:
-                    # Use UUID if available, else create one based on path? (Needs clarification if UUID is needed here)
-                    temp_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"file://{file_path}"))
-                    return create_validation_record(result_dict, file_path, temp_uuid, etag)
-                else:
-                    return result_dict
+                return record
                 
             except Exception as e:
                 logger.error(f"Error validating {file_path} with validate_file: {str(e)}", exc_info=True)
                 error_result = {"file_path": file_path, "success": False, "error": f"Validation failed: {str(e)}"}
                 track_validation_progress(file_path, progress_tracker, f"Error: {str(e)}", False, error_result)
-                return error_result if not return_record else FileValidationRecord.from_dict(error_result)
+                record = FileValidationRecord(file_path, identifier, etag)
+                record.validation_success = False
+                record.update_errors({'validation_error': str(e)})
+                return record
             
         # --- Proceed with stream-based validation for other formats ---
         
@@ -327,7 +332,10 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
             logger.error(f"Local file not found: {file_path}")
             error_result = {"file_path": file_path, "success": False, "error": "File not found"}
             track_validation_progress(file_path, progress_tracker, "Error: File not found", False, error_result)
-            return error_result if not return_record else FileValidationRecord.from_dict(error_result)
+            record = FileValidationRecord(file_path, identifier, etag)
+            record.validation_success = False
+            record.update_errors({'validation_error': 'File not found'})
+            return record
         
         is_gzipped = has_gz_extension(file_path)
         logger.debug(f"File is gzipped: {is_gzipped}")
@@ -340,8 +348,8 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                 
                 # Wrap stream for progress tracking if enabled
                 if progress_tracker:
-                    file_size = os.path.getsize(file_path)
-                    tracked_stream = ProgressTrackingStream(file_stream, file_path, file_size, progress_tracker)
+                    tracked_stream = ProgressTrackingStream(file_stream, progress_tracker)
+                    tracked_stream.file_path = file_path  # Set file path after initialization
                     stream_to_validate = tracked_stream
                 else:
                     stream_to_validate = file_stream
@@ -353,20 +361,14 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                 # --- THIS IS THE CORE CHANGE: pass is_gzipped only to validate_stream ---
                 validation_results = validator.validate_stream(stream_to_validate, is_gzipped=is_gzipped) 
                 
-                # Combine results
-                result_dict = {
-                    "file_path": file_path,
-                    "results": validation_results,
-                    "success": True,
-                    "identifier": identifier
-                }
+                # Create validation record
+                record = FileValidationRecord(file_path, identifier, etag)
+                record.validation_success = True
+                record.update_info(validation_results.get('stats', {}))
+                record.update_errors(validation_results.get('errors', {}))
                 
                 track_validation_progress(file_path, progress_tracker, "Completed", True, validation_results)
-                
-                if return_record:
-                    return create_validation_record(result_dict, file_path, identifier, etag)
-                else:
-                    return result_dict
+                return record
                 
         except Exception as e:
             logger.error(f"Error validating {file_path}: {str(e)}")
@@ -378,24 +380,16 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
         
         track_validation_progress(file_path, progress_tracker, f"Error: {str(e)}", False, {"error": str(e)})
             
-        result = {
-            "file_path": file_path,
-            "error": error_msg,
-            "success": False,
-            "identifier": identifier
-        }
-        
-        # Convert to structured record if requested
-        if return_record:
-            return create_validation_record(result, file_path, identifier, etag)
-        
-        return result
+        record = FileValidationRecord(file_path, identifier, etag)
+        record.validation_success = False
+        record.update_errors({'validation_error': str(e)})
+        return record
 
 def download_and_validate_random_access_file(s3_path: str, file_format: str, debug: bool = False,
                                            validator: Optional[Any] = None,
                                            progress_tracker: Optional[SimpleActivityTracker] = None,
                                            identifier: str = "", return_record: bool = False,
-                                           etag: Optional[str] = None) -> Union[Dict[str, Any], FileValidationRecord]:
+                                           etag: Optional[str] = None) -> FileValidationRecord:
     """
     Download an S3 file that requires random access (like HDF5/H5AD) to the scratch directory and validate it.
     
@@ -406,11 +400,11 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         identifier: Optional identifier for the file (e.g., accession number)
-        return_record: Whether to return a FileValidationRecord instead of a dictionary
+        return_record: Deprecated parameter, kept for backward compatibility
         etag: Optional ETag value for concurrency control
         
     Returns:
-        Dictionary with validation results or FileValidationRecord
+        FileValidationRecord containing validation results
     """
     if progress_tracker:
         progress_tracker.init_file(s3_path)
@@ -433,16 +427,11 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
                 if progress_tracker:
                     progress_tracker.complete_file(s3_path, False, {"error": error_msg})
                 
-                result_dict = {
-                    "file_path": s3_path,
-                    "error": error_msg,
-                    "success": False,
-                    "identifier": identifier
-                }
+                record = FileValidationRecord(s3_path, identifier, etag)
+                record.validation_success = False
+                record.update_errors({'validation_error': error_msg})
                 
-                if return_record:
-                    return create_validation_record(result_dict, s3_path, identifier, etag)
-                return result_dict
+                return record
         
         # Use the helper function to download the file
         if progress_tracker:
@@ -458,16 +447,11 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
                 progress_tracker.update_progress(s3_path, status=f"Download failed: {error_msg}")
                 progress_tracker.complete_file(s3_path, False, {"error": error_msg})
             
-            result_dict = {
-                "file_path": s3_path,
-                "error": error_msg,
-                "success": False,
-                "identifier": identifier
-            }
+            record = FileValidationRecord(s3_path, identifier, etag)
+            record.validation_success = False
+            record.update_errors({'validation_error': error_msg})
             
-            if return_record:
-                return create_validation_record(result_dict, s3_path, identifier, etag)
-            return result_dict
+            return record
         
         logger.info(f"S3 file downloaded successfully to: {temp_file_path}")
         if progress_tracker:
@@ -498,16 +482,11 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
             if progress_tracker:
                 progress_tracker.complete_file(s3_path, False, {"error": error_msg})
             
-            result_dict = {
-                "file_path": s3_path,
-                "error": error_msg,
-                "success": False,
-                "identifier": identifier
-            }
+            record = FileValidationRecord(s3_path, identifier, etag)
+            record.validation_success = False
+            record.update_errors({'validation_error': error_msg})
             
-            if return_record:
-                return create_validation_record(result_dict, s3_path, identifier, etag)
-            return result_dict
+            return record
 
         # Combine hash stats with validation results BEFORE creating local_result
         if "stats" not in validation_results:
@@ -525,11 +504,13 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         if progress_tracker:
             progress_tracker.complete_file(s3_path, local_result["success"], validation_results)
         
-        # Convert to structured record if requested
-        if return_record:
-            return create_validation_record(local_result, s3_path, identifier, etag)
+        # Create validation record
+        record = FileValidationRecord(s3_path, identifier, etag)
+        record.validation_success = local_result["success"]
+        record.update_info(local_result["results"]["stats"])
+        record.update_errors(local_result["results"].get("errors", {}))
         
-        return local_result
+        return record
     
     except Exception as e:
         error_msg = f"Error validating {s3_path} (via download): {str(e)}"
@@ -540,16 +521,11 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
         if progress_tracker:
             progress_tracker.complete_file(s3_path, False, {"error": error_msg})
         
-        result_dict = {
-            "file_path": s3_path,
-            "error": error_msg,
-            "success": False,
-            "identifier": identifier
-        }
+        record = FileValidationRecord(s3_path, identifier, etag)
+        record.validation_success = False
+        record.update_errors({'validation_error': error_msg})
         
-        if return_record:
-            return create_validation_record(result_dict, s3_path, identifier, etag)
-        return result_dict
+        return record
     
     finally:
         # Clean up the temporary file
@@ -564,7 +540,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
                    validator: Optional[Any] = None, 
                    progress_tracker: Optional[SimpleActivityTracker] = None,
                    identifier: str = "", return_record: bool = False,
-                   etag: Optional[str] = None) -> Union[Dict[str, Any], FileValidationRecord]:
+                   etag: Optional[str] = None) -> FileValidationRecord:
     """Validate an S3 file using streaming without downloading to disk.
     
     Args:
@@ -574,11 +550,11 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         validator: Validator instance to use (will be created if None)
         progress_tracker: Activity tracker instance or None if tracking is disabled
         identifier: Optional identifier for the file (e.g., accession number)
-        return_record: Whether to return a FileValidationRecord instead of a dictionary
+        return_record: Deprecated parameter, kept for backward compatibility
         etag: Optional ETag value for concurrency control
         
     Returns:
-        Dictionary with validation results or FileValidationRecord
+        FileValidationRecord containing validation results
     """
     # Add more detailed logging to help diagnose issues
     logger.info(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
@@ -593,7 +569,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
             validator=validator,
             progress_tracker=progress_tracker,
             identifier=identifier,
-            return_record=return_record,
+            return_record=True,  # Always return record
             etag=etag
         )
     
@@ -633,7 +609,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         validation_stream_raw = stream_s3_file(s3_path, decompress=False, file_format=file_format)
         try:
             if progress_tracker:
-                tracking_stream = ProgressTrackingStream(validation_stream_raw, progress_tracker, update_interval_mb=100)
+                tracking_stream = ProgressTrackingStream(validation_stream_raw, progress_tracker)
                 tracking_stream.file_path = s3_path
                 stream_for_validator = tracking_stream
             else:
@@ -651,18 +627,16 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         # Combine results
         validation_results['stats'] = {**validation_results.get('stats', {}), **hash_stats}
         
-        result = {
-            "file_path": s3_path,
-            "results": validation_results,
-            "success": True,
-            "identifier": identifier
-        }
+        # Create validation record
+        record = FileValidationRecord(s3_path, identifier, etag)
+        record.validation_success = True
+        record.update_info(validation_results.get('stats', {}))
+        # Copy valid flag from validation results to info dictionary
+        if 'valid' in validation_results:
+            record.update_info({'valid': validation_results['valid']})
+        record.update_errors(validation_results.get('errors', {}))
         
-        # Convert to structured record if requested
-        if return_record:
-            return create_validation_record(result, s3_path, identifier, etag)
-        
-        return result
+        return record
         
     except Exception as e:
         error_msg = f"Error validating {s3_path}: {str(e)}"
@@ -671,15 +645,9 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
         if progress_tracker:
             progress_tracker.complete_file(s3_path, False, {"error": str(e)})
         
-        result = {
-            "file_path": s3_path,
-            "error": error_msg,
-            "success": False,
-            "identifier": identifier
-        }
+        # Create error record
+        record = FileValidationRecord(s3_path, identifier, etag)
+        record.validation_success = False
+        record.update_errors({'validation_error': error_msg})
         
-        # Convert to structured record if requested
-        if return_record:
-            return create_validation_record(result, s3_path, identifier, etag)
-        
-        return result 
+        return record 

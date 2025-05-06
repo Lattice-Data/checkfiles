@@ -35,6 +35,16 @@ CORE_MODULES = [
     'scipy',
 ]
 
+# List of optional dependencies that might be needed for tests
+optional_deps = [
+    'h5py',
+    'scanpy',
+    'anndata',
+    'numpy',
+    'pandas',
+    'scipy',
+]
+
 @pytest.fixture(autouse=True)
 def mock_optional_imports(monkeypatch):
     """Mock optional imports that might be missing so tests can run.
