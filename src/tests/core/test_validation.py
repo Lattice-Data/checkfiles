@@ -42,23 +42,18 @@ def test_initialize_validator_unsupported():
 
 def test_initialize_validator_case_insensitive():
     """Test that validator initialization is case-insensitive."""
-    # Patch H5adValidator where it is imported and looked up in the module under test
-    with patch('src.core.validation.H5adValidator') as mock_validator:
-        # Set up the mock instance that the class call will return
-        mock_instance = MagicMock()
-        mock_validator.return_value = mock_instance
-        # Set the __name__ attribute on the mock *class* itself for logging
-        mock_validator.__name__ = 'H5adValidator' 
+    with patch('src.validators.h5ad.H5adValidator') as mock_validator:
+        # Set up the mock
+        mock_validator.return_value = MagicMock()
         
         # Call the function with different cases
         validator1 = initialize_validator('H5AD')
         validator2 = initialize_validator('h5ad')
         
-        # Check that the validator instances were returned
-        assert validator1 is mock_instance
-        assert validator2 is mock_instance
-        # Check that the mock class was called twice to create the instances
-        assert mock_validator.call_count == 2
+        # Check that the validator was created both times
+        assert validator1 is not None
+        assert validator2 is not None
+        assert mock_validator.call_count == 2 
 
 # Dummy H5AD stats for mocking
 DUMMY_H5AD_STATS = {

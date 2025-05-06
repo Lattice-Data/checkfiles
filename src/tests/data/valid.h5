@@ -1,2 +1,0 @@
-# HDF5 file content placeholder - actual binary content will be created by h5py
-# We just need the file path for now, test setup will create actual content. 
