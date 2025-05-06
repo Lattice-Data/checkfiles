@@ -1,11 +1,17 @@
 [run]
 source = src
-omit = 
+omit =
     */tests/*
     */site-packages/*
     setup.py
     */docker/*
     */cdk/*
+    src/igvf_checkfiles.py
+    src/old_lattice_checkfiles.py
+    src/cli/*
+    */__init__.py
+    src/tests/*
+    src/checkfiles.egg-info/*
 
 [report]
 exclude_lines =

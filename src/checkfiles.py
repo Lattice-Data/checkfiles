@@ -54,11 +54,13 @@ except ImportError as e:
 try:
     from src.models.validation_record import FileValidationRecord
     from src.cli.parser import parse_arguments
+    from src.backend.patch import fetch_etag_for_uuid
     from src.core.validation import (
         validate_s3_file as core_validate_s3_file,
         create_validation_record,
         SimpleActivityTracker,
-        initialize_validator
+        initialize_validator,
+        validate_local_file
     )
     from src.tracking.progress import SimpleActivityTracker
     from src.utils.helpers import has_gz_extension, validate_gzip_format

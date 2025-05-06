@@ -564,7 +564,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
     logger.info(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
     
     # Special handling for file formats that require random access (HDF5, H5AD)
-    if file_format.lower() in ['hdf5', 'h5ad']:
+    if file_format.lower() in ['hdf5', 'h5ad', 'h5']:
         logger.info(f"File format {file_format} requires random access. Using download_and_validate_random_access_file.")
         return download_and_validate_random_access_file(
             s3_path=s3_path,
