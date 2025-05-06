@@ -16,98 +16,77 @@ from src.utils.helpers import has_gz_extension, stream_s3_file, stream_local_fil
 from src.validators.base import HashCalculatingStream, GzipHashCalculatingStream
 from src.models.validation_record import FileValidationRecord
 
+# Import specific validators
+from src.validators.fastq import FastqValidator
+from src.validators.h5ad import H5adValidator
+from src.validators.hdf5 import Hdf5Validator
+
 logger = logging.getLogger(__name__)
 
 def initialize_validator(file_format: str, file_path: str = None) -> Any:
     """Initialize and return the appropriate validator for the given file format.
     
+    Handles HDF5 based formats by checking file extensions:
+    - Format 'hdf5' with extension '.h5ad' uses H5adValidator.
+    - Format 'hdf5' with extension '.h5' or '.hdf5' uses Hdf5Validator.
+    - Format 'h5ad' uses H5adValidator.
+    
     Args:
-        file_format: The file format to validate (e.g., 'fastq')
-        file_path: Optional path to the file being validated, used to check file extension
+        file_format: The file format to validate (e.g., 'fastq', 'hdf5', 'h5ad')
+        file_path: Optional path to the file being validated, used to check file extension.
+                   Required when file_format is 'hdf5'.
         
     Returns:
-        A validator instance for the specified format
+        A validator instance for the specified format.
         
     Raises:
-        ValueError: If the file format is not supported
-        ImportError: If the validator module cannot be imported
+        ValueError: If the file format is not supported, or if the file extension is 
+                    invalid for the 'hdf5' format, or if file_path is missing for 'hdf5' format.
+        ImportError: If a required validator module (e.g., h5py) cannot be imported.
     """
-    logger.debug(f"Initializing validator for {file_format}")
+    logger.debug(f"Initializing validator for format: {file_format}, path: {file_path}")
     
-    # Special case for HDF5 files
-    # Use appropriate validator based on file extension
-    if file_format.lower() == "hdf5" and file_path:
-        if file_path.lower().endswith('.h5ad'):
-            logger.info(f"File {file_path} has .h5ad extension but format 'hdf5'. Using H5adValidator.")
-            file_format = "h5ad"
-        elif file_path.lower().endswith('.h5'):
-            logger.info(f"File {file_path} has .h5 extension with format 'hdf5'.")
-            # file_format remains "hdf5"
+    fmt_lower = file_format.lower()
+    selected_validator_class = None
+
+    if fmt_lower == "fastq":
+        selected_validator_class = FastqValidator
+    elif fmt_lower == "h5ad":
+        selected_validator_class = H5adValidator
+    elif fmt_lower == "hdf5":
+        if not file_path:
+            logger.error("file_path is required when file_format is 'hdf5' to determine the correct validator based on extension.")
+            raise ValueError("file_path must be provided when file_format is 'hdf5'.")
         else:
-            # This is an error case - hdf5 format with unrecognized extension
-            logger.error(f"File {file_path} has unrecognized extension for format 'hdf5'.")
-            raise ValueError(f"File {file_path} has unrecognized extension for format 'hdf5'. Supported extensions: .h5, .h5ad")
-    
-    if file_format.lower() == "fastq":
+            ext_lower = os.path.splitext(file_path)[1].lower()
+            if ext_lower == '.h5ad':
+                logger.info(f"File {file_path} has format 'hdf5' but extension '.h5ad'. Using H5adValidator.")
+                selected_validator_class = H5adValidator
+            elif ext_lower in ['.h5', '.hdf5']:
+                logger.info(f"File {file_path} has format 'hdf5' and extension '{ext_lower}'. Using Hdf5Validator.")
+                selected_validator_class = Hdf5Validator
+            else:
+                logger.error(f"File {file_path} has unrecognized extension '{ext_lower}' for format 'hdf5'.")
+                raise ValueError(f"File {file_path} has unrecognized extension '{ext_lower}' for format 'hdf5'. Supported extensions for this format: .h5, .hdf5, .h5ad")
+    # Add other formats here if needed
+    # elif fmt_lower == "bam":
+    #     from src.validators.bam import BamValidator
+    #     selected_validator_class = BamValidator
+
+    if selected_validator_class:
         try:
-            from src.validators.fastq import FastqValidator
-            logger.debug("Successfully imported FastqValidator")
-            return FastqValidator()
-        except ImportError as e:
-            logger.error(f"Error importing FastqValidator: {e}")
-            print(f"Error importing FastqValidator: {e}")
-            print("Using pure Python implementation - no Rust required")
-            try:
-                # Try alternative import path
-                import sys
-                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                from validators.fastq import FastqValidator
-                logger.debug("Successfully imported FastqValidator using alternative path")
-                return FastqValidator()
-            except ImportError as e2:
-                logger.error(f"Error importing FastqValidator from alternative path: {e2}")
-                print(f"Failed to import FastqValidator: {e2}")
-                raise ImportError(f"Error importing FastqValidator from all paths: {e}, {e2}")
-    elif file_format.lower() == "h5ad":
-        try:
-            from src.validators.h5ad import H5adValidator
-            logger.debug("Successfully imported H5adValidator")
-            return H5adValidator()
-        except ImportError as e:
-            logger.error(f"Error importing H5adValidator: {e}")
-            print(f"Error importing H5adValidator: {e}")
-            try:
-                # Try alternative import path
-                import sys
-                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                from validators.h5ad import H5adValidator
-                logger.debug("Successfully imported H5adValidator using alternative path")
-                return H5adValidator()
-            except ImportError as e2:
-                logger.error(f"Error importing H5adValidator from alternative path: {e2}")
-                print(f"Failed to import H5adValidator: {e2}")
-                raise ImportError(f"Error importing H5adValidator from all paths: {e}, {e2}")
-    elif file_format.lower() == "h5" or file_format.lower() == "hdf5":
-        try:
-            # For both h5 and hdf5 formats, we use the H5adValidator 
-            # This ensures consistent validation
-            from src.validators.h5ad import H5adValidator
-            logger.debug("Successfully imported H5adValidator for h5/hdf5 format")
-            return H5adValidator()
-        except ImportError as e:
-            logger.error(f"Error importing validator for h5/hdf5: {e}")
-            print(f"Error importing validator for h5/hdf5: {e}")
-            try:
-                import sys
-                sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                from validators.h5ad import H5adValidator
-                logger.debug("Successfully imported H5adValidator using alternative path")
-                return H5adValidator()
-            except ImportError as e2:
-                logger.error(f"Error importing validator from alternative path: {e2}")
-                print(f"Failed to import validator: {e2}")
-                raise ImportError(f"Error importing validator from all paths: {e}, {e2}")
+            validator_instance = selected_validator_class()
+            logger.debug(f"Successfully initialized {selected_validator_class.__name__}")
+            return validator_instance
+        except ImportError as ie: # Catch ImportError specifically (e.g. missing h5py)
+             logger.error(f"Import error initializing {selected_validator_class.__name__}: {ie}")
+             raise ie # Re-raise the ImportError
+        except Exception as e: # Catch other potential instantiation errors
+            logger.error(f"Error initializing {selected_validator_class.__name__}: {e}")
+            # Wrap other exceptions in a standard error type if needed, or re-raise
+            raise RuntimeError(f"Could not initialize {selected_validator_class.__name__}: {e}")
     else:
+        logger.error(f"Unsupported file format provided: {file_format}")
         raise ValueError(f"Unsupported file format: {file_format}")
 
 def track_validation_progress(file_path: str, progress_tracker: Optional[SimpleActivityTracker], 

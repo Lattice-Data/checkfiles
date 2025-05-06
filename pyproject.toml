@@ -1,3 +1,76 @@
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# Add test paths if needed, e.g., testpaths = ["src/tests"]
+# Add command-line options if needed, e.g., addopts = "-v --cov=src"
+markers = [
+    "performance: mark tests that check performance characteristics",
+    "optional_deps: mark tests that require optional dependencies",
+    "requires_internet: mark tests that require internet access",
+]
+# Ignore directories during test collection
+norecursedirs = ["cdk", "build", ".venv", "venv", ".git", "__pycache__"]
+
+[tool.coverage.run]
+# Configuration for coverage.py
+source = ["src"]  # Specify the source directory for coverage measurement
+omit = [
+    "src/tests/*",  # Exclude test files from coverage report
+    "src/conftest.py", # Exclude conftest from coverage report
+    "*/__main__.py", # Exclude main entry points if any
+]
+
+[tool.coverage.report]
+# Fail if coverage drops below 80%
+fail_under = 80 
+show_missing = true
+
+[tool.ruff]
+# Ruff linter and formatter configuration
+line-length = 88
+# Select rules (e.g., E for pycodestyle errors, F for pyflakes, I for isort)
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"] 
+ignore = ["E501"] # Ignore line length errors (handled by formatter)
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[project]
+# Project metadata (replace with your project details)
+name = "checkfiles"
+version = "0.1.0"
+description = "A tool for validating scientific data files."
+authors = [{ name = "Your Name", email = "your.email@example.com" }]
+requires-python = ">=3.9"
+# Add dependencies here
+dependencies = [
+    "boto3",
+    "requests",
+    "numpy", 
+    "pandas", 
+    "h5py", 
+    "anndata", 
+    "scanpy",
+    # Add other core dependencies
+]
+
+[project.optional-dependencies]
+# Optional dependencies for specific file types or functionalities
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "moto[s3]",
+    "pysam",      # Example optional dependency
+    "pybigwig",   # Example optional dependency
+]
+dev = [
+    "ruff",       # For linting and formatting
+    "pre-commit", # For git hooks
+]
+
+[project.scripts]
+# Define command-line entry points if any
+# checkfiles = "src.cli:main"

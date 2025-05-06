@@ -7,8 +7,10 @@ including FASTQ, HDF5.
 
 from src.validators.fastq import FastqValidator
 from src.validators.h5ad import H5adValidator
+from src.validators.hdf5 import Hdf5Validator
 
 __all__ = [
     "FastqValidator",
     "H5adValidator",
+    "Hdf5Validator",
 ]
