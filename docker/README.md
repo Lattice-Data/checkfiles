@@ -1,42 +1,163 @@
 # Docker Guide for Checkfiles
 
-This directory contains Docker configuration for running the Checkfiles validation tool in a containerized environment.
+This guide explains how to run the Checkfiles validation tool using Docker, which is the easiest way to get started without complex setup.
+
+## Table of Contents
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Step-by-Step Tutorial](#step-by-step-tutorial)
+- [Validation Examples](#validation-examples)
+- [Environment Variables](#environment-variables)
+- [Troubleshooting](#troubleshooting)
+- [Advanced Usage](#advanced-usage)
 
 ## Prerequisites
 
-- Docker Engine
-- Docker Compose V2 (version 2.10.0+)
-- AWS credentials (if using S3 functionality)
+- [Docker Engine](https://docs.docker.com/get-docker/) installed on your computer
+- [Docker Compose V2](https://docs.docker.com/compose/install/) (version 2.10.0+)
+- AWS credentials (only required if validating S3 files)
 
 ## Quick Start
 
-First, create a test data directory and add your files:
+1. Create a test data directory and add your files:
 ```bash
 # From project root
 mkdir -p test_data
 # Add your .fastq.gz files to test_data/
 ```
 
-Then build and run:
+2. Build and run:
 ```bash
-# Build and run from project root
+# From project root
 docker compose -f docker/docker-compose.yml up
-
-# Or cd into docker directory
-cd docker
-docker compose up
 ```
 
-By default, this will show the help message. To validate files, see the Usage Examples below.
+3. In a new terminal window, run the validation:
+```bash
+# Validate a local file
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/your_file.fastq.gz
+```
 
-## Features
+## Step-by-Step Tutorial
 
-- Single container with all dependencies pre-installed
-- Python 3.11 environment with type hints and proper documentation
-- Support for both local file and S3 file validation
-- No need to install dependencies locally
-- Health checks to ensure service availability
-- Volume mapping for easy file access
+### 1. Installing Docker
+
+If you don't have Docker installed:
+
+- **Windows/Mac**: Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- **Linux**: Follow the [installation guide](https://docs.docker.com/engine/install/) for your distribution
+
+After installation, verify Docker is running:
+```bash
+docker --version
+```
+
+### 2. Setting Up Test Files
+
+Create a directory for your test files:
+```bash
+mkdir -p test_data
+```
+
+You can now place any files you want to validate in this directory. For example, if you have FASTQ files (`.fastq` or `.fastq.gz`), copy them to the `test_data` directory.
+
+### 3. Starting the Docker Container
+
+From the project root directory, run:
+```bash
+docker compose -f docker/docker-compose.yml up
+```
+
+This command:
+- Builds the Docker container (first time only)
+- Starts the container
+- Shows the help message
+
+The terminal will remain open showing logs. Leave this running and open a new terminal window for the next steps.
+
+### 4. Running Validation
+
+In a new terminal window, navigate to the project root and run:
+
+```bash
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/your_file.fastq.gz
+```
+
+Replace `your_file.fastq.gz` with the actual filename in your test_data directory.
+
+### 5. Understanding the Results
+
+After running validation, you'll see output like:
+
+```
+=== Validation Summary ===
+Total files: 1
+Successfully processed: 1
+Valid files: 1
+Invalid files: 0
+Failed to process: 0
+
+=== Detailed Results ===
+/app/test_data/your_file.fastq.gz: Valid
+  File size: 358420 bytes
+  Uncompressed size: 1234567 bytes
+  MD5: abc123...
+```
+
+The validation results are also saved to log files in the `logs` directory:
+```bash
+# View progress log
+cat logs/validation_progress.log
+
+# View debug log
+cat logs/checkfiles_debug.log
+```
+
+## Validation Examples
+
+### Local File Validation
+
+```bash
+# Single file
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/file1.fastq.gz
+
+# Multiple files (comma-separated, NO spaces)
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l "/app/test_data/file1.fastq.gz,/app/test_data/file2.fastq.gz"
+
+# With debug output
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/file1.fastq.gz -d
+```
+
+### S3 File Validation
+
+First, set up your AWS credentials in your terminal:
+```bash
+# Replace with your actual AWS credentials
+export AWS_ACCESS_KEY_ID=your-key-id
+export AWS_SECRET_ACCESS_KEY=your-secret
+export AWS_DEFAULT_REGION=us-west-2
+```
+
+Then run validation:
+```bash
+# Single S3 file
+docker compose -f docker/docker-compose.yml run checkfiles \
+    -f fastq \
+    -s3 s3://your-bucket/path/to/file.fastq.gz
+```
+
+### Host Path Translation
+
+Docker automatically translates paths between your host computer and the container:
+
+```bash
+# Using host path (works on Mac/Linux)
+docker compose -f docker/docker-compose.yml run checkfiles \
+    -f fastq \
+    -l /Users/yourusername/Documents/file.fastq.gz
+```
+
+This works because the container automatically detects host paths and maps them correctly.
 
 ## Environment Variables
 
@@ -48,141 +169,89 @@ By default, this will show the help message. To validate files, see the Usage Ex
 | LOG_LEVEL | Python logging level | INFO | No |
 | PYTHONUNBUFFERED | Enables unbuffered Python output | 1 | No |
 
-## Recent Updates
+## Troubleshooting
 
-### Path Handling Improvements
-- Added ability to use both host file paths and container paths
-- Files can now be specified with absolute paths from the host system
-- Automatic path translation between host and container filesystems
-- S3 URIs continue to work as before
+### Permission Issues
 
-### Validation Improvements
-- Fixed validation for FASTQ files with mismatched IDs in header and quality lines
-- Mismatched IDs are now correctly treated as errors instead of warnings
-- Test service added to verify validation behavior
-
-## Usage
-
-### Building the Container
-
+If you see "Permission denied" errors for logs:
 ```bash
-docker compose -f docker/docker-compose.yml build
+sudo chown -R $(id -u):$(id -g) logs/
 ```
 
-### Running Validation on S3 Files
+### Container Won't Start
 
-```bash
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -s3 s3://your-bucket/path/to/file.fastq.gz
-```
+1. Check if Docker is running:
+   ```bash
+   docker info
+   ```
 
-### Running Validation on Local Files
+2. Check for port conflicts:
+   ```bash
+   docker ps
+   ```
 
-```bash
-# Using container path
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/src/tests/data/fastq/invalid/mismatched_ids.fastq
+3. Verify Docker Compose is installed:
+   ```bash
+   docker compose version
+   ```
 
-# Using host path (will be automatically translated)
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /Users/yourusername/path/to/file.fastq
-```
+### AWS Credentials Not Working
 
-### Testing FASTQ Validation with Mismatched IDs
+1. Check you've exported credentials correctly:
+   ```bash
+   echo $AWS_ACCESS_KEY_ID
+   echo $AWS_SECRET_ACCESS_KEY
+   ```
 
-```bash
-docker compose -f docker/docker-compose.yml run test-mismatched-ids
-```
+2. Verify region matches your bucket:
+   ```bash
+   echo $AWS_DEFAULT_REGION
+   ```
 
-This will run the validator on a test file with mismatched IDs in the header and quality lines, which should be reported as invalid.
+3. Test AWS CLI access:
+   ```bash
+   aws s3 ls s3://your-bucket/
+   ```
 
-## File Format Validation
+### File Not Found or Invalid Format
 
-The container supports validation of the following file formats:
+1. Verify the file exists in the test_data directory:
+   ```bash
+   ls -la test_data/
+   ```
 
-- FASTQ (with or without gzip compression)
-- BAM
-- CRAM
+2. Check if the file format is supported (fastq, h5, h5ad):
+   ```bash
+   # For .fastq files:
+   docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/file.fastq.gz
 
-Each format has specific validation criteria. See the individual validator documentation for details.
+   # For .h5 files:
+   docker compose -f docker/docker-compose.yml run checkfiles -f h5 -l /app/test_data/file.h5
 
-## Usage Examples
+   # For .h5ad files:
+   docker compose -f docker/docker-compose.yml run checkfiles -f h5ad -l /app/test_data/file.h5ad
+   ```
 
-### Run validation on local files
-```bash
-# Basic usage with local file
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/test.fastq.gz
+## Advanced Usage
 
-# Multiple local files (comma-separated)
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l "/app/test_data/file1.fastq.gz,/app/test_data/file2.fastq.gz"
-```
+### Interactive Shell
 
-### Run validation on S3 files
-
-1. First, set up your AWS credentials in your terminal:
-```bash
-# Replace these with your actual AWS credentials
-export AWS_ACCESS_KEY_ID=your-key-id
-export AWS_SECRET_ACCESS_KEY=your-secret
-export AWS_DEFAULT_REGION=us-west-2
-```
-
-2. Then run the validation with your S3 file path:
-```bash
-# Single S3 file
-docker compose -f docker/docker-compose.yml run checkfiles \
-    -f fastq \
-    -s3 s3://your-bucket/path/to/file.fastq.gz
-
-# Multiple S3 files (comma-separated, no spaces)
-docker compose -f docker/docker-compose.yml run checkfiles \
-    -f fastq \
-    -s3 s3://bucket/file1.fastq.gz,s3://bucket/file2.fastq.gz
-
-# With debug output
-docker compose -f docker/docker-compose.yml run checkfiles \
-    -f fastq \
-    -s3 s3://your-bucket/path/to/file.fastq.gz \
-    -d
-```
-
-Note: Make sure your AWS credentials have permission to access the specified S3 bucket and objects.
-
-### Run interactively for debugging
+For debugging or advanced usage:
 ```bash
 docker compose -f docker/docker-compose.yml run --entrypoint bash checkfiles
 ```
 
-## Development
+This gives you a shell inside the container where you can run commands directly.
 
-The Docker setup mounts your local `src` and `test_data` directories:
-- `src`: Contains the Python source code (mounted read-only)
-- `test_data`: Contains test files for validation (mounted read-only)
-- `logs`: Directory for log output (mounted read-write)
+### Viewing Container Logs
 
-To apply changes to dependencies:
 ```bash
-docker compose -f docker/docker-compose.yml build --no-cache
+# View logs of the container
+docker compose -f docker/docker-compose.yml logs
 ```
 
-### Testing
+### Stopping the Container
 
-When writing tests for the application, ensure:
-- Unit tests cover at least 80% of the code
-- All tests follow the Google Python Style Guide
-- Tests are properly documented with docstrings
-- Test fixtures are reusable and well-named
-
-## Container Management
-
-### View running containers
-```bash
-docker ps
-```
-
-### Inspect container health
-```bash
-docker inspect --format='{{json .State.Health}}' $(docker ps -q --filter name=checkfiles)
-```
-
-### Stop and remove containers
 ```bash
 # Stop containers but preserve data
 docker compose -f docker/docker-compose.yml down
@@ -194,51 +263,9 @@ docker compose -f docker/docker-compose.yml down -v
 docker compose -f docker/docker-compose.yml down -v --rmi all
 ```
 
-## Troubleshooting
+### Available Command Arguments
 
-### Permission issues
-If you encounter permission problems with mounted volumes:
-```bash
-sudo chown -R $(id -u):$(id -g) .
-```
-
-### Common issues
-
-1. **Missing test_data directory**
-   - Create the directory: `mkdir -p test_data`
-   - Add your test files to it
-
-2. **AWS credentials not working**
-   - Verify credentials are exported in your environment
-   - Check AWS region is correct
-   - Ensure S3 bucket/object permissions are set correctly
-
-3. **Container fails to start**
-   - Check if ports are already in use
-   - Verify Docker service is running
-   - Check system resources (memory/disk space)
-   - Review logs: `docker compose -f docker/docker-compose.yml logs`
-
-4. **Health check failures**
-   - Check if Python modules are properly installed
-   - Verify the application code is properly mounted
-   - Inspect logs for initialization errors
-
-## Script Arguments
-
-The checkfiles script supports the following arguments:
-
-```bash
--f, --file-format    Specify the file format (e.g., fastq)
--l, --local-file     Specify local file(s) to validate (comma-separated)
--s3, --s3-file       Specify S3 file(s) to validate (comma-separated)
--d, --debug          Enable debug output
--t, --threads        Number of threads for parallel processing
--q, --quiet          Suppress progress indicators
---log-file          Path to log file
-```
-
-For full usage instructions, run:
+For a complete list of available arguments:
 ```bash
 docker compose -f docker/docker-compose.yml run checkfiles --help
 ```

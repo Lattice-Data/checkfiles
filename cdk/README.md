@@ -1,109 +1,264 @@
-# Checkfiles Step Function Deployment
+# AWS Step Function Guide for Checkfiles
 
-This CDK (Cloud Development Kit) project deploys a Step Function workflow for the Checkfiles application. The Step Function orchestrates various AWS services to process and validate files according to the Checkfiles application requirements.
+This guide explains how to deploy and use the Checkfiles application using AWS Step Functions. This method is recommended for production environments and processing large numbers of files.
 
-## ⚠️ Warning
+## Table of Contents
+- [What is AWS Step Functions?](#what-is-aws-step-functions)
+- [Prerequisites](#prerequisites)
+- [Installation Guide](#installation-guide)
+- [Using Step Functions](#using-step-functions)
+- [Monitoring and Logs](#monitoring-and-logs)
+- [Common Parameters](#common-parameters)
+- [Troubleshooting](#troubleshooting)
+- [Advanced Configuration](#advanced-configuration)
 
-If you are not sure this is what you should be running, you should not be running it. This deployment affects production resources.
+## What is AWS Step Functions?
+
+AWS Step Functions is a serverless workflow service that lets you coordinate multiple AWS services into business-critical applications. For Checkfiles, it:
+
+- Orchestrates the file validation process
+- Manages scaling based on workload
+- Provides visual monitoring of the validation workflow
+- Handles error conditions automatically
+- Provides detailed logs and metrics
 
 ## Prerequisites
 
-- Node.js (v18 or later)
-- Python 3.11
-- AWS CLI configured with appropriate credentials
-- AWS CDK CLI
-- Required AWS permissions for deploying Step Functions and related resources
+Before you begin, ensure you have:
 
-## System Requirements
+- AWS Account with administrator permissions
+- [AWS CLI](https://aws.amazon.com/cli/) installed and configured
+- [Python 3.11](https://www.python.org/downloads/) installed
+- [Node.js v18+](https://nodejs.org/) installed
+- AWS CDK v2.1007.0+ installed:
+  ```bash
+  npm install -g aws-cdk@2.1007.0
+  ```
 
-- Operating System: Linux, macOS, or Windows
-- Minimum 4GB RAM
-- 2GB free disk space
+## Installation Guide
 
-## Installation
-
-1. Install AWS CDK (version 2.1007.0):
-   ```bash
-   npm install -g aws-cdk@2.1007.0
-   ```
-
-2. Create and activate Python virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install required Python packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## Stack Structure
-
-The CDK stack includes:
-- Step Function definition
-- IAM roles and policies
-- CloudWatch alarms and metrics
-- S3 bucket configurations
-- Lambda function integrations
-
-## Deployment
-
-To deploy the stack:
+### Step 1: Clone Repository and Set Up Environment
 
 ```bash
-cdk deploy RunCheckfilesStepFunctionProduction --profile lattice-prod
+# Clone the repository
+git clone https://github.com/Lattice-Data/checkfiles.git
+cd checkfiles/cdk
+
+# Create and activate Python virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-### Deployment Options
+### Step 2: Configure AWS Credentials
 
-- `--profile`: Specify AWS profile (default: lattice-prod)
-- `--require-approval`: Enable manual approval for sensitive changes
-- `--context`: Set context variables
+If you haven't configured AWS CLI already:
 
-## Testing
+```bash
+aws configure
+```
 
-After deployment:
-1. Verify Step Function state machine is created
-2. Check CloudWatch logs for any errors
-3. Test the Step Function with sample input
+You'll be prompted to enter:
+- AWS Access Key ID
+- AWS Secret Access Key
+- Default region (e.g., us-west-2)
+- Default output format (json recommended)
 
-## Monitoring
+### Step 3: Deploy the Step Function
 
-Monitor the deployment using:
-- CloudWatch Metrics
-- Step Function execution history
-- CloudWatch Logs
+```bash
+# Make sure you're in the cdk directory
+cd cdk
+
+# Deploy to production (replace with your AWS profile if necessary)
+cdk deploy RunCheckfilesStepFunctionProduction --profile your-profile-name
+```
+
+The deployment process:
+1. Creates AWS resources (Step Functions, Lambda functions, IAM roles, etc.)
+2. Shows deployment progress in the terminal
+3. Outputs the ARN of the Step Function when complete
+
+The deployment will take approximately 5-10 minutes. When it's done, you'll see output like:
+
+```
+✅ RunCheckfilesStepFunctionProduction
+
+Outputs:
+RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-2:123456789012:stateMachine:RunCheckfilesStepFunctionProduction
+```
+
+Make note of this ARN as you'll need it for the next steps.
+
+## Using Step Functions
+
+### Step 1: Open the AWS Console
+
+1. Log in to the [AWS Management Console](https://console.aws.amazon.com/)
+2. Navigate to the Step Functions service
+   - Type "Step Functions" in the search bar
+   - Or find it under "Services" > "Application Integration" > "Step Functions"
+
+### Step 2: Find Your State Machine
+
+1. In the Step Functions dashboard, click on "State machines"
+2. Look for "RunCheckfilesStepFunctionProduction" in the list
+3. Click on the state machine name
+
+### Step 3: Start a New Execution
+
+1. Click the "Start execution" button
+2. Enter execution input in JSON format:
+
+```json
+{
+  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz",
+  "file_format": "fastq",
+  "debug": true,
+  "threads": 4
+}
+```
+
+3. (Optional) Enter a custom execution name or use the auto-generated one
+4. Click "Start execution"
+
+### Step 4: Monitor the Execution
+
+Once started, you'll see a visualization of the workflow:
+
+1. Each step is represented as a box in the workflow diagram
+2. Steps change color to indicate their status:
+   - In progress: Blue
+   - Succeeded: Green
+   - Failed: Red
+
+3. The execution details panel shows:
+   - Execution status
+   - Start and end times
+   - Input/output data
+
+4. Click on individual steps to see details about that specific step
+
+## Monitoring and Logs
+
+### Viewing CloudWatch Logs
+
+Step Function executions generate logs that can be viewed in CloudWatch:
+
+1. Open the [CloudWatch Console](https://console.aws.amazon.com/cloudwatch/)
+2. Navigate to "Log groups" in the left sidebar
+3. Find log groups with names containing:
+   - `/aws/lambda/RunCheckfiles` (Lambda function logs)
+   - `/aws/states/RunCheckfilesStepFunction` (Step Function execution logs)
+
+4. Click on a log group, then click on the most recent log stream
+5. Use the search bar to filter logs for specific information
+
+### Setting Up CloudWatch Alarms (Optional)
+
+You can create alarms to notify you of issues:
+
+1. In the CloudWatch console, go to "Alarms" > "Create alarm"
+2. Click "Select metric"
+3. Navigate to "States" > "Metrics with no dimensions"
+4. Select "ExecutionsFailed" for your state machine
+5. Configure the threshold (e.g., alarm when ≥ 1)
+6. Set up notifications (e.g., email, SMS)
+7. Review and create the alarm
+
+## Common Parameters
+
+When starting a Step Function execution, you can provide these parameters:
+
+| Parameter | Type | Description | Required | Example |
+|-----------|------|-------------|----------|---------|
+| file_s3_uri | String | S3 URI of the file to validate | Yes | "s3://your-bucket/path/to/file.fastq.gz" |
+| file_format | String | Format of the file (fastq, h5, h5ad) | Yes | "fastq" |
+| debug | Boolean | Enable detailed debug output | No | true |
+| threads | Number | Number of threads to use for validation | No | 4 |
+| update | Boolean | Update backend with validation results | No | false |
+| update_s3_tags | Boolean | Add validation tags to S3 objects | No | false |
+| ignore_active_credentials | Boolean | Skip credential check for backend | No | false |
 
 ## Troubleshooting
 
-Common issues and solutions:
+### Deployment Failures
 
-1. **Deployment Failures**
-   - Check AWS credentials and permissions
-   - Verify all prerequisites are installed
-   - Review CloudFormation stack events
+If the `cdk deploy` command fails:
 
-2. **Step Function Errors**
-   - Check CloudWatch logs
-   - Verify IAM permissions
-   - Review Step Function execution history
+1. **Check AWS credentials**
+   ```bash
+   aws sts get-caller-identity
+   ```
+   This should show your account ID and user. If not, run `aws configure` again.
 
-3. **Resource Limits**
-   - Check AWS service quotas
-   - Verify region-specific limitations
+2. **Verify CDK prerequisites**
+   ```bash
+   cdk --version
+   python --version
+   ```
+   Ensure CDK version is 2.1007.0+ and Python is 3.11.
 
-## Cleanup
+3. **Review CloudFormation stack**
+   - Open the AWS CloudFormation console
+   - Look for stacks with names containing "RunCheckfiles"
+   - Check the "Events" tab for error messages
 
-To remove the stack:
+### Execution Failures
+
+If a Step Function execution fails:
+
+1. **Check input parameters**
+   - Verify the S3 URI is correct
+   - Ensure the file format is supported
+   - Check file permissions in S3
+
+2. **Review logs in CloudWatch**
+   - Find the execution ID in the Step Functions console
+   - Look for logs with that execution ID in CloudWatch
+   - Check for error messages
+
+3. **Verify S3 access**
+   - Confirm the Step Function has permissions to access the S3 bucket
+   - Try accessing the file manually with AWS CLI:
+     ```bash
+     aws s3 ls s3://your-bucket/path/to/file.fastq.gz
+     ```
+
+### Common Error Messages
+
+| Error Message | Likely Cause | Solution |
+|---------------|--------------|----------|
+| "Access Denied" | Insufficient permissions | Check IAM roles and bucket policies |
+| "File not found" | Incorrect S3 URI or missing file | Verify the file exists in S3 |
+| "Unsupported file format" | Format not recognized | Use one of: fastq, h5, h5ad |
+| "Validation failed" | File does not meet format requirements | Check file contents and integrity |
+| "Execution timed out" | File too large or process too slow | Increase timeout settings or use a smaller file |
+
+## Advanced Configuration
+
+For advanced users who need to modify the Step Function:
+
+### Updating the CDK Stack
 
 ```bash
-cdk destroy RunCheckfilesStepFunctionProduction --profile lattice-prod
+# Make changes to the CDK code (app.py or checkfiles_runner/)
+# Then deploy the changes
+cdk deploy RunCheckfilesStepFunctionProduction --profile your-profile-name
 ```
 
-## Support
+### Cleaning Up Resources
 
-For additional help:
-- AWS CDK Documentation: https://docs.aws.amazon.com/cdk/
-- AWS Step Functions Documentation: https://docs.aws.amazon.com/step-functions/
-- Contact the development team for specific issues
+To remove all deployed resources:
+
+```bash
+cdk destroy RunCheckfilesStepFunctionProduction --profile your-profile-name
+```
+
+**⚠️ Warning:** This will permanently delete all resources created by the CDK stack, including logs and metrics.
+
+### Configuring Timeout and Retry Settings
+
+To change timeout or retry settings, modify the Step Function definition in `checkfiles_runner/step_functions.py`.
