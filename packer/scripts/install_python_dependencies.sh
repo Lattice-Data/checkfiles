@@ -55,6 +55,13 @@ pip3 install --no-cache-dir \
     h5py==3.10.0 \
     requests==2.31.0
 
+# Install scientific computing packages
+echo "Installing scientific computing packages..."
+pip3 install --no-cache-dir \
+    scanpy>=1.9.0 \
+    pandas>=2.0.0 \
+    scipy>=1.11.0
+
 # Create src package directory if it doesn't exist
 echo "Setting up package directories..."
 SRC_DIR="${SITE_PACKAGES}/src"
