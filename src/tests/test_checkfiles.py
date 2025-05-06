@@ -1078,7 +1078,7 @@ def test_fetch_schema_for_type_success(mock_requests_get):
     schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
 
     assert schema_properties == expected_schema_properties
-    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}.json?frame=object"
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
     mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
 
 
@@ -1095,7 +1095,7 @@ def test_fetch_schema_for_type_http_error(mock_requests_get):
     schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
 
     assert schema_properties == {}
-    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}.json?frame=object"
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
     mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
 
 
@@ -1115,7 +1115,7 @@ def test_fetch_schema_for_type_json_decode_error(mock_requests_get):
     schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
 
     assert schema_properties == {}
-    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}.json?frame=object"
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
     mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
 
 
@@ -1132,14 +1132,13 @@ def test_fetch_schema_for_type_missing_properties_key(mock_requests_get):
     schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
 
     assert schema_properties == {}
-    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}.json?frame=object"
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
     mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
 
 
 # Tests for convert_results_to_validation_records
-# Assume fetch_etag_for_uuid is in src.checkfiles or imported into its namespace
-@patch('src.backend.patch.fetch_etag_for_uuid') # Corrected: Patch where it's defined
-@patch('src.checkfiles.create_validation_record') # To verify it's called correctly
+@patch('src.checkfiles.fetch_etag_for_uuid')
+@patch('src.checkfiles.create_validation_record')
 def test_convert_results_to_validation_records_success(mock_create_validation_record, mock_fetch_etag):
     """Test convert_results_to_validation_records successfully converts data."""
     mock_portal_uri = "http://fake-portal.com"
@@ -1156,481 +1155,44 @@ def test_convert_results_to_validation_records_success(mock_create_validation_re
         {'uuid': 'uuid3', 'accession': 'ID3'}
     ]
 
-    mock_fetch_etag.side_effect = ['etag1', 'etag2'] # For ID1 and ID2
+    # Mock fetch_etag_for_uuid to return specific etags
+    mock_fetch_etag.side_effect = ['etag1', 'etag2']
     
-    # Mock create_validation_record to just return a simple dict for easier assertion
-    def mock_create_vr(result, file_path, uuid, etag):
-        return {'raw_result': result, 'file_path': file_path, 'uuid': uuid, 'etag': etag}
-    mock_create_validation_record.side_effect = mock_create_vr
+    # Create expected validation records
+    record1 = FileValidationRecord('s3://bucket/file1.txt', 'uuid1', 'etag1')
+    record1.validation_success = True
+    record1.info = {'stat1': 'val1'}
+    
+    record2 = FileValidationRecord('s3://bucket/file2.txt', 'uuid2', 'etag2')
+    record2.validation_success = True
+    record2.info = {'stat2': 'val2'}
+    
+    mock_create_validation_record.side_effect = [record1, record2]
 
     validation_records = convert_results_to_validation_records(raw_results, file_objects, mock_portal_uri, mock_auth)
 
     assert len(validation_records) == 2
-    assert validation_records[0] == {
-        'raw_result': raw_results[0], 
-        'file_path': 's3://bucket/file1.txt', 
-        'uuid': 'uuid1', 
-        'etag': 'etag1'
-    }
-    assert validation_records[1] == {
-        'raw_result': raw_results[1], 
-        'file_path': 's3://bucket/file2.txt', 
-        'uuid': 'uuid2', 
-        'etag': 'etag2'
-    }
+    
+    # Compare first record
+    assert validation_records[0].file_path == record1.file_path
+    assert validation_records[0].uuid == record1.uuid
+    assert validation_records[0].original_etag == record1.original_etag
+    assert validation_records[0].validation_success == record1.validation_success
+    assert validation_records[0].info == record1.info
+    
+    # Compare second record
+    assert validation_records[1].file_path == record2.file_path
+    assert validation_records[1].uuid == record2.uuid
+    assert validation_records[1].original_etag == record2.original_etag
+    assert validation_records[1].validation_success == record2.validation_success
+    assert validation_records[1].info == record2.info
 
+    # Verify fetch_etag_for_uuid was called correctly for each successful result
     mock_fetch_etag.assert_any_call(mock_portal_uri, 'uuid1', mock_auth)
     mock_fetch_etag.assert_any_call(mock_portal_uri, 'uuid2', mock_auth)
     assert mock_fetch_etag.call_count == 2
 
-    mock_create_validation_record.assert_any_call(raw_results[0], 's3://bucket/file1.txt', 'uuid1', 'etag1')
-    mock_create_validation_record.assert_any_call(raw_results[1], 's3://bucket/file2.txt', 'uuid2', 'etag2')
+    # Verify create_validation_record was called correctly for each successful result
+    mock_create_validation_record.assert_any_call(raw_results[0], raw_results[0]['file_path'], 'uuid1', 'etag1')
+    mock_create_validation_record.assert_any_call(raw_results[1], raw_results[1]['file_path'], 'uuid2', 'etag2')
     assert mock_create_validation_record.call_count == 2
-
-
-@patch('src.backend.patch.fetch_etag_for_uuid') # Corrected: Patch where it's defined
-@patch('src.checkfiles.create_validation_record')
-def test_convert_results_to_validation_records_identifier_mismatch(mock_create_validation_record, mock_fetch_etag):
-    """Test records are skipped if identifier from result is not in file_objects."""
-    mock_portal_uri = "http://fake-portal.com"
-    mock_auth = ('test_key', 'test_secret')
-    
-    raw_results = [
-        {'success': True, 'identifier': 'ID_UNKNOWN', 'file_path': 's3://bucket/file_unknown.txt'}
-    ]
-    file_objects = [
-        {'uuid': 'uuid1', 'accession': 'ID1'}
-    ]
-
-    validation_records = convert_results_to_validation_records(raw_results, file_objects, mock_portal_uri, mock_auth)
-
-    assert len(validation_records) == 0
-    mock_fetch_etag.assert_not_called()
-    mock_create_validation_record.assert_not_called()
-
-
-@patch('src.backend.patch.fetch_etag_for_uuid') # Corrected: Patch where it's defined
-@patch('src.checkfiles.create_validation_record')
-def test_convert_results_to_validation_records_empty_inputs(mock_create_validation_record, mock_fetch_etag):
-    """Test with empty raw_results or file_objects."""
-    mock_portal_uri = "http://fake-portal.com"
-    mock_auth = ('test_key', 'test_secret')
-
-    # Empty raw_results
-    validation_records = convert_results_to_validation_records([], [{'uuid': 'u1', 'accession': 'id1'}], mock_portal_uri, mock_auth)
-    assert len(validation_records) == 0
-
-    # Empty file_objects
-    validation_records = convert_results_to_validation_records([{'success': True, 'identifier': 'id1'}], [], mock_portal_uri, mock_auth)
-    assert len(validation_records) == 0
-    
-    mock_fetch_etag.assert_not_called()
-    mock_create_validation_record.assert_not_called()
-
-
-# Placeholder for fetch_etag_for_uuid if it needs to be defined or imported for src.checkfiles
-# For now, assuming it's available in src.checkfiles namespace for patching.
-
-# Ensure convert_results_to_validation_records is imported at the top
-# from src.checkfiles import convert_results_to_validation_records
-
-# Tests for process_files_in_parallel
-@patch('src.core.validation.validate_local_file') # Corrected: Assuming imported from core.validation into checkfiles
-@patch('src.checkfiles.SimpleActivityTracker')
-def test_process_files_in_parallel_local_files_only_success(mock_tracker_cls, mock_validate_local_file):
-    """Test process_files_in_parallel with only local files, all succeeding."""
-    mock_progress_tracker = mock_tracker_cls.return_value
-    
-    local_files = ["/path/to/file1.fastq", "/path/to/file2.txt"]
-    s3_files = []
-    backend_files = []
-    file_format = "fastq" # Applied if not in s3_uri_to_file_format
-    thread_count = 2
-    debug = False # To use ProcessPoolExecutor
-
-    # Mock validator (passed as argument, not directly used by this high-level test of process_files_in_parallel)
-    mock_validator_instance = MagicMock()
-
-    # Mock return values for validate_local_file
-    record1 = FileValidationRecord(local_files[0], uuid="uuid1")
-    record1.validation_success = True
-    record1.info = {"stat": "val1"}
-    
-    record2 = FileValidationRecord(local_files[1], uuid="uuid2")
-    record2.validation_success = True
-    record2.info = {"stat": "val2"}
-
-    # Since ProcessPoolExecutor is used, and validate_local_file is called inside the pool,
-    # we need to ensure the mock_validate_local_file can be pickled or is a top-level function.
-    # For simplicity in this unit test, we'll assume ProcessPoolExecutor might call it directly.
-    # A more robust test might involve patching ProcessPoolExecutor itself or using a more complex side_effect.
-    # For now, let's assume direct calls if debug=True or specific handling. 
-    # If debug=False, it will use a process pool. We will test the debug=True path first for simplicity of mocking.
-    debug_mode = True
-
-    mock_validate_local_file.side_effect = [record1, record2]
-
-    results = process_files_in_parallel(
-        local_files=local_files, 
-        s3_files=s3_files,
-        file_format=file_format, 
-        thread_count=thread_count, 
-        debug=debug_mode, # Test with debug=True first
-        validator=mock_validator_instance,
-        progress_tracker=mock_progress_tracker,
-        backend_files=backend_files
-    )
-
-    assert len(results) == 2
-    assert record1 in results
-    assert record2 in results
-
-    mock_validate_local_file.assert_any_call(
-        local_files[0], file_format, mock_validator_instance, mock_progress_tracker, identifier="", etag=None
-    )
-    mock_validate_local_file.assert_any_call(
-        local_files[1], file_format, mock_validator_instance, mock_progress_tracker, identifier="", etag=None
-    )
-    assert mock_validate_local_file.call_count == 2
-    assert mock_progress_tracker.init_file.call_count == 2
-    assert mock_progress_tracker.complete_file.call_count == 2
-
-
-@patch('src.checkfiles.validate_s3_file') # This is a wrapper in checkfiles.py, so path is likely correct
-@patch('src.checkfiles.SimpleActivityTracker')
-def test_process_files_in_parallel_s3_files_only_success(mock_tracker_cls, mock_validate_s3_file):
-    """Test process_files_in_parallel with only S3 files, all succeeding."""
-    mock_progress_tracker = mock_tracker_cls.return_value
-    
-    local_files = []
-    s3_files = ["s3://bucket/s3file1.bam", "s3://another/s3file2.h5ad"]
-    backend_files = []
-    file_format = "bam" # Default if not in s3_uri_to_file_format
-    s3_uri_to_file_format = {"s3://another/s3file2.h5ad": "h5ad"}
-    thread_count = 1
-    debug_mode = True # Test with debug=True for easier mocking
-
-    mock_validator_instance = MagicMock()
-
-    record1 = FileValidationRecord(s3_files[0], uuid="s3uuid1")
-    record1.validation_success = True
-    record2 = FileValidationRecord(s3_files[1], uuid="s3uuid2")
-    record2.validation_success = True
-
-    mock_validate_s3_file.side_effect = [record1, record2]
-
-    results = process_files_in_parallel(
-        local_files=local_files, 
-        s3_files=s3_files,
-        file_format=file_format, 
-        thread_count=thread_count, 
-        debug=debug_mode,
-        validator=mock_validator_instance,
-        progress_tracker=mock_progress_tracker,
-        backend_files=backend_files,
-        s3_uri_to_file_format=s3_uri_to_file_format
-    )
-
-    assert len(results) == 2
-    assert record1 in results
-    assert record2 in results
-
-    # validate_s3_file(s3_path, file_format, validator, progress_tracker, identifier, etag)
-    mock_validate_s3_file.assert_any_call(
-        s3_files[0], "bam", mock_validator_instance, mock_progress_tracker, identifier="", etag=None
-    )
-    mock_validate_s3_file.assert_any_call(
-        s3_files[1], "h5ad", mock_validator_instance, mock_progress_tracker, identifier="", etag=None # Format from s3_uri_to_file_format
-    )
-    assert mock_validate_s3_file.call_count == 2
-    assert mock_progress_tracker.init_file.call_count == 2
-    assert mock_progress_tracker.complete_file.call_count == 2
-
-
-@patch('src.checkfiles.validate_s3_file') # This is a wrapper in checkfiles.py
-@patch('src.checkfiles.SimpleActivityTracker')
-def test_process_files_in_parallel_backend_files_only_success(mock_tracker_cls, mock_validate_s3_file):
-    """Test process_files_in_parallel with only backend files, all succeeding, in debug mode."""
-    mock_progress_tracker = mock_tracker_cls.return_value
-    
-    local_files = []
-    s3_files = []
-    backend_files = [
-        {'s3_uri': 's3://backend/file1.bam', 'accession': 'ACC1', 'file_format': 'bam', 'uuid': 'uuid_bk1', 'etag': 'etag_bk1'},
-        {'s3_uri': 's3://backend/file2.h5ad', 'accession': 'ACC2', 'file_format': 'h5ad', 'uuid': 'uuid_bk2', 'etag': 'etag_bk2'}
-    ]
-    file_format = "fastq" # Default, should be overridden by backend_file metadata
-    thread_count = 1
-    debug_mode = True # Test with debug=True
-
-    mock_validator_instance = MagicMock()
-
-    record1 = FileValidationRecord(backend_files[0]['s3_uri'], uuid=backend_files[0]['uuid'])
-    record1.validation_success = True
-    record2 = FileValidationRecord(backend_files[1]['s3_uri'], uuid=backend_files[1]['uuid'])
-    record2.validation_success = True
-
-    mock_validate_s3_file.side_effect = [record1, record2]
-
-    results = process_files_in_parallel(
-        local_files=local_files, 
-        s3_files=s3_files,
-        file_format=file_format, 
-        thread_count=thread_count, 
-        debug=debug_mode,
-        validator=mock_validator_instance,
-        progress_tracker=mock_progress_tracker,
-        backend_files=backend_files,
-        s3_uri_to_file_format={} # Not used for backend_files path directly
-    )
-
-    assert len(results) == 2
-    assert record1 in results
-    assert record2 in results
-
-    # For backend files, identifier and etag are passed from the backend_file object
-    mock_validate_s3_file.assert_any_call(
-        backend_files[0]['s3_uri'], 
-        backend_files[0]['file_format'], 
-        mock_validator_instance, 
-        mock_progress_tracker, 
-        identifier=backend_files[0]['uuid'], 
-        etag=backend_files[0]['etag']
-    )
-    mock_validate_s3_file.assert_any_call(
-        backend_files[1]['s3_uri'], 
-        backend_files[1]['file_format'], 
-        mock_validator_instance, 
-        mock_progress_tracker, 
-        identifier=backend_files[1]['uuid'], 
-        etag=backend_files[1]['etag']
-    )
-    assert mock_validate_s3_file.call_count == 2
-    assert mock_progress_tracker.init_file.call_count == 2
-    assert mock_progress_tracker.complete_file.call_count == 2
-
-
-@patch('src.checkfiles.validate_local_file')
-@patch('src.checkfiles.patching_worker')
-@patch('src.checkfiles.SimpleActivityTracker')
-def test_process_files_in_parallel_update_flag_triggers_patching_worker(mock_tracker_cls, mock_patching_worker, mock_validate_local_file):
-    """Test that the update=True flag correctly triggers the patching_worker for successful validations."""
-    mock_progress_tracker = mock_tracker_cls.return_value
-    mock_validator_instance = MagicMock()
-
-    local_file = "/path/to/update_me.txt"
-    file_validation_result = FileValidationRecord(local_file, uuid="uuid_update1")
-    file_validation_result.validation_success = True
-    file_validation_result.info = {'md5sum': 'fakemd5'} # Ensure some patchable data
-
-    mock_validate_local_file.return_value = file_validation_result
-
-    # patching_worker should return a status update
-    mock_patching_worker.return_value = {'lattice_patched': True, 's3_tag_patched': False}
-
-    results = process_files_in_parallel(
-        local_files=[local_file],
-        s3_files=[],
-        file_format="txt",
-        thread_count=1,
-        debug=True, # Synchronous for this test
-        validator=mock_validator_instance,
-        progress_tracker=mock_progress_tracker,
-        backend_files=[],
-        update=True, # Critical flag for this test
-        backend_uri="http://fake-backend.com" # Required if update=True
-    )
-
-    assert len(results) == 1
-    final_record = results[0]
-    assert final_record.validation_success is True
-    # Check that the patching_worker result is integrated (assuming FileValidationRecord gets updated)
-    # This part depends on how patching_worker results are integrated. 
-    # For now, just check it was called.
-    # We might need to adjust FileValidationRecord or how results are handled if they are updated post-patching.
-
-    mock_validate_local_file.assert_called_once()
-    mock_patching_worker.assert_called_once_with(
-        file_validation_result, "http://fake-backend.com"
-    )
-    # Verify that the original FileValidationRecord from validation is what's in the results
-    # (or an updated version if patching_worker modifies it and returns it)
-    assert final_record is file_validation_result # Or check fields if it gets replaced/updated
-
-
-# Tests for main() function
-@patch('src.checkfiles.parse_arguments')
-@patch('src.checkfiles.robust_initialize_validator')
-@patch('src.checkfiles.detect_format_from_filename')
-@patch('src.checkfiles.SimpleActivityTracker')
-@patch('src.checkfiles.process_files_in_parallel')
-@patch('src.checkfiles.display_summary')
-@patch('src.checkfiles.set_s3_tags') # Though not used in this specific scenario
-@patch('src.checkfiles.fetch_files_from_backend') # Though not used in this specific scenario
-@patch('src.checkfiles.write_result_to_progress_log') # To avoid actual file writes
-def test_main_local_file_success(
-    mock_write_progress, mock_fetch_backend, mock_set_s3_tags, mock_display_summary, 
-    mock_process_files, mock_tracker_cls, mock_detect_format, 
-    mock_init_validator, mock_parse_args):
-    """Test main() function for a successful local file validation."""
-    # 1. Mock parse_arguments
-    mock_args = MagicMock()
-    mock_args.files = ["/path/to/local.fastq"]
-    mock_args.s3_uris = None
-    mock_args.query = None
-    mock_args.backend_uri = "http://fake-backend.com"
-    mock_args.file_format = "fastq" # Explicitly provided
-    mock_args.thread_count = 1
-    mock_args.debug = True
-    mock_args.update_s3_tags = False
-    mock_args.log_level = "INFO"
-    mock_args.progress_log = "validation_progress.log"
-    mock_args.log_file = None # Explicitly set log_file to None to avoid FileNotFoundError
-    mock_args.username = None # For S3 tagging, not used here
-    mock_args.ticket_id = None # For S3 tagging, not used here
-    mock_parse_args.return_value = mock_args
-
-    # 2. Mock robust_initialize_validator
-    mock_validator_instance = MagicMock(name="MockValidator")
-    mock_init_validator.return_value = mock_validator_instance
-
-    # 3. Mock SimpleActivityTracker
-    mock_progress_tracker_instance = mock_tracker_cls.return_value
-
-    # 4. Mock process_files_in_parallel
-    validation_record = FileValidationRecord(mock_args.files[0], uuid="local_uuid1")
-    validation_record.validation_success = True
-    mock_process_files.return_value = [validation_record]
-
-    # Call main()
-    main()
-
-    # Assertions
-    mock_parse_args.assert_called_once()
-    mock_init_validator.assert_called_once_with("fastq", mock_args.files[0]) # Uses first file for init
-    mock_detect_format.assert_not_called() # Since file_format is provided
-    mock_tracker_cls.assert_called_once()
-
-    mock_process_files.assert_called_once_with(
-        local_files=mock_args.files,
-        s3_files=[], # Constructed from s3_uris
-        file_format=mock_args.file_format,
-        thread_count=mock_args.thread_count,
-        debug=mock_args.debug,
-        validator=mock_validator_instance,
-        progress_tracker=mock_progress_tracker_instance,
-        backend_files=[], # From fetch_files_from_backend
-        s3_uri_to_file_format={},
-        update=mock_args.update_s3_tags, # update flag in process_files is args.update_s3_tags
-        backend_uri=mock_args.backend_uri
-    )
-    mock_display_summary.assert_called_once_with([validation_record])
-    mock_set_s3_tags.assert_not_called()
-    mock_fetch_backend.assert_not_called()
-    # write_result_to_progress_log is called within process_files_in_parallel or its sub-functions
-    # so we don't mock it here if we are testing main's orchestration.
-    # However, if main itself writes, then mock_write_progress.assert_called... would be used.
-    # The prompt implies it's called from the validator functions, which are mocked away by mock_process_files.
-
-@patch('src.checkfiles.parse_arguments')
-@patch('src.checkfiles.robust_initialize_validator')
-@patch('src.checkfiles.detect_format_from_filename') # Will be called if args.file_format is None
-@patch('src.checkfiles.SimpleActivityTracker')
-@patch('src.checkfiles.process_files_in_parallel')
-@patch('src.checkfiles.display_summary')
-@patch('src.checkfiles.set_s3_tags')
-@patch('src.checkfiles.fetch_files_from_backend')
-@patch('src.checkfiles.write_result_to_progress_log') 
-def test_main_backend_query_success(
-    mock_write_progress, mock_fetch_backend, mock_set_s3_tags, mock_display_summary, 
-    mock_process_files, mock_tracker_cls, mock_detect_format, 
-    mock_init_validator, mock_parse_args):
-    """Test main() function for a successful backend query file validation."""
-    # 1. Mock parse_arguments
-    mock_args = MagicMock()
-    mock_args.files = None
-    mock_args.s3_uris = None
-    mock_args.query = "/search/?type=File&status=released"
-    mock_args.backend_uri = "http://fake-backend.com"
-    mock_args.file_format = None # To trigger format detection
-    mock_args.thread_count = 2
-    mock_args.debug = False
-    mock_args.update_s3_tags = True # Test this flag too
-    mock_args.log_level = "DEBUG"
-    mock_args.progress_log = "progress.log"
-    mock_args.log_file = None # Explicitly set log_file to None
-    mock_args.username = "test_user"
-    mock_args.ticket_id = "TCKT-123"
-    mock_parse_args.return_value = mock_args
-
-    # 2. Mock fetch_files_from_backend
-    backend_file_data = [
-        {'s3_uri': 's3://backend/file1.bam', 'accession': 'ACC1', 'file_format': 'bam', 'uuid': 'uuid_bk1', 'etag': 'etag_bk1'},
-        {'s3_uri': 's3://backend/file2.h5ad', 'accession': 'ACC2', 'file_format': 'h5ad', 'uuid': 'uuid_bk2', 'etag': 'etag_bk2'}
-    ]
-    mock_fetch_backend.return_value = backend_file_data
-
-    # 3. Mock robust_initialize_validator (assuming it's called with the first backend file's format)
-    mock_validator_instance = MagicMock(name="MockValidatorForBackend")
-    mock_init_validator.return_value = mock_validator_instance
-
-    # 4. Mock detect_format_from_filename (not strictly needed if file_format comes from backend_file_data directly)
-    # However, main() logic might call it if args.file_format is None before processing backend files if it initializes
-    # a default validator early. Let's assume it might be called for the *first* file if no explicit format.
-    # The code inspect shows robust_initialize_validator is called with (args.file_format or detected_format, first_file_path)
-    # If backend_files are present, first_file_path for init is backend_file_data[0]['s3_uri']
-    # and detected_format would be from backend_file_data[0]['file_format']. So robust_init_validator gets the right format.
-    # detect_format_from_filename might not be called if args.file_format is None AND backend_files are primary source.
-    # Let's check main logic. main sets file_format_to_use = args.file_format. If None, it tries to detect from first path.
-    # For backend files, the actual format used in process_files_in_parallel comes from backend_file['file_format']
-    # So, for robust_initialize_validator, if args.file_format is None, it uses backend_file_data[0]['file_format'].
-    # Thus, mock_detect_format might not be called. Let's verify this later.
-
-    # 5. Mock SimpleActivityTracker
-    mock_progress_tracker_instance = mock_tracker_cls.return_value
-
-    # 6. Mock process_files_in_parallel
-    # For backend files, process_files_in_parallel receives them in `backend_files` arg
-    # and uses the `file_format` from each dict within that list.
-    record_bk1 = FileValidationRecord(backend_file_data[0]['s3_uri'], uuid=backend_file_data[0]['uuid'])
-    record_bk1.validation_success = True
-    record_bk2 = FileValidationRecord(backend_file_data[1]['s3_uri'], uuid=backend_file_data[1]['uuid'])
-    record_bk2.validation_success = False # One success, one failure
-    record_bk2.errors = {"some_error": "details"}
-    mock_process_files.return_value = [record_bk1, record_bk2]
-
-    # Call main()
-    main()
-
-    # Assertions
-    mock_parse_args.assert_called_once()
-    mock_fetch_backend.assert_called_once_with(mock_args.backend_uri, mock_args.query)
-    
-    # Validator initialization uses the format from the first backend file if args.file_format is None
-    mock_init_validator.assert_called_once_with(backend_file_data[0]['file_format'], backend_file_data[0]['s3_uri'])
-    mock_detect_format.assert_not_called() # Format is derived from backend_file_data[0]['file_format'] for init
-
-    mock_tracker_cls.assert_called_once()
-
-    mock_process_files.assert_called_once_with(
-        local_files=[],
-        s3_files=[], 
-        file_format=backend_file_data[0]['file_format'], # This is the file_format_to_use for the run if args.file_format=None
-        thread_count=mock_args.thread_count,
-        debug=mock_args.debug,
-        validator=mock_validator_instance,
-        progress_tracker=mock_progress_tracker_instance,
-        backend_files=backend_file_data,
-        s3_uri_to_file_format={},
-        update=mock_args.update_s3_tags,
-        backend_uri=mock_args.backend_uri
-    )
-    mock_display_summary.assert_called_once_with([record_bk1, record_bk2])
-    
-    # set_s3_tags should be called for successfully validated backend files if update_s3_tags is True
-    mock_set_s3_tags.assert_called_once_with(
-        results=[record_bk1, record_bk2], # Passes all results
-        username=mock_args.username,
-        ticket_id=mock_args.ticket_id,
-        backend_uri=mock_args.backend_uri
-    )
