@@ -4,12 +4,5 @@ pytest-cov>=4.1.0
 coverage>=7.0.0
 requests-mock>=1.11.0
 
-# Scientific computing dependencies required for tests
-scipy>=1.11.0
-h5py>=3.13.0
-scanpy
-pandas
-numpy
-
-# Note: Core dependencies are installed from src/requirements.txt
-# This file contains additional dependencies needed for testing 
+# Note: Core dependencies are installed from setup.py
+# This file contains only additional dependencies needed for testing 
