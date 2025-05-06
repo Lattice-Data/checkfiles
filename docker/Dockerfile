@@ -47,8 +47,7 @@ RUN pip3 install --no-cache-dir \
 # Create required directories
 RUN mkdir -p /opt/checkfiles /app/logs
 
-# Copy Python code and requirements
-COPY src/requirements.txt /app/
+# Copy Python code and setup files
 COPY src /app/src
 COPY setup.py pyproject.toml /app/
 
@@ -59,7 +58,6 @@ python /app/src/checkfiles.py "$@"\n\
 
 # Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -e .
 
 # Make the script executable
