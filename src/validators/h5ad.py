@@ -306,7 +306,12 @@ class H5adValidator(BaseValidator): # Changed inheritance
         # CRITICAL CHECK - ALWAYS ENFORCE
         # This is a required field for all h5ad files
         if 'feature_types' not in adata.var.columns:
-            errors['var.feature_types'] = 'is missing'
+            errors['var.feature_types.missing'] = {
+                'message': 'Required field feature_types is missing in var columns',
+                'location': 'var.columns',
+                'field': 'feature_types',
+                'severity': 'critical'
+            }
             logger.warning("Required field 'feature_types' is missing in var columns")
             # Still add stats for file size, observation count etc.
             stats['validated'] = False
@@ -320,13 +325,26 @@ class H5adValidator(BaseValidator): # Changed inheritance
             key = self.FEATURE_TYPE_MAPPING.get(feature_name, feature_name)
             feature_counts.append({'feature_type': key, 'feature_count': v})
             if pd.isna(k):
-                 errors['var.feature_types[Undefined]'] = 'Feature type is missing/NaN'
+                errors[f'var.feature_types.undefined'] = {
+                    'message': 'Feature type is missing/NaN',
+                    'location': 'var.feature_types',
+                    'field': 'feature_types',
+                    'severity': 'error',
+                    'count': v
+                }
             elif feature_name not in self.FEATURE_TYPE_MAPPING:
-                errors[f'var.feature_types[{feature_name}]'] = 'not a valid feature type'
+                errors[f'var.feature_types.invalid'] = {
+                    'message': f'Invalid feature type: {feature_name}',
+                    'location': 'var.feature_types',
+                    'field': 'feature_types',
+                    'severity': 'error',
+                    'invalid_type': feature_name,
+                    'count': v
+                }
                 
         stats['feature_counts'] = feature_counts
     
-    def _validate_gene_ids(self, adata, errors: Dict[str, str], warnings: Dict[str, str], stats: Dict[str, Any]) -> None: # Added stats
+    def _validate_gene_ids(self, adata, errors: Dict[str, str], warnings: Dict[str, str], stats: Dict[str, Any]) -> None:
         """
         Validate gene IDs in the AnnData object.
         
@@ -339,14 +357,24 @@ class H5adValidator(BaseValidator): # Changed inheritance
         # CRITICAL CHECK - ALWAYS ENFORCE
         # This is a required field for all h5ad files
         if 'gene_ids' not in adata.var.columns:
-            errors['var.gene_ids'] = 'is missing'
+            errors['var.gene_ids.missing'] = {
+                'message': 'Required field gene_ids is missing in var columns',
+                'location': 'var.columns',
+                'field': 'gene_ids',
+                'severity': 'critical'
+            }
             logger.warning("Required field 'gene_ids' is missing in var columns")
             # Ensure validation status is captured
             stats['validated'] = False
             # Check if index itself might contain gene IDs
             if all(g.startswith('ENS') for g in adata.var.index):
-                 warnings['var.gene_ids_missing_but_index_ok'] = 'var.gene_ids is missing, but var.index contains ENS IDs.'
-                 stats['feature_keys'] = ['Ensembl gene ID'] # Assume index is feature key
+                warnings['var.gene_ids.index_fallback'] = {
+                    'message': 'var.gene_ids is missing, but var.index contains ENS IDs',
+                    'location': 'var.index',
+                    'field': 'gene_ids',
+                    'severity': 'warning'
+                }
+                stats['feature_keys'] = ['Ensembl gene ID']
             return
             
         # Ensure gene_ids is treated as string type for checks
@@ -361,10 +389,14 @@ class H5adValidator(BaseValidator): # Changed inheritance
             if len(not_ensg) > 0:
                 # Report only a sample if too many
                 sample_size = min(len(not_ensg), 5)
-                errors['var.gene_ids_not_ensg'] = (
-                    f"{len(not_ensg)} Gene Expression features in var.gene_ids "
-                    f"not ENS-formatted (e.g., {not_ensg[:sample_size]})"
-                )
+                errors['var.gene_ids.format'] = {
+                    'message': f'Gene Expression features in var.gene_ids not ENS-formatted',
+                    'location': 'var.gene_ids',
+                    'field': 'gene_ids',
+                    'severity': 'error',
+                    'count': len(not_ensg),
+                    'examples': not_ensg[:sample_size]
+                }
                 
             # Check gene versions outside of Peaks and Antibody Capture
             non_special_mask = (
@@ -374,19 +406,28 @@ class H5adValidator(BaseValidator): # Changed inheritance
             with_version = [g for g in gene_ids_series[non_special_mask] if '.' in g]
         else:
             # If no feature_types column, just check all gene_ids for versions
-            warnings['missing_feature_types_for_gene_id_check'] = "Cannot definitively check gene ID versions without 'feature_types' column."
+            warnings['var.gene_ids.version_check'] = {
+                'message': "Cannot definitively check gene ID versions without 'feature_types' column",
+                'location': 'var.gene_ids',
+                'field': 'gene_ids',
+                'severity': 'warning'
+            }
             with_version = [g for g in gene_ids_series[gene_ids_series.notna()] if '.' in g]
             
         if len(with_version) > 0:
             # Report only a sample if too many
             sample_size = min(len(with_version), 5)
-            errors['var.gene_ids_version_present'] = (
-                f"{len(with_version)} non-peak/antibody gene IDs contain versions "
-                f"('.') which should be removed (e.g., {with_version[:sample_size]})"
-            )
+            errors['var.gene_ids.version'] = {
+                'message': 'Non-peak/antibody gene IDs contain versions (.) which should be removed',
+                'location': 'var.gene_ids',
+                'field': 'gene_ids',
+                'severity': 'error',
+                'count': len(with_version),
+                'examples': with_version[:sample_size]
+            }
             
         # Validate PAR_Y genes
-        self._validate_par_y_genes(adata, errors) # Pass adata directly
+        self._validate_par_y_genes(adata, errors)
             
         # Check gene versions column if it exists
         if 'gene_versions' in adata.var.columns:
@@ -397,10 +438,14 @@ class H5adValidator(BaseValidator): # Changed inheritance
             without_version_dot = [g for g in gene_versions_series[version_mask] if '.' not in g]
             if len(without_version_dot) > 0:
                 sample_size = min(len(without_version_dot), 5)
-                errors['var.gene_versions_format'] = (
-                    f"{len(without_version_dot)} IDs in var.gene_versions lack version suffix "
-                    f"('.' format) (e.g., {without_version_dot[:sample_size]})"
-                )
+                errors['var.gene_versions.format'] = {
+                    'message': 'IDs in var.gene_versions lack version suffix (.)',
+                    'location': 'var.gene_versions',
+                    'field': 'gene_versions',
+                    'severity': 'error',
+                    'count': len(without_version_dot),
+                    'examples': without_version_dot[:sample_size]
+                }
                 
         # Check if all feature keys (index) are Ensembl gene IDs if not already set
         if 'feature_keys' not in stats and all(isinstance(g, str) and g.startswith('ENS') for g in adata.var.index):
@@ -418,49 +463,78 @@ class H5adValidator(BaseValidator): # Changed inheritance
             gene_ids_series = adata.var['gene_ids'].astype(str)
             has_gene_versions = 'gene_versions' in adata.var.columns
             if has_gene_versions:
-                 gene_versions_series = adata.var['gene_versions'].astype(str)
+                gene_versions_series = adata.var['gene_versions'].astype(str)
 
             found_par_y_error = False # Flag to see if we find any PAR_Y
 
             # Iterate through all gene IDs
             for idx, g_id in gene_ids_series.items():
-                 # --- Add detailed logging here ---
-                 logger.debug(f"Checking g_id: {repr(g_id)} (Type: {type(g_id)})") 
-                 # --- End logging ---
-                 # Use case-insensitive check for finding candidates
-                 if 'PAR_Y' in g_id.upper(): 
+                # Use case-insensitive check for finding candidates
+                if 'PAR_Y' in g_id.upper(): 
                     found_par_y_error = True # Mark that we found one
                     logger.debug(f"Checking potential PAR_Y gene ID: {g_id}")
                     
-                    # --- Check Suffix ---
+                    # Check Suffix
                     if not g_id.endswith('_PAR_Y'):
-                         errors[f'PAR_Y_id_suffix[{g_id}]'] = f"Expecting PAR_Y gene ID '{g_id}' to end with '_PAR_Y'"
-                         logger.warning(f"PAR_Y suffix error for {g_id}")
-                         # Don't check other things if suffix is wrong
-                         continue 
-                         
-                    # --- Check Duplication (only for correctly suffixed) ---
+                        errors[f'var.gene_ids.par_y.suffix'] = {
+                            'message': f"PAR_Y gene ID '{g_id}' must end with '_PAR_Y'",
+                            'location': 'var.gene_ids',
+                            'field': 'gene_ids',
+                            'severity': 'error',
+                            'gene_id': g_id
+                        }
+                        logger.warning(f"PAR_Y suffix error for {g_id}")
+                        continue 
+                        
+                    # Check Duplication (only for correctly suffixed)
                     matching_symbols = adata.var.index[gene_ids_series == g_id]
                     if len(matching_symbols) < 2:
-                         errors[f'PAR_Y_duplication[{g_id}]'] = f'Expecting gene ID {g_id} to correspond to at least 2 symbols (found {len(matching_symbols)})'
-                         logger.warning(f"PAR_Y duplication error for {g_id}")
-                         
-                    # --- Check Version Consistency (only for correctly suffixed) ---
+                        errors[f'var.gene_ids.par_y.duplication'] = {
+                            'message': f'PAR_Y gene ID {g_id} must correspond to at least 2 symbols',
+                            'location': 'var.gene_ids',
+                            'field': 'gene_ids',
+                            'severity': 'error',
+                            'gene_id': g_id,
+                            'symbol_count': len(matching_symbols)
+                        }
+                        logger.warning(f"PAR_Y duplication error for {g_id}")
+                        
+                    # Check Version Consistency (only for correctly suffixed)
                     if has_gene_versions:
                         # Get version corresponding to this specific index `idx`
                         ver = gene_versions_series.loc[idx]
                         if pd.notna(ver) and '.' in ver:
                             base_id_from_version = '_'.join([ver.split('.')[0]] + ver.split('_')[1:])
                             if g_id != base_id_from_version:
-                                errors[f'PAR_Y_version_mismatch[{g_id}]'] = f"PAR_Y gene ID '{g_id}' does not match derived ID from version '{ver}' ('{base_id_from_version}')"
+                                errors[f'var.gene_ids.par_y.version_mismatch'] = {
+                                    'message': f"PAR_Y gene ID '{g_id}' does not match derived ID from version '{ver}'",
+                                    'location': 'var.gene_ids',
+                                    'field': 'gene_ids',
+                                    'severity': 'error',
+                                    'gene_id': g_id,
+                                    'version': ver,
+                                    'expected_id': base_id_from_version
+                                }
                         elif pd.notna(ver):
-                            errors[f'PAR_Y_version_format[{g_id}]'] = f"PAR_Y gene version '{ver}' for ID '{g_id}' lacks '.' format"
+                            errors[f'var.gene_ids.par_y.version_format'] = {
+                                'message': f"PAR_Y gene version '{ver}' lacks '.' format",
+                                'location': 'var.gene_ids',
+                                'field': 'gene_ids',
+                                'severity': 'error',
+                                'gene_id': g_id,
+                                'version': ver
+                            }
 
             if not found_par_y_error:
-                 logger.debug("No gene IDs containing 'PAR_Y' were found during iteration.")
+                logger.debug("No gene IDs containing 'PAR_Y' were found during iteration.")
 
         except Exception as e:
-            errors['par_y_check_error'] = f"Error during PAR_Y gene validation: {str(e)}"
+            errors['var.gene_ids.par_y.error'] = {
+                'message': f"Error during PAR_Y gene validation: {str(e)}",
+                'location': 'var.gene_ids',
+                'field': 'gene_ids',
+                'severity': 'error'
+            }
             logger.warning(f"Error validating PAR_Y genes: {e}", exc_info=True)
 
     def _validate_genomes(self, adata, stats: Dict[str, Any]) -> None:
@@ -634,8 +708,8 @@ class H5adValidator(BaseValidator): # Changed inheritance
         # CRITICAL CHECK: If certain critical errors exist, always override valid status
         # This ensures validation always fails for missing required fields
         critical_errors = ['var.feature_types', 'var.gene_ids']
-        if errors and any(error in errors for error in critical_errors):
-            logger.warning(f"Critical errors found: {[e for e in critical_errors if e in errors]}")
+        if errors and any(error.startswith(critical_error) for critical_error in critical_errors for error in errors):
+            logger.warning(f"Critical errors found: {[e for e in errors if any(e.startswith(ce) for ce in critical_errors)]}")
             result['valid'] = False
             # Ensure the validated flag is explicitly set in stats
             if 'stats' in result and result['stats'] is not None:

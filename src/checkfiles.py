@@ -756,17 +756,35 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                     file_path = result.file_path if isinstance(result, FileValidationRecord) else result.get('file_path', 'unknown')
                     if isinstance(result, FileValidationRecord):
                         success = result.validation_success
-                        results = {'valid': result.info.get('valid', False), 'errors': result.errors}
+                        # For the tracker, results should be a simple dict for errors if not successful
+                        results_for_tracker = {'valid': result.info.get('valid', False), 'errors': result.errors, 'stats': result.info}
                     else:
                         success = result.get('success', False)
-                        results = result.get('results', {})
+                        results_for_tracker = result.get('results', {})
                     
                     if success:
-                        progress_tracker.complete_file(file_path, True, results)
+                        progress_tracker.complete_file(file_path, True, results_for_tracker)
                     else:
-                        error_msg = results.get('errors', {}).get('validation_error', 'Unknown error')
-                        logger.error(f"Validation failed for {file_path}: {error_msg}")
-                        progress_tracker.complete_file(file_path, False, {"error": error_msg})
+                        # Construct a detailed error message for logging and tracker
+                        error_detail_for_log_and_tracker = "Unknown error"
+                        actual_errors_dict = result.errors if isinstance(result, FileValidationRecord) else results_for_tracker.get('errors', {})
+                        
+                        if actual_errors_dict and isinstance(actual_errors_dict, dict):
+                            error_messages = []
+                            for err_key, err_val in actual_errors_dict.items():
+                                if isinstance(err_val, dict) and 'message' in err_val:
+                                    error_messages.append(f"{err_key}: {err_val['message']}")
+                                elif isinstance(err_val, str):
+                                    error_messages.append(f"{err_key}: {err_val}")
+                                else:
+                                    error_messages.append(f"{err_key}: {str(err_val)}") # Catch-all for other types
+                            if error_messages:
+                                error_detail_for_log_and_tracker = "; ".join(error_messages)
+                        elif isinstance(actual_errors_dict, str): # If errors is just a string
+                            error_detail_for_log_and_tracker = actual_errors_dict
+
+                        logger.error(f"Validation indicated failure for {file_path}. Errors: {error_detail_for_log_and_tracker}")
+                        progress_tracker.complete_file(file_path, False, {"error": error_detail_for_log_and_tracker})
                 
                 # Write each result to validation_progress.log as it completes
                 write_result_to_progress_log(result)
@@ -791,16 +809,58 @@ def display_summary(all_results: List[FileValidationRecord]) -> None:
     Args:
         all_results: List of FileValidationRecord objects
     """
-    total = len(all_results)
-    successful = sum(1 for r in all_results if r.validation_success)
-    valid = sum(1 for r in all_results if r.validation_success and r.info.get('valid', False))
+    total_files = len(all_results)
+    count_content_valid = 0
+    count_content_invalid = 0
+    count_processing_failed = 0
+
+    # Define keys that typically indicate a processing/infrastructure error
+    # set by core.validation functions, rather than a file content validation error
+    # from a specific format validator.
+    processing_failure_error_keys = {
+        'validation_error',  # Generic error from core.validation
+        'download_error',
+        'stream_error',
+        'file_not_found', # As set by core.validation or validators before content check
+        'validator_initialization_failed', # If core.validation indicates this
+        # Errors from H5AD/H5Py that occur before/during scanpy content validation
+        'is_hdf5', # e.g., "File is not a valid HDF5 format."
+        'h5py_open_error',
+        'is_h5py_check_error',
+        'scanpy_read_error', # If scanpy itself fails to read/parse the file structure
+        'file_existence' # From H5adValidator if file not found
+    }
+
+    for r in all_results:
+        if r.validation_success:
+            # validation_success being True means the validator ran
+            # and deemed the content valid.
+            count_content_valid += 1
+        else:
+            # validation_success is False. This could be due to:
+            # 1. A processing failure (e.g., download, file open, validator init).
+            # 2. A content validation failure (validator ran, found content errors).
+            is_processing_failure = False
+            if r.errors:
+                # Check if any of the reported error keys indicate a processing failure.
+                if any(err_key in processing_failure_error_keys for err_key in r.errors.keys()):
+                    is_processing_failure = True
+                # Handle cases where r.errors might be a string (though less likely for FileValidationRecord)
+                elif isinstance(r.errors, str) and any(pf_key in r.errors for pf_key in processing_failure_error_keys):
+                    is_processing_failure = True
+            
+            if is_processing_failure:
+                count_processing_failed += 1
+            else:
+                # If not a clear processing failure, and validation_success is False,
+                # it's considered a content invalidity.
+                count_content_invalid += 1
     
     print("\n=== Validation Summary ===")
-    print(f"Total files: {total}")
-    print(f"Successfully processed: {successful}")
-    print(f"Valid files: {valid}")
-    print(f"Invalid files: {successful - valid}")
-    print(f"Failed to process: {total - successful}")
+    print(f"Total files submitted: {total_files}")
+    print(f"Files with valid content: {count_content_valid}")
+    print(f"Files with invalid content: {count_content_invalid}")
+    print(f"Files that failed processing (e.g., download/read errors): {count_processing_failed}")
     
     # Print detailed results
     print("\n=== Detailed Results ===")
@@ -812,7 +872,7 @@ def display_summary(all_results: List[FileValidationRecord]) -> None:
         valid = info.get('valid', False) if success else False
 
         if success:
-            validity = "Valid" if valid else "Invalid"
+            validity = "Valid" # If success is true, content is valid
             print(f"{file_path}: {validity}")
             
             # Print hash values if they exist
@@ -833,12 +893,42 @@ def display_summary(all_results: List[FileValidationRecord]) -> None:
                 if "content_md5sum" in info:
                     print(f"  Content MD5: {info['content_md5sum']}")
             
-            if not valid:
-                print(f"  Errors: {errors}")
-            if isinstance(result, dict) and result.get('results', {}).get('warnings'):
-                print(f"  Warnings: {result['results']['warnings']}")
-        else:
-            print(f"{file_path}: Failed - {errors.get('validation_error', 'Unknown error')}")
+            if not valid and errors: # This 'valid' is info.get('valid'), 'success' is record.validation_success
+                                     # If success is True, valid will also be True. This block seems unreachable if success is True.
+                                     # Let's simplify: if success (content is valid), no content errors to print here.
+                pass # Errors for valid files are not expected here.
+            if isinstance(result, dict) and result.get('results', {}).get('warnings'): # old structure, less relevant now
+                warnings_dict = result.get('results', {}).get('warnings')
+                if warnings_dict:
+                    print(f"  Warnings: {warnings_dict}")
+            elif isinstance(result, FileValidationRecord) and result.info.get('warnings'): # new structure
+                 warnings_dict = result.info.get('warnings')
+                 if warnings_dict:
+                    print(f"  Warnings:")
+                    for warn_key, warn_value in warnings_dict.items():
+                        if isinstance(warn_value, dict) and 'message' in warn_value:
+                             print(f"    - {warn_value['message']}")
+                        else:
+                             print(f"    - {str(warn_value)}")
+
+        else: # success (FileValidationRecord.validation_success) is False
+            # Determine if it was a processing failure or content invalidity for the message
+            is_processing_failure_detail = False
+            if r.errors and any(err_key in processing_failure_error_keys for err_key in r.errors.keys()):
+                is_processing_failure_detail = True
+
+            if is_processing_failure_detail:
+                print(f"{file_path}: Failed during processing")
+            else:
+                print(f"{file_path}: Invalid content")
+
+            if errors:
+                print("  Errors:")
+                for error_key, error_value in errors.items():
+                    if isinstance(error_value, dict):
+                        print(f"    - {error_value.get('message', error_key)}")
+                    else:
+                        print(f"    - {error_value}")
 
 def detect_format_from_filename(file_path: str) -> str:
     """Detect the likely format of a file based on its file extension.

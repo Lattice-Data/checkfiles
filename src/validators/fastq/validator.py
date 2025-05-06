@@ -105,6 +105,7 @@ class FastqValidator(BaseValidator):
         errors = {}
         warnings = {}
         stats = {} # Initialize stats dict
+        validated = False  # Explicitly track validation status
         
         try:
             logger.debug("Starting FASTQ stream validation")
@@ -152,6 +153,9 @@ class FastqValidator(BaseValidator):
                     errors={"invalid_format": error_detail}
                 )
             
+            # Mark basic format validation as passed
+            validated = True
+            
             # Get statistics collected during validation
             format_stats = self.statistics.get_statistics()
             # Update the main stats dictionary with format-specific stats
@@ -171,9 +175,10 @@ class FastqValidator(BaseValidator):
             if self.mismatched_ids:
                 errors["mismatched_ids"] = f"Found {len(self.mismatched_ids)} records with mismatched IDs"
             
-            # Determine if valid
-            valid = len(errors) == 0
-            logger.debug(f"Final validation result: valid={valid}, errors={len(errors)}, warnings={len(warnings)}")
+            # Determine validity - require both format validation AND no errors
+            # This is a change from the previous approach where only errors were checked
+            valid = validated and len(errors) == 0
+            logger.debug(f"Final validation result: valid={valid}, validated={validated}, errors={len(errors)}, warnings={len(warnings)}")
             
             return self.format_validation_result(
                 valid=valid,
@@ -210,6 +215,7 @@ class FastqValidator(BaseValidator):
         """
         line_count = 0
         current_block = []
+        read_count = 0  # Track the number of FASTQ reads processed
         
         # Determine the actual stream to read from (handle decompression)
         validation_stream = None # Renamed for clarity
@@ -250,6 +256,8 @@ class FastqValidator(BaseValidator):
                 
                 # Process complete blocks (4 lines per FASTQ record)
                 if len(current_block) == 4:
+                    read_count += 1
+                    
                     # 1. Check header line starts with @
                     if not current_block[0].startswith(b'@'):
                         logger.debug(f"Invalid header line at line {line_count-3}")
@@ -358,7 +366,15 @@ class FastqValidator(BaseValidator):
                     line_count
                 )
             
-            logger.debug("FASTQ validation successful")
+            # File must contain at least one read to be valid
+            if read_count == 0:
+                logger.debug("No valid FASTQ reads found in file")
+                return FastqValidationResult.invalid(
+                    "No valid FASTQ reads found in file",
+                    line_count
+                )
+            
+            logger.debug(f"FASTQ validation successful - {read_count} reads processed")
             return FastqValidationResult.valid()
             
         except Exception as e:
@@ -392,6 +408,34 @@ class FastqValidator(BaseValidator):
     def get_last_instrument_types(self) -> str:
         """Get instrument types from the last validation as a pipe-separated string."""
         return "|".join(self.header_parser.instrument_types)
+
+    def format_validation_result(self, valid: bool, errors: Dict[str, str] = None, 
+                                warnings: Dict[str, str] = None, stats: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Format the validation result in a standard way.
+        
+        Args:
+            valid: Whether the file content is valid
+            errors: Dictionary of validation errors (if any)
+            warnings: Dictionary of validation warnings (if any)
+            stats: Dictionary of file statistics (if any)
+            
+        Returns:
+            Dictionary with standard validation result format
+        """
+        result = {
+            'valid': valid,
+            'errors': errors or {},
+            'warnings': warnings or {},
+            'stats': stats or {}
+        }
+        
+        # Ensure validated flag is explicitly set in stats
+        if 'stats' in result and result['stats'] is not None:
+            result['stats']['validated'] = valid
+        else:
+            result['stats'] = {'validated': valid}
+        
+        return result
 
 # Helper class for concatenating streams
 class CompositeStream:

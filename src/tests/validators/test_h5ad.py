@@ -235,8 +235,8 @@ def test_validate_h5ad_missing_columns(validator, missing_cols_h5ad_file):
     print(result) # Debug output
     assert result['valid'] is False
     assert 'errors' in result
-    assert 'var.feature_types' in result['errors']
-    assert 'var.gene_ids' in result['errors']
+    assert 'var.feature_types.missing' in result['errors']
+    assert 'var.gene_ids.missing' in result['errors']
 
 @pytest.mark.skipif(not H5PY_AVAILABLE, reason="h5py needed")
 def test_validate_non_hdf5_file(validator, non_hdf5_file):
