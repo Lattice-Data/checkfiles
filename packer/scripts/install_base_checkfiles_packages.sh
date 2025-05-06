@@ -17,6 +17,14 @@ sudo apt-get -y install \
     awscli \
     jq \
     pkg-config \
-    libssl-dev
+    libssl-dev \
+    gcc \
+    g++ \
+    libhdf5-dev \
+    wget \
+    unzip \
+    libcurl4-gnutls-dev \
+    libncurses5-dev \
+    libncursesw5-dev
 
 echo "Base package installation completed."

@@ -27,6 +27,9 @@ def parse_arguments() -> argparse.Namespace:
   # Validate multiple S3 files
   ./src/checkfiles.py -f fastq -s3 s3://bucket/file1.fastq.gz,s3://bucket/file2.fastq.gz
   
+  # Validate H5AD single-cell matrix files
+  ./src/checkfiles.py -f h5ad -l path/to/anndata.h5ad
+  
   # Validate files using a backend query
   ./src/checkfiles.py --backend-uri https://example.com/api/ --query type=File&accession=ABCD1234
   
@@ -39,7 +42,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-s3', '--s3-file', help='Specify S3 file(s) as comma-separated paths')
     parser.add_argument('-l', '--local-file', help='Specify local file(s) to validate as comma-separated paths')
     parser.add_argument('-f', '--file-format', 
-                        help='Specify the file format (e.g., fastq). Required when using -l or -s3, but must not be used with --backend-uri and --query.')
+                        help='Specify the file format (e.g., fastq, h5ad, hdf5). Required when using -l or -s3, but must not be used with --backend-uri and --query.')
     parser.add_argument('-d', '--debug', action='store_true', 
                         help='Enable debug output')
     parser.add_argument('-t', '--threads', type=int, default=default_threads, 

@@ -32,21 +32,19 @@ def get_checkfiles_tag():
 
 def get_instance_type_from_number_of_files_pending(number_of_files_pending: int):
     if number_of_files_pending <= 2:
-        return 'c6a.large'
+        return 'c7g.large'
     elif number_of_files_pending <= 4:
-        return 'c6a.xlarge'
+        return 'c7g.xlarge'
     elif number_of_files_pending <= 8:
-        return 'c6a.2xlarge'
+        return 'c7g.2xlarge'
     elif number_of_files_pending <= 16:
-        return 'c6a.4xlarge'
+        return 'c7g.4xlarge'
     elif number_of_files_pending <= 32:
-        return 'c6a.8xlarge'
+        return 'c7g.8xlarge'
     elif number_of_files_pending <= 128:
-        return 'c6a.12xlarge'
-    elif number_of_files_pending <= 512:
-        return 'c6a.16xlarge'
+        return 'c7g.12xlarge'
     else:
-        return 'c6a.24xlarge'
+        return 'c7g.16xlarge'
 
 
 def create_checkfiles_instance(event, context):
@@ -72,6 +70,12 @@ def create_checkfiles_instance(event, context):
     echo "==== Starting checkfiles runtime setup ===="
     cd /home/ubuntu
     
+    # Set up scratch space on the existing boot volume
+    echo "==== Setting up scratch space ===="
+    mkdir -p /mnt/scratch
+    chmod 777 /mnt/scratch
+    chown ubuntu:ubuntu /mnt/scratch
+    
     # Clone repository with specific tag
     echo "==== Cloning checkfiles repository ===="
     git clone https://github.com/Lattice-Data/checkfiles.git --branch {tag} --single-branch
@@ -81,6 +85,7 @@ def create_checkfiles_instance(event, context):
     echo "==== Setting up environment variables ===="
     echo 'export PYTHONPATH=/home/ubuntu/checkfiles:' > /home/ubuntu/.env_checkfiles
     echo 'export CHECKFILES_LOG_DIR=/home/ubuntu/checkfiles' >> /home/ubuntu/.env_checkfiles
+    echo 'export SCRATCH_DIR=/mnt/scratch' >> /home/ubuntu/.env_checkfiles
     chmod +x /home/ubuntu/.env_checkfiles
     
     # Set proper permissions
@@ -99,7 +104,7 @@ def create_checkfiles_instance(event, context):
             'DeleteOnTermination': True,
             'Encrypted': False,
             'VolumeSize': 500,
-            'VolumeType': 'gp2',
+            'VolumeType': 'gp3',
         }
     }
 

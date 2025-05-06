@@ -11,3 +11,4 @@ globs: **/*.py
 - Use Pylint for linting.
 - Follow PEP 8 and project-specific rules.
 - Use flake8 to enforce PEP 8.
+- Always initiate conda lattice environment before code execution in terminal.

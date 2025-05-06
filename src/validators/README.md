@@ -1,13 +1,76 @@
-# File Validators
+## Validators Overview
 
-This directory contains validators for different file formats used in scientific and bioinformatics applications.
+This module provides file format validation for various scientific data formats:
 
-## Available Validators
+- **FASTQ**: Validates FASTQ format files, including sequence quality, read names, and file structure.
+- **HDF5**: Validates HDF5 format files, including structure and attributes.
+- **H5AD**: Validates AnnData (H5AD) format files for single-cell genomics data.
 
-- **BAM**: Validates Binary Alignment/Map files using samtools.
-- **CRAM**: Validates CRAM format files using samtools.
-- **FASTQ**: Validates FASTQ sequence files with quality scores.
-- **HDF5**: Validates HDF5 hierarchical data format files.
+## General Design
+
+Each validator implements a consistent interface:
+
+- `validate_file(file_path)`: Validates a file on disk
+- `validate_stream(input_stream, is_gzipped)`: Validates a file stream (for S3 streaming)
+
+### Validation Results
+
+All validators return a standardized result dictionary:
+
+```python
+{
+    "valid": bool,              # Whether the file passed validation
+    "errors": {                 # Dictionary of errors encountered
+        "error_type": "error message"
+    },
+    "warnings": {               # Dictionary of warnings (non-critical issues)
+        "warning_type": "warning message"
+    },
+    "stats": {                  # Statistics about the file
+        "file_size": int,       # Size in bytes
+        "read_count": int,      # Number of reads (for sequence data)
+        "read_length": int,     # Average read length (for sequence data)
+        # Other format-specific stats
+    }
+}
+```
+
+## Validator Types
+
+### FASTQ Validator
+
+The FASTQ validator performs several checks:
+
+1. File format validation (correct FASTQ structure)
+2. Read name consistency
+3. Quality score validation
+4. Base composition analysis
+5. Read length statistics
+
+### HDF5 Validator
+
+The HDF5 validator checks:
+
+1. File format validity
+2. Structure compliance
+3. Required attributes
+
+### H5AD Validator
+
+The H5AD (AnnData) validator extends the HDF5 validator with specific checks for:
+
+1. AnnData format compliance
+2. Cell and gene metadata presence
+3. Matrix data integrity
+
+## Implementation Details
+
+- **FASTQ**: Uses custom parsing with validation rules
+- **HDF5/H5AD**: Uses h5py for validation
+
+## Dependencies
+
+- **h5py**: Required for HDF5 and H5AD validation
 
 ## Core Features
 
@@ -89,7 +152,6 @@ else:
 
 ## Implementation Notes
 
-- **BAM/CRAM**: Use samtools for validation via subprocess
 - **FASTQ**: Pure Python implementation with header parsing and statistics
 - **HDF5**: Uses h5py to validate format and gather statistics
 
@@ -97,10 +159,7 @@ else:
 
 Some validators require external tools:
 
-- **samtools**: Required for BAM and CRAM validation
-  - Installed in Docker container
-  - Installed on AMI via packer script
-  - Installation instructions: [Samtools Documentation](http://www.htslib.org/download/)
+- **h5py**: Required for HDF5 validation
 
 ## Adding New Validators
 

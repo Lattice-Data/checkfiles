@@ -11,9 +11,12 @@ from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import logging
 import threading
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Union
 from urllib.parse import urljoin
 import requests
+import json
+import tempfile
+import traceback
 
 # Configure logging
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -48,78 +51,107 @@ except ImportError as e:
     logger.debug(f"Failed to set up Python paths: {e}")
 
 # Import internal modules
-from src.cli.parser import parse_arguments
-from src.core.validation import initialize_validator, validate_local_file, validate_s3_file
-from src.tracking.progress import SimpleActivityTracker
-from src.utils.helpers import has_gz_extension, validate_gzip_format
-from src.path_translator import resolve_path, is_s3_uri
-from src.models.validation_record import FileValidationRecord
-from src.worker.patch_worker import patching_worker
-from src.utils.s3_utils import set_s3_tags
+try:
+    from src.models.validation_record import FileValidationRecord
+    from src.cli.parser import parse_arguments
+    from src.core.validation import (
+        validate_s3_file as core_validate_s3_file,
+        create_validation_record,
+        SimpleActivityTracker,
+        initialize_validator
+    )
+    from src.tracking.progress import SimpleActivityTracker
+    from src.utils.helpers import has_gz_extension, validate_gzip_format
+    from src.path_translator import resolve_path, is_s3_uri
+    from src.worker.patch_worker import patching_worker
+    from src.utils.s3_utils import set_s3_tags
+except ImportError as e:
+    logger.error(f"Failed to import required modules: {e}")
+    print(f"Error: Failed to import required modules: {e}")
+    # Try to find the module in alternative locations
+    for module_name in ["src.cli.parser", "src.core.validation", "src.tracking.progress", 
+                       "src.utils.helpers", "src.path_translator"]:
+        try:
+            __import__(module_name)
+            logger.debug(f"Successfully imported {module_name}")
+        except ImportError as e:
+            logger.error(f"Could not import {module_name}: {e}")
 
 # Define a helper function for writing to logs that doesn't depend on a global lock
-def write_result_to_progress_log(result: Dict[str, Any]) -> None:
+def write_result_to_progress_log(result: FileValidationRecord) -> None:
     """Write a validation result to the validation_progress.log file.
     
     Args:
-        result: The validation result dictionary
+        result: The validation result record
     """
     log_dir = os.getenv('CHECKFILES_LOG_DIR', os.getcwd())
     os.makedirs(log_dir, exist_ok=True)
     progress_log_path = os.path.join(log_dir, 'validation_progress.log')
     print(f"Writing result to {progress_log_path}")
     
-    file_path = result.get('file_path', 'unknown')
+    # Extract fields from FileValidationRecord
+    file_path = result.file_path
+    success = result.validation_success
+    info = result.info
+    errors = result.errors
+    identifier = result.uuid or os.path.basename(file_path)
     
-    # Get identifier directly from result if available
-    identifier = result.get('identifier', '')
-    if not identifier:
-        # Fall back to extracting from file path
-        file_name = os.path.basename(file_path)
-        identifier = file_name
-        if 'accession=' in file_path:
-            try:
-                # Try to extract accession from the query string
-                accession_part = file_path.split('accession=')[1].split('&')[0]
-                identifier = accession_part
-            except (IndexError, AttributeError):
-                pass
-    
-    uri = file_path if file_path.startswith('s3://') else ''
-    
-    if result.get('success', False):
-        validation_results = result.get('results', {})
-        errors = validation_results.get('errors', {})
-        stats = validation_results.get('stats', {})
-        
-        # Create a json_patch dictionary with key fields to update
+    # Use file_path for URI
+    uri = file_path
+
+    if success:
+        # Create a json_patch dictionary dynamically based on available stats
         json_patch = {}
-        if stats:
-            json_patch = {
-                'file_size': stats.get('file_size', ''),
-                'md5sum': stats.get('md5sum', ''),
-                'sha256': stats.get('sha256', ''),
-                'crc32c': stats.get('crc32c', ''),
-                'content_md5sum': stats.get('content_md5sum', ''),
-                'read_count': stats.get('read_count', ''),
-                'read_length': stats.get('read_length', '')
-            }
-            # Add flowcell_details if available
-            if 'flowcell_details' in stats:
-                json_patch['flowcell_details'] = stats['flowcell_details']
-            # Add platform if available
-            if 'platform' in stats:
-                json_patch['platform'] = stats['platform']
-            # Add validation status
-            json_patch['validated'] = validation_results.get('valid', False)
-        
-        log_line = f"{identifier}\t{uri}\t{errors}\t{stats}\t{json_patch}\tsuccess\tsuccess"
+        # Keys relevant for H5/H5AD and potentially other types
+        patch_keys = [
+            'file_size',
+            'md5sum',
+            'sha256',
+            'crc32c',
+            'content_md5sum', # May be present for gzipped files
+            'observation_count', # Specific to H5/H5AD
+            'genomes', # Specific to H5/H5AD
+            'feature_counts', # Specific to H5/H5AD
+            'is_hdf5', # Specific to H5/H5AD
+            'read_count', # Specific to FASTQ
+            'read_length', # Specific to FASTQ
+            'platform', # Potentially FASTQ
+            'flowcell_details' # Potentially FASTQ
+        ]
+
+        for key in patch_keys:
+            if key in info:
+                json_patch[key] = info[key]
+
+        # Add validation status explicitly
+        json_patch['validated'] = True
+
+        # Ensure dicts are properly JSON formatted for the log line
+        errors_str = json.dumps(errors)
+        stats_str = json.dumps(info)
+        patch_str = json.dumps(json_patch)
+
+        log_line = f"{identifier}\t{uri}\t{errors_str}\t{stats_str}\t{patch_str}\tsuccess\tsuccess"
     else:
-        error = result.get('error', 'Unknown error')
-        log_line = f"{identifier}\t{uri}\t{{'error': '{error}'}}\t{{}}\t{{}}\tfailed\tfailed"
+        # For failed validations, ensure we capture all error information
+        error_dict = {}
+        if errors:
+            # If we have specific errors, use them
+            error_dict = errors
+        else:
+            # If no specific errors, use a generic error message
+            error_dict = {'validation_error': 'Validation failed'}
+            
+        # Create empty stats and patch for failed validation
+        empty_dict = {}
+        
+        # Ensure all dicts are properly JSON formatted
+        error_dict_str = json.dumps(error_dict)
+        empty_dict_str = json.dumps(empty_dict)
+        
+        log_line = f"{identifier}\t{uri}\t{error_dict_str}\t{empty_dict_str}\t{empty_dict_str}\tfailed\tfailed"
     
     # Use file locking to ensure atomic writes
-    # This approach doesn't require a global lock object that needs to be pickled
     try:
         # Check if the file exists and has the header
         file_exists = os.path.exists(progress_log_path)
@@ -271,7 +303,13 @@ def convert_results_to_validation_records(results: List[Dict[str, Any]],
 
 def main():
     """Main entry point for checkfiles utility."""
+    global logger  # Move global declaration to the top of the function
+    
     args = parse_arguments()
+    
+    # Log full command line arguments for debugging
+    logger.debug(f"Command line arguments: {vars(args)}")
+    print(f"Command line arguments: {vars(args)}")
     
     # Set up logging with custom path if provided
     if args.log_file:
@@ -283,7 +321,7 @@ def main():
             filename=args.log_file,
             filemode='w'
         )
-        global logger
+        # Don't need global logger declaration here since it's at the function start
         logger = logging.getLogger(__name__)
         logger.debug(f"Logging redirected to: {args.log_file}")
     
@@ -303,23 +341,34 @@ def main():
     if args.backend_uri and args.query:
         sources_provided += 1
     
+    logger.debug(f"Sources provided: {sources_provided}")
+    
     if sources_provided == 0:
-        print("Error: You must specify one file source: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)")
+        error_msg = "Error: You must specify one file source: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)"
+        logger.error(error_msg)
+        print(error_msg)
         sys.exit(1)
     
     if sources_provided > 1:
-        print("Error: Only one file source can be used at a time. Choose one of: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)")
+        error_msg = "Error: Only one file source can be used at a time. Choose one of: local files (-l), S3 files (-s3), or a backend query (--backend-uri and --query)"
+        logger.error(error_msg)
+        print(error_msg)
         sys.exit(1)
     
     # Enforce file format rules:
     # 1. When using local or S3 files directly, -f is required
     # 2. When using backend API, -f must not be provided
     if (args.local_file or args.s3_file) and not args.file_format:
-        print("Error: When using -l or -s3, you must specify a file format using the -f/--file-format option")
+        error_msg = "Error: When using -l or -s3, you must specify a file format using the -f/--file-format option"
+        logger.error(error_msg)
+        print(error_msg)
         sys.exit(1)
     
     if args.backend_uri and args.query and args.file_format:
-        print("Error: When using --backend-uri and --query, the -f/--file-format option must not be provided")
+        error_msg = "Error: When using --backend-uri and --query, the -f/--file-format option must not be provided"
+        logger.warning(error_msg)
+        logger.warning("The file format will be determined from the backend file information")
+        print(error_msg)
         print("The file format will be determined from the backend file information")
         sys.exit(1)
     
@@ -331,7 +380,9 @@ def main():
     
     # If backend_uri and query are provided, fetch files from backend
     if args.backend_uri and args.query:
+        logger.debug(f"Fetching files from backend: {args.backend_uri} with query: {args.query}")
         backend_files = fetch_files_from_backend(args.backend_uri, args.query)
+        logger.debug(f"Fetched {len(backend_files)} files from backend")
         
         for file_obj in backend_files:
             if file_obj.get('s3_uri'):
@@ -341,15 +392,18 @@ def main():
                 # Extract file format from backend file object
                 if file_obj.get('file_format'):
                     s3_uri_to_file_format[s3_uri] = file_obj.get('file_format')
+                    logger.debug(f"Detected format for {s3_uri}: {file_obj.get('file_format')}")
                 else:
                     logger.warning(f"File {s3_uri} has no file_format field in backend response")
                     print(f"Warning: File {s3_uri} has no file_format field in backend response")
     elif args.local_file:
         raw_local_files = [f.strip() for f in args.local_file.split(',')]
+        logger.debug(f"Raw local files: {raw_local_files}")
         
         # Process each local file path through the path translator
         for file_path in raw_local_files:
             if is_s3_uri(file_path):
+                logger.debug(f"Local file path is S3 URI: {file_path}")
                 s3_files.append(file_path)
             else:
                 resolved_path = resolve_path(file_path)
@@ -357,11 +411,15 @@ def main():
                 local_files.append(resolved_path)
     elif args.s3_file:
         s3_files = [f.strip() for f in args.s3_file.split(',')]
+        logger.debug(f"S3 files to process: {s3_files}")
     
     total_files = len(local_files) + len(s3_files)
+    logger.info(f"Total files to process: {total_files}")
     
     if total_files == 0:
-        print("Error: No files found to validate")
+        error_msg = "Error: No files found to validate"
+        logger.error(error_msg)
+        print(error_msg)
         sys.exit(1)
     
     # Initialize activity tracker
@@ -371,6 +429,7 @@ def main():
     
     # Set a reasonable thread count based on file count and system resources
     thread_count = max(1, min(args.threads, total_files, multiprocessing.cpu_count()))
+    logger.info(f"Using {thread_count} threads for parallel file processing")
     print(f"Using {thread_count} threads for parallel file processing")
     
     # Pre-validate gzip files before starting threads
@@ -378,8 +437,10 @@ def main():
         validated_local_files = []
         for file_path in local_files:
             if has_gz_extension(file_path):
+                logger.debug(f"Pre-validating gzip format for {file_path}")
                 gzip_errors = validate_gzip_format(file_path)
                 if gzip_errors:
+                    logger.error(f"GZIP validation failed for {file_path}: {gzip_errors}")
                     print(f"GZIP validation failed for {file_path}: {gzip_errors}")
                     continue
             validated_local_files.append(file_path)
@@ -486,7 +547,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                               backend_files: List[Dict[str, Any]] = None,
                               s3_uri_to_file_format: Dict[str, str] = {},
                               update: bool = False,
-                              backend_uri: str = None) -> List[Dict[str, Any]]:
+                              backend_uri: str = None) -> List[FileValidationRecord]:
     """Process multiple files in parallel using a process pool.
     
     Args:
@@ -503,28 +564,92 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
         backend_uri: The URI of the backend API
         
     Returns:
-        List of validation results
+        List of FileValidationRecord objects containing validation results
     """
+    logger.info(f"Starting parallel processing with {thread_count} threads")
     print(f"Starting parallel processing with {thread_count} threads")
+    
+    # Create logs directory if it doesn't exist
+    log_dir = os.getenv('CHECKFILES_LOG_DIR', os.path.join(os.getcwd(), 'logs'))
+    os.makedirs(log_dir, exist_ok=True)
+    logger.debug(f"Ensuring log directory exists: {log_dir}")
+    
+    # Create scratch directory for temporary files if it doesn't exist
+    scratch_dir = os.environ.get('SCRATCH_DIR', '/mnt/scratch')
+    try:
+        os.makedirs(scratch_dir, exist_ok=True)
+        logger.debug(f"Ensuring scratch directory exists: {scratch_dir}")
+    except (PermissionError, OSError) as e:
+        scratch_dir = tempfile.gettempdir()
+        logger.warning(f"Could not create/access scratch directory, using system temp: {scratch_dir}")
+    
+    # Fix file formats from backend if they are "hdf5"
+    if backend_uri and s3_uri_to_file_format:
+        logger.info("Checking file formats from backend for compatibility")
+        for s3_uri, format_name in list(s3_uri_to_file_format.items()):
+            logger.debug(f"Processing format for {s3_uri}:")
+            logger.debug(f"  Original format from backend: {format_name}")
+            
+            if format_name and format_name.lower() == "hdf5":
+                # Check S3 file extension to determine if it's h5 or h5ad
+                file_name = os.path.basename(s3_uri).lower()
+                logger.debug(f"  File extension check for {file_name}")
+                
+                if file_name.endswith('.h5ad'):
+                    logger.info(f"Converting format 'hdf5' to 'h5ad' for {s3_uri}")
+                    print(f"Converting format 'hdf5' to 'h5ad' for {s3_uri}")
+                    s3_uri_to_file_format[s3_uri] = 'h5ad'
+                elif file_name.endswith('.h5'):
+                    logger.info(f"Converting format 'hdf5' to 'h5' for {s3_uri}")
+                    print(f"Converting format 'hdf5' to 'h5' for {s3_uri}")
+                    s3_uri_to_file_format[s3_uri] = 'h5'
+                else:
+                    error_msg = f"Error: File with format 'hdf5' has unrecognized extension: {file_name}"
+                    logger.error(error_msg)
+                    print(error_msg)
+                    # Remove this file from processing
+                    s3_uri_to_file_format.pop(s3_uri)
+                    s3_files.remove(s3_uri)
+            elif format_name and format_name.lower() not in ['fastq', 'h5', 'h5ad']:
+                error_msg = f"Error: Unsupported file format from backend: {format_name}"
+                logger.error(error_msg)
+                print(error_msg)
+                # Remove this file from processing
+                s3_uri_to_file_format.pop(s3_uri)
+                if s3_uri in s3_files:
+                    s3_files.remove(s3_uri)
+            
+            logger.debug(f"  Final format after processing: {s3_uri_to_file_format.get(s3_uri, 'removed')}")
+    
+    # Debug the format mapping for S3 files
+    if s3_uri_to_file_format:
+        logger.debug(f"S3 file format mapping: {s3_uri_to_file_format}")
+        print(f"S3 file format mapping: {s3_uri_to_file_format}")
     
     # Debug info to help identify serialization issues
     if progress_tracker:
+        logger.debug(f"Progress tracker type: {type(progress_tracker)}")
         print(f"Progress tracker type: {type(progress_tracker)}")
-        print(f"Progress tracker attributes: {dir(progress_tracker)}")
     
     with ProcessPoolExecutor(max_workers=thread_count) as executor:
         futures = []
         
         # Process local files
         if local_files:
+            logger.info(f"Processing {len(local_files)} local files...")
             print(f"Processing {len(local_files)} local files...")
             
             # Check if file format is supported
             try:
                 # Test initializing a validator to catch errors early
-                test_validator = initialize_validator(file_format)
+                # Don't pass a specific file path here since we're just testing general format support
+                logger.debug(f"Testing validator initialization for format: {file_format}")
+                test_validator = initialize_validator(file_format, None)
+                logger.debug(f"Test validator initialized: {type(test_validator).__name__}")
             except (ValueError, ImportError) as e:
-                print(f"Error initializing validator for format '{file_format}': {str(e)}")
+                error_msg = f"Error initializing validator for format '{file_format}': {str(e)}"
+                logger.error(error_msg)
+                print(error_msg)
                 sys.exit(1)
                 
             for file_path in local_files:
@@ -542,6 +667,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 
         # Process S3 files
         if s3_files:
+            logger.info(f"Processing {len(s3_files)} S3 files...")
             print(f"Processing {len(s3_files)} S3 files...")
 
             # Create a mapping from S3 URI to accession
@@ -551,6 +677,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 for file_obj in backend_files:
                     if file_obj.get('s3_uri') and file_obj.get('accession'):
                         s3_uri_to_accession[file_obj['s3_uri']] = file_obj['accession']
+                logger.debug(f"Created mapping for {len(s3_uri_to_accession)} files with accessions")
                 print(f"Created mapping for {len(s3_uri_to_accession)} files with accessions")
                 
             # Submit validation tasks for each S3 file
@@ -562,17 +689,47 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 if not s3_file_format:
                     s3_file_format = file_format
                 
+                logger.debug(f"Using format '{s3_file_format}' for S3 file: {s3_path}")
+                print(f"Using format '{s3_file_format}' for S3 file: {s3_path}")
+                
+                # For H5AD files, add additional logging
+                if s3_file_format and s3_file_format.lower() in ['h5ad', 'h5']:
+                    logger.info(f"H5AD/HDF5 file detected: {s3_path}")
+                    logger.info("This format requires file download before validation")
+                
                 try:
                     # Test if the format is valid, but don't create the validator instance here
-                    initialize_validator(s3_file_format)
+                    logger.debug(f"Testing validator for S3 file with format: {s3_file_format}")
+                    try:
+                        test_validator = initialize_validator(s3_file_format, s3_path)
+                        logger.debug(f"Test validator initialized: {type(test_validator).__name__}")
+                    except ValueError as ve:
+                        # If the standard validator initialization fails, try to detect from filename
+                        detected_format = detect_format_from_filename(s3_path)
+                        if detected_format and detected_format != s3_file_format:
+                            logger.info(f"Detected alternative format '{detected_format}' from filename, original was '{s3_file_format}'")
+                            print(f"Detected alternative format '{detected_format}' from filename, will try this instead")
+                            s3_file_format = detected_format
+                            # Try again with the detected format
+                            test_validator = initialize_validator(s3_file_format, s3_path)
+                            logger.debug(f"Alternative validator initialized: {type(test_validator).__name__}")
+                        else:
+                            # Re-raise if we couldn't detect an alternative format
+                            raise
                 except (ValueError, ImportError) as e:
-                    print(f"Error initializing validator for S3 file {s3_path} with format '{s3_file_format}': {str(e)}")
+                    error_msg = f"Error initializing validator for S3 file {s3_path} with format '{s3_file_format}': {str(e)}"
+                    logger.error(error_msg)
+                    print(error_msg)
                     # Skip this file and continue with others
                     continue
                 
                 # Get identifier from mapping if available
                 identifier = s3_uri_to_accession.get(s3_path, "")
+                logger.debug(f"Using identifier '{identifier}' for S3 file: {s3_path}")
                 
+                # Every S3 validation goes through validate_s3_file, which knows how to handle 
+                # special formats like h5ad that need downloading
+                logger.info(f"Submitting S3 file for validation: {s3_path}")
                 futures.append(
                     executor.submit(
                         validate_s3_file,
@@ -581,7 +738,9 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         debug,
                         None,  # Pass None instead of validator instance
                         None,  # Don't pass progress_tracker to worker processes
-                        identifier  # Pass the identifier if available
+                        identifier,  # Pass the identifier if available
+                        True,  # Return a FileValidationRecord
+                        None  # No etag for concurrency control
                     )
                 )
         
@@ -594,37 +753,47 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                 
                 # Update progress tracker in the main process if it exists
                 if progress_tracker:
-                    file_path = result.get('file_path', 'unknown')
-                    if result.get('success', False):
-                        progress_tracker.complete_file(file_path, True, result.get('results', {}))
+                    file_path = result.file_path if isinstance(result, FileValidationRecord) else result.get('file_path', 'unknown')
+                    if isinstance(result, FileValidationRecord):
+                        success = result.validation_success
+                        results = {'valid': result.info.get('valid', False), 'errors': result.errors}
                     else:
-                        progress_tracker.complete_file(file_path, False, {"error": result.get('error', 'Unknown error')})
+                        success = result.get('success', False)
+                        results = result.get('results', {})
+                    
+                    if success:
+                        progress_tracker.complete_file(file_path, True, results)
+                    else:
+                        error_msg = results.get('errors', {}).get('validation_error', 'Unknown error')
+                        logger.error(f"Validation failed for {file_path}: {error_msg}")
+                        progress_tracker.complete_file(file_path, False, {"error": error_msg})
                 
                 # Write each result to validation_progress.log as it completes
                 write_result_to_progress_log(result)
             except Exception as e:
+                error_traceback = traceback.format_exc()
                 logger.error(f"Error processing file: {str(e)}")
+                logger.error(f"Traceback: {error_traceback}")
                 print(f"Error processing file: {str(e)}")
-                error_result = {
-                    "file_path": "unknown",
-                    "error": str(e),
-                    "success": False
-                }
+                print(f"Traceback: {error_traceback}")
+                error_result = FileValidationRecord("unknown")
+                error_result.validation_success = False
+                error_result.update_errors({'validation_error': str(e)})
                 all_results.append(error_result)
                 # Write error to validation_progress.log
                 write_result_to_progress_log(error_result)
     
     return all_results
 
-def display_summary(all_results: List[Dict[str, Any]]) -> None:
+def display_summary(all_results: List[FileValidationRecord]) -> None:
     """Display a summary of validation results.
     
     Args:
-        all_results: List of validation results
+        all_results: List of FileValidationRecord objects
     """
     total = len(all_results)
-    successful = sum(1 for r in all_results if r["success"])
-    valid = sum(1 for r in all_results if r["success"] and r["results"]["valid"])
+    successful = sum(1 for r in all_results if r.validation_success)
+    valid = sum(1 for r in all_results if r.validation_success and r.info.get('valid', False))
     
     print("\n=== Validation Summary ===")
     print(f"Total files: {total}")
@@ -636,97 +805,207 @@ def display_summary(all_results: List[Dict[str, Any]]) -> None:
     # Print detailed results
     print("\n=== Detailed Results ===")
     for result in all_results:
-        if result["success"]:
-            validity = "Valid" if result["results"]["valid"] else "Invalid"
-            print(f"{result['file_path']}: {validity}")
+        success = result.validation_success
+        file_path = result.file_path
+        info = result.info
+        errors = result.errors
+        valid = info.get('valid', False) if success else False
+
+        if success:
+            validity = "Valid" if valid else "Invalid"
+            print(f"{file_path}: {validity}")
             
             # Print hash values if they exist
-            if result["results"].get("stats"):
-                stats = result["results"]["stats"]
+            if info:
                 # Print file sizes
-                if "file_size" in stats:
-                    print(f"  File size: {stats['file_size']} bytes")
-                if "content_size" in stats:
-                    print(f"  Uncompressed size: {stats['content_size']} bytes")
+                if "file_size" in info:
+                    print(f"  File size: {info['file_size']} bytes")
+                if "content_size" in info:
+                    print(f"  Uncompressed size: {info['content_size']} bytes")
                 
                 # Print hash values
-                if "md5sum" in stats:
-                    print(f"  MD5: {stats['md5sum']}")
-                if "sha256" in stats:
-                    print(f"  SHA256: {stats['sha256']}")
-                if "crc32c" in stats:
-                    print(f"  CRC32C: {stats['crc32c']}")
-                if "content_md5sum" in stats:
-                    print(f"  Content MD5: {stats['content_md5sum']}")
+                if "md5sum" in info:
+                    print(f"  MD5: {info['md5sum']}")
+                if "sha256" in info:
+                    print(f"  SHA256: {info['sha256']}")
+                if "crc32c" in info:
+                    print(f"  CRC32C: {info['crc32c']}")
+                if "content_md5sum" in info:
+                    print(f"  Content MD5: {info['content_md5sum']}")
             
-            if not result["results"]["valid"]:
-                print(f"  Errors: {result['results'].get('errors', {})}")
-            if result["results"].get("warnings"):
-                print(f"  Warnings: {result['results'].get('warnings', {})}")
+            if not valid:
+                print(f"  Errors: {errors}")
+            if isinstance(result, dict) and result.get('results', {}).get('warnings'):
+                print(f"  Warnings: {result['results']['warnings']}")
         else:
-            print(f"{result['file_path']}: Failed - {result.get('error', 'Unknown error')}")
+            print(f"{file_path}: Failed - {errors.get('validation_error', 'Unknown error')}")
+
+def detect_format_from_filename(file_path: str) -> str:
+    """Detect the likely format of a file based on its file extension.
+    
+    Args:
+        file_path: Path to the file
+        
+    Returns:
+        String representing the detected format, or empty string if unknown
+    """
+    file_name = os.path.basename(file_path).lower()
+    
+    # Remove compression extensions first
+    if file_name.endswith('.gz'):
+        file_name = file_name[:-3]
+    elif file_name.endswith('.bz2'):
+        file_name = file_name[:-4]
+    elif file_name.endswith('.zip'):
+        file_name = file_name[:-4]
+    
+    # Check for supported extensions ONLY (fastq, h5, h5ad)
+    if file_name.endswith('.fastq') or file_name.endswith('.fq'):
+        return 'fastq'
+    elif file_name.endswith('.h5ad'):
+        return 'h5ad'
+    elif file_name.endswith('.h5'):
+        return 'h5'
+    
+    # Unknown/unsupported format
+    return ''
+
+def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
+                   validator: Optional[Any] = None, 
+                   progress_tracker: Optional[SimpleActivityTracker] = None,
+                   identifier: str = "", return_record: bool = False,
+                   etag: Optional[str] = None) -> FileValidationRecord:
+    """Validate an S3 file using the core validation functionality.
+    
+    This is a wrapper around the core validate_s3_file function that maintains
+    backward compatibility with the existing interface.
+    
+    Args:
+        s3_path: S3 URI of the file to validate
+        file_format: Format of the file
+        debug: Whether to enable debug output
+        validator: Validator instance or None to create one
+        progress_tracker: Activity tracker instance or None if tracking is disabled
+        identifier: Identifier for the file (e.g., accession)
+        return_record: Whether to return a FileValidationRecord (always True now)
+        etag: Optional ETag value for concurrency control
+        
+    Returns:
+        FileValidationRecord containing validation results
+    """
+    print(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
+    logger.info(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
+    
+    try:
+        # Call the core validation function
+        result = core_validate_s3_file(
+            s3_path=s3_path,
+            file_format=file_format,
+            debug=debug,
+            validator=validator,
+            progress_tracker=progress_tracker,
+            identifier=identifier,
+            return_record=True,  # Always return record
+            etag=etag
+        )
+        
+        # Handle non-FileValidationRecord results
+        if not isinstance(result, FileValidationRecord):
+            error_msg = f"Unexpected result type: {type(result)}"
+            logger.error(error_msg)
+            return create_validation_record({
+                "file_path": s3_path,
+                "error": error_msg,
+                "success": False,
+                "identifier": identifier
+            }, s3_path, identifier, etag)
+            
+        return result
+        
+    except Exception as e:
+        error_msg = f"Error validating {s3_path}: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return create_validation_record({
+            "file_path": s3_path,
+            "error": error_msg,
+            "success": False,
+            "identifier": identifier
+        }, s3_path, identifier, etag)
+
+# Add a new function to robustly initialize validators with better error handling
+def robust_initialize_validator(file_format, file_path):
+    """Initialize a validator with robust error handling.
+    
+    This is a wrapper around initialize_validator that includes better error
+    handling and fallback mechanisms.
+    
+    Args:
+        file_format: Format of the file to validate
+        file_path: Path to the file to validate
+        
+    Returns:
+        Validator instance
+    
+    Raises:
+        ValueError: If the validator could not be initialized
+    """
+    logger.debug(f"Robust validator initialization for format '{file_format}' and file: {file_path}")
+    
+    # Validate inputs
+    if not file_format:
+        if file_path:
+            # Try to detect format from filename
+            detected_format = detect_format_from_filename(file_path)
+            if detected_format:
+                logger.info(f"Detected format '{detected_format}' from filename")
+                file_format = detected_format
+            else:
+                raise ValueError("No file format specified and could not detect from filename")
+        else:
+            raise ValueError("No file format specified and no file path to detect from")
+    
+    # Try to import the validator module directly
+    validator_class = None
+    
+    # Map of format names to validator module paths
+    validator_map = {
+        'fastq': 'src.validators.fastq_validator.FastqValidator',
+        'h5ad': 'src.validators.h5ad_validator.H5adValidator',
+        'h5': 'src.validators.h5_validator.H5Validator',
+    }
+    
+    # Check if we support this file format
+    if file_format.lower() not in validator_map:
+        raise ValueError(f"Unsupported file format: {file_format}")
+    
+    module_path = validator_map.get(file_format.lower())
+    
+    # Try to import the validator directly
+    try:
+        module_parts = module_path.split('.')
+        class_name = module_parts[-1]
+        module_path = '.'.join(module_parts[:-1])
+        
+        logger.debug(f"Importing {module_path} for class {class_name}")
+        module = __import__(module_path, fromlist=[class_name])
+        validator_class = getattr(module, class_name)
+        logger.debug(f"Successfully imported validator class: {validator_class.__name__}")
+    except (ImportError, AttributeError) as e:
+        logger.error(f"Could not import validator for {file_format}: {e}")
+        # Fall back to the original initialize_validator function
+        logger.debug("Falling back to original initialize_validator")
+        return initialize_validator(file_format, file_path)
+    
+    # Create and return the validator instance
+    try:
+        validator = validator_class(file_path)
+        logger.debug(f"Created validator instance: {type(validator).__name__}")
+        return validator
+    except Exception as e:
+        logger.error(f"Error creating validator instance: {e}")
+        raise ValueError(f"Could not create validator for {file_format}: {e}")
 
 if __name__ == "__main__":
     main()
-    
-# Add this function to test serialization with multiprocessing
-def test_multiprocessing_serialization():
-    """
-    Test function to diagnose serialization issues with multiprocessing.
-    
-    Run this directly to test if objects can be properly serialized:
-    python -c "from src.checkfiles import test_multiprocessing_serialization; test_multiprocessing_serialization()"
-    """
-    import multiprocessing
-    from concurrent.futures import ProcessPoolExecutor
-    
-    def worker_function(data):
-        """Simple worker function that returns its input."""
-        print(f"Worker received: {data}")
-        return data
-        
-    print("Testing basic multiprocessing serialization...")
-    
-    # Test with different types of data
-    test_data = [
-        {"type": "dict", "value": 123},
-        "simple string",
-        42,
-        [1, 2, 3]
-    ]
-    
-    # Test using ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=2) as executor:
-        futures = []
-        for data in test_data:
-            futures.append(executor.submit(worker_function, data))
-            
-        # Collect results
-        results = []
-        for future in futures:
-            try:
-                result = future.result()
-                print(f"Successfully processed: {result}")
-                results.append(result)
-            except Exception as e:
-                print(f"Error in worker: {str(e)}")
-                
-    print(f"Successfully processed {len(results)} out of {len(test_data)} items")
-    
-    # Try to initialize a progress tracker in isolation
-    try:
-        from src.tracking.progress import SimpleActivityTracker
-        tracker = SimpleActivityTracker(10)
-        print(f"Created tracker: {type(tracker)}")
-        print(f"Tracker attributes: {dir(tracker)}")
-        
-        # Test if tracker can be serialized directly
-        import pickle
-        try:
-            pickle_data = pickle.dumps(tracker)
-            print(f"Successfully pickled tracker: {len(pickle_data)} bytes")
-        except Exception as e:
-            print(f"Failed to pickle tracker: {str(e)}")
-            
-    except ImportError:
-        print("Could not import SimpleActivityTracker for testing")

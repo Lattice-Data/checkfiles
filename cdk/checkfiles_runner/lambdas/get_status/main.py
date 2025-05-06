@@ -40,7 +40,7 @@ def get_checkfiles_command_status(event, context):
         )
         
         try:
-            line_count = int(count_result['StandardOutputContent'].split()[0])
+            line_count = int(count_result['StandardOutputContent'].split()[0]) - 1
         except (ValueError, IndexError):
             line_count = 0
             

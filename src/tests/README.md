@@ -1,27 +1,91 @@
 # Testing for Checkfiles
 
 This directory contains tests for the checkfiles project, which is used to validate
-various file formats like FASTQ, BAM, CRAM, and HDF5.
+various file formats like FASTQ and HDF5.
 
-## Directory Structure
+## Test Suite Overview
+
+This directory contains tests for the Checkfiles project, which validates
+various file formats like FASTQ and HDF5.
+
+### Directory Structure
 
 ```
-src/tests/
-├── validators/               # Tests for specific file format validators
-│   ├── data/                 # Test data files for validation tests
-│   ├── test_bam.py           # Tests for BAM validator
-│   ├── test_bam_integration.py  # Integration tests for BAM validator
-│   ├── test_cram.py          # Tests for CRAM validator
-│   ├── test_cram_integration.py # Integration tests for CRAM validator
-│   ├── test_fastq.py         # Tests for FASTQ validator
-│   ├── test_fastq_enhanced.py # Extended tests for FASTQ validator
-│   ├── test_fastq_readnames.py # Tests for FASTQ read name parsing
-│   ├── test_fastq_validator.py # Tests for the FASTQ validator class
-│   └── test_hdf5.py          # Tests for HDF5 validator
-├── test_checkfiles.py        # Main tests for the checkfiles module
-├── conftest.py               # Pytest configuration and fixtures
-└── README.md                 # This file
+tests/
+├── conftest.py                # Common pytest fixtures
+├── data/                      # Test data files
+│   ├── fastq/                 # FASTQ test files
+│   │   ├── invalid/           # Invalid FASTQ files for negative tests
+│   │   └── valid/             # Valid FASTQ files for positive tests
+│   └── hdf5/                  # HDF5 test files
+│       ├── invalid/           # Invalid HDF5 files
+│       └── valid/             # Valid HDF5 files
+├── core/                      # Tests for core functionality
+│   ├── test_validation.py     # Tests for the validation framework
+│   └── test_utils.py          # Tests for utility functions
+├── validators/                # Tests for individual validators
+│   ├── test_fastq.py          # Tests for FASTQ validator
+│   ├── test_fastq_enhanced.py # Tests for enhanced FASTQ validation
+│   ├── test_hdf5.py           # Tests for HDF5 validator
+│   └── test_base.py           # Tests for validator base class
+├── utils/                     # Tests for utility modules
+│   ├── test_helpers.py        # Tests for helper functions
+│   └── test_s3_utils.py       # Tests for S3 utilities
+└── test_checkfiles.py         # Main integration tests
 ```
+
+### Running Tests
+
+To run the test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific tests with more output
+pytest tests/validators/test_fastq.py -v
+
+# Run tests matching a pattern
+pytest -k "fastq"
+
+# Run tests with coverage report
+pytest --cov=src
+```
+
+### Test Data
+
+The `data/` directory contains sample files for testing:
+
+- **FASTQ**: Sample FASTQ files with various formats and errors
+- **HDF5**: Sample HDF5 files with different structures
+
+### Testing Approach
+
+1. **Unit Tests**: Test individual components in isolation
+   - Test validator functions with simple mock inputs
+   - Test utility functions with specific inputs and expected outputs
+
+2. **Integration Tests**: Test interactions between components
+   - Test CLI with actual file inputs
+   - Test validation pipeline end-to-end
+
+3. **Mock Testing**: Use mocks for external dependencies
+   - Mock S3 client responses
+   - Mock subprocess calls for external tools
+
+### Key Test Features
+
+- Fixtures for common setup and teardown
+- Parameterized tests for comprehensive test coverage
+- Streaming validation tests without local file storage
+- Memory usage verification for large files
+
+### Continuous Integration
+
+Tests run automatically on:
+- Pull requests
+- Merges to main branch
+- Scheduled daily runs
 
 ## Test Approach
 

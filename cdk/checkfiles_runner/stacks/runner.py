@@ -7,6 +7,7 @@ from aws_cdk import Stack
 
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
 from aws_cdk.aws_lambda import Runtime
+from aws_cdk.aws_lambda import Architecture
 
 from aws_cdk.aws_iam import PolicyStatement
 from aws_cdk.aws_iam import Role
@@ -22,6 +23,7 @@ from aws_cdk.aws_secretsmanager import Secret as SMSecret
 
 from aws_cdk.aws_stepfunctions import Choice
 from aws_cdk.aws_stepfunctions import Condition
+from aws_cdk.aws_stepfunctions import DefinitionBody
 from aws_cdk.aws_stepfunctions import JsonPath
 from aws_cdk.aws_stepfunctions import Pass
 from aws_cdk.aws_stepfunctions import Succeed
@@ -205,6 +207,7 @@ class RunCheckfilesStepFunction(Stack):
             index='main.py',
             handler='get_checkfiles_command_status',
             timeout=Duration.seconds(180),
+            architecture=Architecture.ARM_64,
         )
 
         get_checkfiles_command_status_lambda.add_to_role_policy(
@@ -259,7 +262,8 @@ class RunCheckfilesStepFunction(Stack):
             timeout=Duration.seconds(30),
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
-            }
+            },
+            architecture=Architecture.ARM_64,
         )
 
         self.portal_secrets.grant_read(check_pending_files_lambda)
@@ -306,6 +310,7 @@ class RunCheckfilesStepFunction(Stack):
             index='increment.py',
             handler='increment_counter',
             timeout=Duration.seconds(60),
+            architecture=Architecture.ARM_64,
         )
 
         increment_counter = LambdaInvoke(
@@ -349,7 +354,8 @@ class RunCheckfilesStepFunction(Stack):
                 'INSTANCE_PROFILE_ARN': self.props.instance_profile_arn,
                 'SECURITY_GROUP': self.props.instance_security_group_id,
                 'CHECKFILES_TAG': self.props.checkfiles_tag,
-            }
+            },
+            architecture=Architecture.ARM_64,
         )
 
         create_checkfiles_instance_lambda.add_to_role_policy(
@@ -420,7 +426,8 @@ class RunCheckfilesStepFunction(Stack):
             timeout=Duration.seconds(60),
             environment={
                 'PORTAL_SECRETS_ARN': self.props.portal_secrets_arn,
-            }
+            },
+            architecture=Architecture.ARM_64,
         )
 
         self.portal_secrets.grant_read(run_checkfiles_command_lambda)
@@ -478,7 +485,8 @@ class RunCheckfilesStepFunction(Stack):
                 'SLACK_TOKEN_ARN': self.props.slack_token_arn,
                 'SLACK_CHANNEL_ID_ARN': self.props.slack_channel_id_arn,
                 'S3_BUCKET_NAME': self.props.s3_bucket_name
-            }
+            },
+            architecture=Architecture.ARM_64,
         )
         slack_token_secret = SMSecret.from_secret_complete_arn(
             self,
@@ -563,11 +571,11 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
-        wait_for_ten_minutes = Wait(
+        wait_for_five_minutes = Wait(
             self,
             'WaitTenMinutes',
             time=WaitTime.duration(
-                Duration.minutes(10)
+                Duration.minutes(5)
             )
         )
 
@@ -602,7 +610,7 @@ class RunCheckfilesStepFunction(Stack):
                 ).next(
                     increment_counter
                 ).next(
-                    wait_for_ten_minutes
+                    wait_for_five_minutes
                 ).next(
                     get_checkfiles_command_status
                 ).next(
@@ -636,7 +644,7 @@ class RunCheckfilesStepFunction(Stack):
         state_machine = StateMachine(
             self,
             'StateMachine',
-            definition=definition
+            definition_body=DefinitionBody.from_chainable(definition)
         )
 
         state_machine_target = SfnStateMachine(

@@ -137,7 +137,7 @@ class SimpleActivityTracker:
 class ProgressTrackingStream:
     """Stream wrapper that tracks reading progress for large file processing."""
     
-    def __init__(self, stream, tracker=None, update_interval_mb=5):
+    def __init__(self, stream, tracker=None, update_interval_mb=100):
         """Initialize a tracking stream.
         
         Args:
