@@ -299,4 +299,145 @@ def test_download_s3_file_to_scratch():
                         assert content == test_content
                     
                     # Clean up
-                    os.unlink(local_path) 
+                    os.unlink(local_path)
+
+def test_stream_local_file_subprocess_errors():
+    """Test error handling in stream_local_file for subprocess failures."""
+    # Create a gzipped file
+    with tempfile.NamedTemporaryFile(suffix='.gz', delete=False) as temp_file:
+        with gzip.open(temp_file.name, 'wb') as gz:
+            gz.write(b"test content")
+    
+    try:
+        # Mock subprocess.Popen to simulate process failure
+        with patch('subprocess.Popen') as mock_popen:
+            # Simulate process failing immediately
+            mock_process = MagicMock()
+            mock_process.poll.return_value = 1
+            mock_process.stderr = io.BytesIO(b"gunzip: invalid compressed data")
+            mock_popen.return_value = mock_process
+            
+            # Test that the error is properly raised
+            with pytest.raises(RuntimeError) as exc_info:
+                with stream_local_file(temp_file.name, decompress=True):
+                    pass
+            assert "Failed to start decompression stream" in str(exc_info.value)
+            
+            # Verify the correct command was used
+            mock_popen.assert_called_once()
+            cmd = mock_popen.call_args[0][0]
+            assert "gunzip -c" in cmd
+    finally:
+        os.unlink(temp_file.name)
+
+def test_download_s3_file_to_scratch_permission_errors():
+    """Test permission error handling in download_s3_file_to_scratch."""
+    # Create a temporary directory to simulate scratch space
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Mock os.environ to return our temp directory
+        with patch.dict('os.environ', {'SCRATCH_DIR': temp_dir}, clear=True):
+            # Mock os.makedirs to raise PermissionError for scratch dir but succeed for /tmp
+            def mock_makedirs(path, exist_ok=False):
+                if temp_dir in path:
+                    raise PermissionError("Permission denied")
+                return None
+            
+            with patch('os.makedirs', side_effect=mock_makedirs):
+                # Test that it falls back to system temp directory
+                with patch('tempfile.gettempdir', return_value='/tmp'):
+                    # Mock subprocess.run to simulate S3 download
+                    with patch('subprocess.run') as mock_run:
+                        # First call fails with permission error
+                        mock_run.side_effect = [
+                            MagicMock(returncode=1, stderr="Permission denied"),
+                            MagicMock(returncode=0, stdout="", stderr="")
+                        ]
+                        
+                        # Mock uuid.uuid4 to return a consistent value for testing
+                        with patch('uuid.uuid4', return_value=MagicMock(__str__=lambda _: '12345678')):
+                            # Create a temporary file in /tmp to simulate the downloaded file
+                            temp_file_path = os.path.join('/tmp', "h5ad_12345678_test.h5ad")
+                            
+                            # Ensure the file exists before the function tries to access it
+                            with open(temp_file_path, 'wb') as temp_file:
+                                temp_file.write(b"test content")
+                            
+                            # Mock os.path.exists to return True for our test file
+                            with patch('os.path.exists', side_effect=lambda path: path == temp_file_path):
+                                # Mock os.path.getsize to return a non-zero size
+                                with patch('os.path.getsize', return_value=1024):
+                                    # Mock subprocess.run to simulate successful S3 download
+                                    with patch('subprocess.run', return_value=MagicMock(returncode=0, stdout="", stderr="")):
+                                        local_path, stats = download_s3_file_to_scratch(
+                                            "s3://bucket/test.h5ad",
+                                            file_format="h5ad"
+                                        )
+                                        
+                                        assert local_path is not None
+                                        assert local_path.startswith('/tmp/')
+                                        assert stats['success'] is True
+                                        
+                                        # Clean up
+                                        os.unlink(temp_file_path)
+
+def test_stream_s3_file_additional_errors():
+    """Test additional error scenarios in stream_s3_file."""
+    # Test invalid S3 path
+    with patch('subprocess.Popen') as mock_popen:
+        mock_popen.side_effect = ValueError("Invalid S3 path")
+        with pytest.raises(ValueError, match="Invalid S3 path"):
+            with stream_s3_file("invalid-path"):
+                pass
+    
+    # Test S3 path with special characters
+    with patch('subprocess.Popen') as mock_popen:
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None
+        mock_process.stdout = io.BytesIO(b"test content")
+        mock_popen.return_value = mock_process
+        
+        with stream_s3_file("s3://bucket/file with spaces.txt") as stream:
+            content = stream.read()
+            assert content == b"test content"
+        
+        # Verify the path was properly escaped
+        cmd = mock_popen.call_args[0][0]
+        assert "'s3://bucket/file with spaces.txt'" in cmd
+    
+    # Test HDF5 file with large content
+    with patch('subprocess.Popen') as mock_popen:
+        large_content = b"x" * (1024 * 1024)  # 1MB of data
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None
+        mock_process.stdout = io.BytesIO(large_content)
+        mock_popen.return_value = mock_process
+        
+        with stream_s3_file("s3://bucket/large.h5ad", file_format="h5ad") as stream:
+            content = stream.read()
+            assert len(content) == len(large_content)
+            assert isinstance(stream, io.BytesIO)
+
+def test_validate_gzip_format_edge_cases():
+    """Test edge cases in validate_gzip_format."""
+    # Test empty file
+    with tempfile.NamedTemporaryFile(suffix='.gz', delete=False) as temp_file:
+        result = validate_gzip_format(temp_file.name)
+        assert 'gzip_error' in result
+        assert 'magic number' in result['gzip_error'].lower()
+    
+    # Test file with only magic number
+    with tempfile.NamedTemporaryFile(suffix='.gz', delete=False) as temp_file:
+        temp_file.write(b'\x1f\x8b')
+        temp_file.flush()
+        result = validate_gzip_format(temp_file.name)
+        assert 'gzip_error' in result
+        assert 'header structure' in result['gzip_error'].lower()
+    
+    # Test S3 path with invalid format
+    with patch('subprocess.check_output') as mock_check_output:
+        mock_check_output.side_effect = subprocess.CalledProcessError(
+            1, "aws s3 cp", stderr=b"InvalidRequest: The authorization mechanism you have provided is not supported"
+        )
+        result = validate_gzip_format("s3://bucket/invalid-format.gz")
+        assert 'gzip_error' in result
+        assert 'invalid gzip header structure' in result['gzip_error'].lower() 
