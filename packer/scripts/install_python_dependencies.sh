@@ -34,6 +34,21 @@ unzip awscliv2.zip
 sudo ./aws/install
 rm -rf aws awscliv2.zip
 
+# Create and set up /opt/checkfiles directory
+echo "Setting up /opt/checkfiles directory..."
+sudo mkdir -p /opt/checkfiles
+sudo chmod -R 777 /opt/checkfiles
+
+# Copy files from /tmp/build to /opt/checkfiles
+if [ -d /tmp/build ]; then
+    echo "Copying files from /tmp/build to /opt/checkfiles..."
+    sudo cp -r /tmp/build/* /opt/checkfiles/
+    sudo chmod -R 777 /opt/checkfiles
+else
+    echo "ERROR: /tmp/build directory not found"
+    exit 1
+fi
+
 # Install package with all dependencies for AMI
 echo "Installing package with AMI dependencies..."
 cd /opt/checkfiles || { echo "ERROR: Cannot change to /opt/checkfiles directory"; exit 1; }

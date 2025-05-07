@@ -12,20 +12,6 @@ echo "3. Setting up symbolic links for module discovery"
 echo "4. Verifying the installation"
 echo ""
 
-# Create and set up /opt/checkfiles directory
-sudo mkdir -p /opt/checkfiles
-sudo chmod -R 777 /opt/checkfiles
-
-# Copy files from /tmp/build to /opt/checkfiles
-if [ -d /tmp/build ]; then
-    echo "Copying files from /tmp/build to /opt/checkfiles..."
-    sudo cp -r /tmp/build/* /opt/checkfiles/
-    sudo chmod -R 777 /opt/checkfiles
-else
-    echo "ERROR: /tmp/build directory not found"
-    exit 1
-fi
-
 # List directory contents for debugging
 echo "Checking /opt/checkfiles contents:"
 ls -la /opt/checkfiles
