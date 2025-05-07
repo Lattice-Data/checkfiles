@@ -2,7 +2,7 @@
 
 # Checkfiles
 
-A scalable system for processing and validating file uploads in a cloud environment. This project provides infrastructure and automation for file processing workflows.
+A scalable system for processing and validating files. It supports both local validation via Docker containers and AWS cloud-based architecture. This project provides infrastructure and automation for validation workflows.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -24,9 +24,10 @@ A scalable system for processing and validating file uploads in a cloud environm
 
 ## Overview
 
-Checkfiles is a cloud-based system that:
+Checkfiles is a system that supports both local and cloud-based deployments:
+- Supports both local validation via Docker containers and cloud-based deployment.
 - Monitors for new file uploads
-- Processes and validates files (FASTQ, HDF5, H5AD formats supported)
+- Processes and validates files (FASTQ, H5, H5AD formats supported)
 - Tracks processing status
 - Provides metrics and monitoring
 - Scales automatically based on workload
@@ -59,108 +60,7 @@ The system consists of several components:
 
 ## Getting Started
 
-### Prerequisites
-
-- For Docker method:
-  - Docker Engine installed ([Install Docker](https://docs.docker.com/get-docker/))
-  - Docker Compose V2 (version 2.10.0+)
-  - No AWS account needed for local file validation
-
-- For AWS Step Functions method:
-  - AWS Account with appropriate permissions
-  - AWS CLI installed and configured ([Install AWS CLI](https://aws.amazon.com/cli/))
-  - Python 3.11 ([Install Python](https://www.python.org/downloads/))
-  - Node.js v18+ and npm ([Install Node.js](https://nodejs.org/))
-  - AWS CDK CLI v2.1007.0+ (`npm install -g aws-cdk@2.1007.0`)
-
-### Installation
-
-#### Local Installation (Docker Method)
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Lattice-Data/checkfiles.git
-   cd checkfiles
-   ```
-
-2. Create test data directory:
-   ```bash
-   mkdir -p test_data
-   # Add your test files to the test_data directory
-   ```
-
-#### AWS Installation (CDK Method)
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Lattice-Data/checkfiles.git
-   cd checkfiles/cdk
-   ```
-
-2. Create and activate virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Configure AWS credentials (if not already done):
-   ```bash
-   aws configure
-   # Enter your AWS Access Key ID, Secret Access Key, default region, and output format
-   ```
-
-## Running Checkfiles
-
-### Using Docker (Easiest Method)
-
-Docker is the simplest way to run Checkfiles locally without AWS dependencies.
-
-#### Step 1: Build and start Docker container
-
-```bash
-# From project root
-docker compose -f docker/docker-compose.yml up
-```
-
-This will display the help message showing available commands.
-
-#### Step 2: Validate local files
-
-```bash
-# Validate a single FASTQ file
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/your_file.fastq.gz
-
-# Validate multiple files (comma-separated, no spaces)
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l "/app/test_data/file1.fastq.gz,/app/test_data/file2.fastq.gz"
-```
-
-#### Step 3: Validate S3 files (requires AWS credentials)
-
-```bash
-# First export your AWS credentials
-export AWS_ACCESS_KEY_ID=your-key-id
-export AWS_SECRET_ACCESS_KEY=your-secret
-export AWS_DEFAULT_REGION=us-west-2
-
-# Then run validation with S3 path
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -s3 s3://your-bucket/path/to/file.fastq.gz
-```
-
-#### Step 4: View logs
-
-Logs are saved to the `logs` directory in your project root:
-```bash
-# View progress log
-cat logs/validation_progress.log
-
-# View debug log
-cat logs/checkfiles_debug.log
-```
+**Note**: The AWS Step Functions instructions below are intended only for advanced users who need to deploy a new Step Function for file validation. Lattice curators should follow the validation execution instructions in `docker/README.md` or `cdk/README.md` instead of deploying AWS Step Function.
 
 ### Using AWS Step Functions
 
@@ -188,9 +88,10 @@ The deployment will take several minutes. When complete, you'll see outputs incl
 
 ```json
 {
-  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz",
-  "file_format": "fastq",
-  "debug": true
+  "query": "/report/?type=RawSequenceFile&lab.title=Calliope+Dendrou%2C+Oxford&read_type=i5+index",
+  "instance_name_suffix": "mike",
+  "backend_uri": "https://www.lattice-data.org/",
+  "update": false
 }
 ```
 
@@ -222,46 +123,27 @@ The deployment will take several minutes. When complete, you'll see outputs incl
 | `-s3`, `--s3-file` | S3 file URI(s) | `-s3 s3://bucket/file.fastq.gz` |
 | `-d`, `--debug` | Enable debug output | `-d` |
 | `-t`, `--threads` | Number of processing threads | `-t 4` |
-| `-q`, `--quiet` | Suppress progress indicators | `-q` |
 | `--backend-uri` | URI of backend service | `--backend-uri https://api.example.com` |
 | `--query` | Query string for backend | `--query "type=file&format=fastq"` |
 | `--update` | Update backend with results | `--update` |
-| `--log-file` | Custom log file path | `--log-file /path/to/log.txt` |
 
 ### Docker-specific Options
 
 When using Docker, paths inside the container start with `/app`:
 
 ```bash
-# Using local file inside container
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/file.fastq
 
 # Using host path (automatically translated)
 docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /Users/yourusername/path/to/file.fastq
 ```
 
-### Step Function Input Parameters
-
-Step Functions accept a JSON object with the following parameters:
-
-```json
-{
-  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz", 
-  "file_format": "fastq",
-  "debug": true,
-  "threads": 4,
-  "update": false,
-  "update_s3_tags": false,
-  "ignore_active_credentials": false
-}
-```
 
 ## Supported File Formats
 
 Checkfiles currently supports the following file formats:
 
 - **FASTQ**: DNA/RNA sequence reads (`.fastq`, `.fq`, with optional `.gz` compression)
-- **HDF5**: Hierarchical data format (`.h5`)
+- **H5**: Hierarchical data format (`.h5`)
 - **H5AD**: AnnData single-cell genomics data (`.h5ad`)
 
 Each format has specific validators that check for:
@@ -295,64 +177,12 @@ When using AWS Step Functions, logs are available in CloudWatch:
 - `Invalid files: Z` - Number of invalid files
 - `Failed to process: N` - Files that couldn't be processed
 
-## Troubleshooting
 
-### Docker Issues
-
-1. **Permission denied errors**:
-   ```bash
-   sudo chown -R $(id -u):$(id -g) logs/
-   ```
-
-2. **Container fails to start**:
-   - Check if Docker daemon is running
-   - Verify Docker Compose is installed
-   - Ensure ports aren't already in use
-
-3. **AWS credential errors**:
-   - Verify you've exported AWS credentials correctly
-   - Check region matches your S3 bucket location
-
-### AWS Step Function Issues
-
-1. **Deployment failures**:
-   - Check AWS credentials have sufficient permissions
-   - Verify CDK version is 2.1007.0 or higher
-   - Ensure Python 3.11 is installed
-
-2. **Execution failures**:
-   - Check S3 path is correct and accessible
-   - Verify file format is supported
-   - Look in CloudWatch logs for detailed error messages
-
-3. **Missing logs**:
-   - Check log retention settings in CloudWatch
-   - Verify Lambda functions have logging permissions
-
-## Development
-
-### Local Development
-1. Set up virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-2. Install development dependencies:
-   ```bash
-   pip install -r requirements-dev.txt
-   ```
 
 ### Testing
 ```bash
 # Run unit tests
-pytest
-
-# Run integration tests
-pytest tests/integration
-
-# Run linting
-flake8
+python -m pytest src/tests/
 ```
 
 ## Contributing
