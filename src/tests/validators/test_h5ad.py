@@ -901,3 +901,64 @@ def test_multiple_feature_types_validation(validator):
     finally:
         # Clean up
         os.unlink(filename) 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_compression_efficiency_validation(validator):
+    """Test validation of compression efficiency in H5AD files."""
+    if not SCANPY_AVAILABLE:
+        pytest.skip("scanpy/anndata not available for test setup")
+        
+    # Create test data
+    N_OBS = 100  # Larger dataset to ensure meaningful compression
+    N_VARS = 1000
+    
+    # Create AnnData object with sparse data
+    X = np.random.normal(size=(N_OBS, N_VARS)).astype(np.float32)
+    # Make it sparse by setting most values to 0
+    X[X < 0.5] = 0
+    
+    obs = pd.DataFrame(index=[f"CELL_{i}" for i in range(N_OBS)])
+    var = pd.DataFrame(index=[f"GENE_{i}" for i in range(N_VARS)])
+    
+    # Add required columns
+    var['feature_types'] = ['Gene Expression'] * N_VARS
+    var['gene_ids'] = [f"ENSG{str(i).zfill(11)}" for i in range(N_VARS)]
+    var['gene_versions'] = [f"ENSG{str(i).zfill(11)}.1" for i in range(N_VARS)]
+    var['genome'] = ['GRCh38'] * N_VARS
+    
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+    
+    # Create two temporary files with different compression settings
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp1, \
+         tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp2:
+        filename1 = tmp1.name  # Will use gzip compression
+        filename2 = tmp2.name  # Will use minimal compression
+    
+    try:
+        # Write files with different compression settings
+        adata.write_h5ad(filename1, compression='gzip')  # Explicit gzip compression
+        adata.write_h5ad(filename2, compression=None)  # No compression
+        
+        # Validate both files
+        result1 = validator.validate_file(filename1)
+        result2 = validator.validate_file(filename2)
+        
+        # Check that the gzip compressed file is valid
+        assert result1['valid'] is True  # gzip compression should be fine
+        assert 'compression' not in result1['errors']
+        
+        # Check that the uncompressed file is invalid due to compression warning
+        assert result2['valid'] is False  # Should be invalid due to compression
+        assert 'compression' in result2['errors']
+        assert 'File size' in result2['errors']['compression']
+        assert 'potential gzip compressed size' in result2['errors']['compression']
+        
+        # Verify file sizes
+        size1 = os.path.getsize(filename1)
+        size2 = os.path.getsize(filename2)
+        assert size1 < size2  # Compressed file should be smaller
+        
+    finally:
+        # Clean up
+        os.unlink(filename1)
+        os.unlink(filename2) 
