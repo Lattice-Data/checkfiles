@@ -21,6 +21,8 @@ import inspect
 import re
 import json
 import requests
+import concurrent.futures
+from io import StringIO
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -29,7 +31,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.utils.helpers import has_gz_extension, validate_gzip_format, stream_s3_file
 from src.core.validation import initialize_validator, validate_local_file, validate_s3_file, create_validation_record
 from src.tracking.progress import SimpleActivityTracker
-from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel, fetch_files_from_backend, fetch_schema_for_type, convert_results_to_validation_records
+from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel, fetch_files_from_backend, fetch_schema_for_type, convert_results_to_validation_records, detect_format_from_filename, robust_initialize_validator, display_summary
 from src.models.validation_record import FileValidationRecord
 
 # Define sample H5AD result structure
@@ -939,7 +941,7 @@ def test_fetch_files_from_backend_success(mock_requests_get, mock_os_getenv):
     assert retrieved_files == expected_files
     
     # Verify calls to requests.get
-    expected_query_url = f"{backend_uri}/search/?type=File&format=json&limit=all" # Adjusted based on typical implementation
+    expected_query_url = f"{backend_uri}/search/?type=File&format=json&limit=all"
     expected_acc1_url = f"{backend_uri}/ACC1/?frame=object"
     expected_acc2_url = f"{backend_uri}/ACC2/?frame=object"
 
@@ -1196,3 +1198,81 @@ def test_convert_results_to_validation_records_success(mock_create_validation_re
     mock_create_validation_record.assert_any_call(raw_results[0], raw_results[0]['file_path'], 'uuid1', 'etag1')
     mock_create_validation_record.assert_any_call(raw_results[1], raw_results[1]['file_path'], 'uuid2', 'etag2')
     assert mock_create_validation_record.call_count == 2
+
+@patch('builtins.open', new_callable=mock_open)
+@patch('os.path.exists', return_value=True)
+@patch('os.path.getsize', return_value=100)
+@patch('os.makedirs')
+@patch('os.fsync')
+def test_write_result_to_progress_log_file_locking(mock_fsync, mock_makedirs, mock_getsize, mock_exists, mock_file_open):
+    """Test file locking and atomic writes in write_result_to_progress_log."""
+    # Mock file operations
+    mock_exists.return_value = True
+    mock_getsize.return_value = 100  # Non-empty file
+    
+    # Create a mock validation record
+    record = FileValidationRecord(
+        file_path="/path/to/test.h5ad",
+        uuid="test-uuid-123"
+    )
+    record.validation_success = True
+    record.info = {
+        'file_size': 1000,
+        'md5sum': 'abc123',
+        'sha256': 'def456',
+        'crc32c': '7890',
+        'observation_count': 100,
+        'genomes': ['GRCh38'],
+        'feature_counts': [{'feature_type': 'gene', 'feature_count': 1000}]
+    }
+    record.errors = {}
+    
+    # Call function
+    write_result_to_progress_log(record)
+    
+    # Verify file operations
+    mock_file_open.assert_called_once()
+    handle = mock_file_open()
+    handle.write.assert_called()
+    handle.flush.assert_called_once()
+    mock_fsync.assert_called_once()
+
+
+
+def test_display_summary():
+    """Test display summary functionality."""
+    # Create test results
+    record1 = FileValidationRecord(
+        file_path="/path/to/file1.h5ad",
+        uuid="uuid1"
+    )
+    record1.validation_success = True
+    record1.info = {'file_size': 1000}
+    
+    record2 = FileValidationRecord(
+        file_path="/path/to/file2.h5ad",
+        uuid="uuid2"
+    )
+    record2.validation_success = False
+    record2.errors = {'validation_error': 'Test error'}
+    
+    record3 = FileValidationRecord(
+        file_path="/path/to/file3.h5ad",
+        uuid="uuid3"
+    )
+    record3.validation_success = True
+    record3.info = {'file_size': 2000, 'warnings': {'warning1': 'Test warning'}}
+    
+    results = [record1, record2, record3]
+    
+    # Capture stdout
+    with patch('sys.stdout', new=StringIO()) as fake_out:
+        display_summary(results)
+        output = fake_out.getvalue()
+        
+        # Verify output contains expected information
+        assert "file1.h5ad" in output
+        assert "file2.h5ad" in output
+        assert "file3.h5ad" in output
+        assert "Test error" in output
+        assert "Test warning" in output

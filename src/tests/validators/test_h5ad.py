@@ -7,7 +7,7 @@ import pytest
 import tempfile
 import numpy as np
 import pandas as pd
-from unittest.mock import patch # Import patch for mocking constants
+from unittest.mock import patch, MagicMock
 
 # Try to import necessary libraries for test setup
 try:
@@ -28,8 +28,20 @@ N_VARS = 15
 
 @pytest.fixture
 def validator():
-    """Create an H5adValidator instance for testing."""
+    """Create a validator instance for testing."""
     return H5adValidator()
+
+@pytest.fixture
+def mock_anndata():
+    """Create a mock AnnData object for testing."""
+    mock = MagicMock()
+    # Set up basic attributes
+    mock.shape = (100, 1000)  # 100 cells, 1000 genes
+    mock.var_names = pd.Index([f"GENE_{i}" for i in range(1000)])
+    mock.obs_names = pd.Index([f"CELL_{i}" for i in range(100)])
+    mock.var = pd.DataFrame(index=mock.var_names)
+    mock.obs = pd.DataFrame(index=mock.obs_names)
+    return mock
 
 def _create_base_adata(with_errors=False, is_par_y_error=False):
     """Helper function to create a base AnnData object."""
@@ -393,3 +405,226 @@ def test_validation_consistency(validator, valid_h5ad_file):
     assert 'validated' in result2['stats']
     assert result1['stats']['validated'] is True
     assert result2['stats']['validated'] is True 
+
+def test_initialization(validator):
+    """Test validator initialization."""
+    assert isinstance(validator, H5adValidator)
+    assert hasattr(validator, 'has_scanpy')
+    assert hasattr(validator, 'has_h5py')
+
+def test_validate_file_nonexistent(validator):
+    """Test validation of a non-existent file."""
+    result = validator.validate_file("nonexistent.h5ad")
+    assert not result['valid']
+    assert 'file_existence' in result['errors']
+    assert not result['stats']['validated']
+
+def test_validate_file_invalid_hdf5(validator):
+    """Test validation of a file that is not a valid HDF5 file."""
+    with tempfile.NamedTemporaryFile(suffix='.h5ad') as temp_file:
+        # Write some non-HDF5 content
+        temp_file.write(b"Not an HDF5 file")
+        temp_file.flush()
+        
+        with patch('h5py.is_hdf5', return_value=False):
+            result = validator.validate_file(temp_file.name)
+            assert not result['valid']
+            assert 'is_hdf5' in result['errors']
+            assert not result['stats']['validated']
+
+def test_validate_file_h5py_error(validator):
+    """Test validation when h5py raises an error."""
+    with tempfile.NamedTemporaryFile(suffix='.h5ad') as temp_file:
+        with patch('h5py.is_hdf5', side_effect=Exception("h5py error")):
+            result = validator.validate_file(temp_file.name)
+            assert not result['valid']
+            assert 'is_h5py_check_error' in result['errors']
+            assert not result['stats']['validated']
+
+def test_validate_file_scanpy_missing(validator):
+    """Test validation when scanpy is not available."""
+    with tempfile.NamedTemporaryFile(suffix='.h5ad') as temp_file:
+        # First ensure the validator's state is correct
+        validator.has_scanpy = False
+        validator.has_h5py = True
+        
+        with patch('h5py.is_hdf5', return_value=True), \
+             patch('h5py.File'):
+            result = validator.validate_file(temp_file.name)
+            assert result['valid'] is True
+            assert 'warnings' in result
+            assert result['warnings'] is not None
+            assert 'scanpy_missing' in result['warnings']
+            assert isinstance(result['warnings']['scanpy_missing'], str)
+            assert result['warnings']['scanpy_missing'] == "scanpy module not available. Cannot perform AnnData content validation."
+            assert result['stats']['validated'] is True
+
+def test_validate_file_scanpy_error(validator):
+    """Test validation when scanpy raises an error."""
+    with tempfile.NamedTemporaryFile(suffix='.h5ad') as temp_file:
+        with patch('h5py.is_hdf5', return_value=True), \
+             patch('h5py.File'), \
+             patch('scanpy.read_h5ad', side_effect=Exception("scanpy error")):
+            result = validator.validate_file(temp_file.name)
+            assert not result['valid']
+            assert 'scanpy_read_error' in result['errors']
+            assert not result['stats']['validated']
+
+def test_validate_anndata_content(validator, mock_anndata):
+    """Test validation of AnnData content."""
+    # Set up mock AnnData with valid content
+    mock_anndata.var['feature_types'] = pd.Series(['Gene Expression'] * 1000, index=mock_anndata.var_names)
+    mock_anndata.var['gene_ids'] = pd.Series([f"ENSG{str(i).zfill(11)}" for i in range(1000)], index=mock_anndata.var_names)
+    mock_anndata.var['gene_versions'] = pd.Series([f"ENSG{str(i).zfill(11)}.1" for i in range(1000)], index=mock_anndata.var_names)
+    mock_anndata.var['genome'] = pd.Series(['GRCh38'] * 1000, index=mock_anndata.var_names)
+    
+    result = validator._validate_anndata_content(mock_anndata)
+    assert 'errors' in result
+    assert 'warnings' in result
+    assert 'stats' in result
+    assert len(result['errors']) == 0
+
+def test_validate_feature_types(validator, mock_anndata):
+    """Test validation of feature types."""
+    # Test with valid feature types
+    mock_anndata.var = pd.DataFrame(index=mock_anndata.var_names)
+    mock_anndata.var['feature_types'] = pd.Series(['Gene Expression'] * 1000, index=mock_anndata.var_names)
+    errors = {}
+    stats = {}
+    validator._validate_feature_types(mock_anndata, errors, stats)
+    assert len(errors) == 0
+    assert 'feature_counts' in stats
+    assert any(fc['feature_type'] == 'gene' for fc in stats['feature_counts'])
+    
+    # Test with invalid feature type
+    mock_anndata.var['feature_types'] = pd.Series(['Invalid Type'] * 1000, index=mock_anndata.var_names)
+    errors = {}
+    stats = {}
+    validator._validate_feature_types(mock_anndata, errors, stats)
+    assert len(errors) > 0
+    assert 'var.feature_types.invalid' in errors
+    assert 'message' in errors['var.feature_types.invalid']
+    assert 'severity' in errors['var.feature_types.invalid']
+    assert errors['var.feature_types.invalid']['severity'] == 'error'
+
+def test_validate_gene_ids(validator, mock_anndata):
+    """Test validation of gene IDs."""
+    # Test with valid gene IDs
+    mock_anndata.var = pd.DataFrame(index=mock_anndata.var_names)
+    mock_anndata.var['feature_types'] = pd.Series(['Gene Expression'] * 1000, index=mock_anndata.var_names)
+    mock_anndata.var['gene_ids'] = pd.Series([f"ENSG{str(i).zfill(11)}" for i in range(1000)], index=mock_anndata.var_names)
+    errors = {}
+    warnings = {}
+    stats = {}
+    validator._validate_gene_ids(mock_anndata, errors, warnings, stats)
+    assert len(errors) == 0
+    
+    # Test with invalid gene IDs (non-ENSG format)
+    mock_anndata.var['gene_ids'] = pd.Series([f"GENE_{i}" for i in range(1000)], index=mock_anndata.var_names)
+    errors = {}
+    warnings = {}
+    stats = {}
+    validator._validate_gene_ids(mock_anndata, errors, warnings, stats)
+    assert len(errors) > 0
+    assert 'var.gene_ids.format' in errors
+    assert 'message' in errors['var.gene_ids.format']
+    assert 'severity' in errors['var.gene_ids.format']
+    assert errors['var.gene_ids.format']['severity'] == 'error'
+
+def test_validate_cell_ids(validator, mock_anndata):
+    """Test validation of cell IDs."""
+    # Test with valid cell IDs
+    mock_anndata.obs = pd.DataFrame(index=pd.Index([f"CELL_{i}" for i in range(100)]))
+    errors = {}
+    validator._validate_cell_ids(mock_anndata, errors)
+    assert len(errors) == 0
+    
+    # Test with invalid cell IDs (with numeric suffix)
+    mock_anndata.obs = pd.DataFrame(index=pd.Index([f"CELL_{i}.1" for i in range(100)]))
+    errors = {}
+    validator._validate_cell_ids(mock_anndata, errors)
+    assert len(errors) > 0
+    assert 'cell_id_suffix' in errors
+
+def test_validate_genomes(validator, mock_anndata):
+    """Test validation of genome annotations."""
+    # Test with valid genome
+    mock_anndata.var['genome'] = pd.Series(['GRCh38'] * 1000, index=mock_anndata.var_names)
+    stats = {}
+    validator._validate_genomes(mock_anndata, stats)
+    assert 'genomes' in stats
+    assert stats['genomes'] == ['GRCh38']
+    
+    # Test with multiple genomes
+    mock_anndata.var['genome'] = pd.Series(['GRCh38' if i % 2 == 0 else 'mm10' for i in range(1000)], index=mock_anndata.var_names)
+    stats = {}
+    validator._validate_genomes(mock_anndata, stats)
+    assert 'genomes' in stats
+    assert set(stats['genomes']) == {'GRCh38', 'mm10'}
+
+def test_check_compression(validator, mock_anndata):
+    """Test compression check."""
+    with tempfile.NamedTemporaryFile(suffix='.h5ad') as temp_file:
+        errors = {}
+        validator._check_compression(temp_file.name, mock_anndata, errors)
+        # Compression check should not add errors for a valid file
+        assert len(errors) == 0
+
+def test_format_validation_result(validator):
+    """Test validation result formatting."""
+    errors = {'error1': 'message1'}
+    warnings = {'warning1': 'message1'}
+    stats = {'stat1': 'value1'}
+    
+    result = validator.format_validation_result(
+        valid=True,
+        errors=errors,
+        warnings=warnings,
+        stats=stats
+    )
+    
+    assert result['valid'] is True
+    assert result['errors'] == errors
+    assert result['warnings'] == warnings
+    assert result['stats'] == stats 
+
+def test_validate_gene_ids_index_fallback(validator, mock_anndata):
+    """Test gene ID validation with index fallback."""
+    mock_anndata.var = pd.DataFrame(index=[f"ENSG{str(i).zfill(11)}" for i in range(1000)])
+    errors = {}
+    warnings = {}
+    stats = {}
+    validator._validate_gene_ids(mock_anndata, errors, warnings, stats)
+    assert 'var.gene_ids.missing' in errors
+    assert 'var.gene_ids.index_fallback' in warnings
+    assert warnings['var.gene_ids.index_fallback']['severity'] == 'warning'
+    assert stats['feature_keys'] == ['Ensembl gene ID']
+
+def test_validate_gene_versions(validator, mock_anndata):
+    """Test validation of gene versions."""
+    mock_anndata.var = pd.DataFrame(index=mock_anndata.var_names)
+    mock_anndata.var['gene_ids'] = pd.Series([f"ENSG{str(i).zfill(11)}" for i in range(1000)], index=mock_anndata.var_names)
+    mock_anndata.var['gene_versions'] = pd.Series([f"ENSG{str(i).zfill(11)}" for i in range(1000)], index=mock_anndata.var_names)  # Missing version dot
+    errors = {}
+    warnings = {}
+    stats = {}
+    validator._validate_gene_ids(mock_anndata, errors, warnings, stats)
+    assert 'var.gene_versions.format' in errors
+    assert errors['var.gene_versions.format']['severity'] == 'error'
+
+def test_validate_par_y_genes_duplication(validator, mock_anndata):
+    """Test validation of PAR_Y gene duplication."""
+    mock_anndata.var = pd.DataFrame(index=mock_anndata.var_names)
+    # Add a PAR_Y gene with correct suffix but no duplication
+    gene_ids = [f"ENSG{str(i).zfill(11)}" for i in range(1000)]
+    gene_ids[0] = "ENSG00000000001_PAR_Y"  # Correct suffix
+    mock_anndata.var['gene_ids'] = pd.Series(gene_ids, index=mock_anndata.var_names)
+    # Add feature_types to ensure proper validation
+    mock_anndata.var['feature_types'] = pd.Series(['Gene Expression'] * 1000, index=mock_anndata.var_names)
+    errors = {}
+    # Call _validate_gene_ids first to ensure proper setup
+    validator._validate_gene_ids(mock_anndata, errors, {}, {})
+    assert 'var.gene_ids.par_y.duplication' in errors
+    assert errors['var.gene_ids.par_y.duplication']['severity'] == 'error'
+    assert errors['var.gene_ids.par_y.duplication']['gene_id'] == "ENSG00000000001_PAR_Y"
+    assert errors['var.gene_ids.par_y.duplication']['message'] == "PAR_Y gene ID ENSG00000000001_PAR_Y must correspond to at least 2 symbols" 
