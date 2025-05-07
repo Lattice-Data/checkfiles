@@ -27,12 +27,12 @@ sudo apt-get install -y \
     libffi-dev \
     libssl-dev
 
-# Install AWS CLI with specific versions (kept separate for AWS compatibility)
-echo "Installing AWS SDK..."
-pip3 install --no-cache-dir \
-    botocore==1.31.17 \
-    awscli==1.29.17 \
-    boto3==1.28.17
+# Install AWS CLI
+echo "Installing AWS CLI..."
+curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+rm -rf aws awscliv2.zip
 
 # Install package with all dependencies for AMI
 echo "Installing package with AMI dependencies..."

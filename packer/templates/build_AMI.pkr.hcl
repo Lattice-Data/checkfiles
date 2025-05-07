@@ -103,11 +103,6 @@ build {
   }
   
   provisioner "file" {
-    source = "../../setup.py"
-    destination = "/tmp/build/setup.py"
-  }
-  
-  provisioner "file" {
     source = "../../pyproject.toml"
     destination = "/tmp/build/pyproject.toml"
   }
