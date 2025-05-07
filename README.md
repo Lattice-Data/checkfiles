@@ -8,16 +8,12 @@ A scalable system for processing and validating files. It supports both local va
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-- [Running Checkfiles](#running-checkfiles)
-  - [Using Docker (Easiest Method)](#using-docker-easiest-method)
   - [Using AWS Step Functions](#using-aws-step-functions)
 - [Command Reference](#command-reference)
 - [Supported File Formats](#supported-file-formats)
 - [Monitoring and Logs](#monitoring-and-logs)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
+
+
 - [Contributing](#contributing)
 - [License](#license)
 - [Support](#support)
