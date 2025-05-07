@@ -20,6 +20,9 @@ from unittest.mock import patch, MagicMock, mock_open
 import inspect
 import re
 import json
+import requests
+import concurrent.futures
+from io import StringIO
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -28,7 +31,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.utils.helpers import has_gz_extension, validate_gzip_format, stream_s3_file
 from src.core.validation import initialize_validator, validate_local_file, validate_s3_file, create_validation_record
 from src.tracking.progress import SimpleActivityTracker
-from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel
+from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel, fetch_files_from_backend, fetch_schema_for_type, convert_results_to_validation_records, detect_format_from_filename, robust_initialize_validator, display_summary
 from src.models.validation_record import FileValidationRecord
 
 # Define sample H5AD result structure
@@ -81,6 +84,22 @@ SAMPLE_FAILED_RESULT = create_validation_record({
     'identifier': 'TESTFAIL001',
     'error': 'Something went wrong'
 }, 's3://another/file.fastq', 'TESTFAIL001')
+
+# Helper class for mocking requests.get responses
+class MockResponse:
+    def __init__(self, json_data, status_code, ok=True):
+        self.json_data = json_data
+        self.status_code = status_code
+        self.ok = ok
+        self.text = json.dumps(json_data) if json_data else ""
+
+    def json(self):
+        return self.json_data
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.exceptions.HTTPError(f"HTTP error {self.status_code}")
+
 
 @pytest.fixture
 def test_files():
@@ -883,3 +902,377 @@ def test_validate_s3_file_wrapper_invalid_result(monkeypatch):
     assert isinstance(result, FileValidationRecord)
     assert result.validation_success is False
     assert "Unexpected result type" in result.errors.get('validation_error', '')
+
+@patch('src.checkfiles.os.getenv')
+@patch('src.checkfiles.requests.get')
+def test_fetch_files_from_backend_success(mock_requests_get, mock_os_getenv):
+    """Test fetch_files_from_backend successfully retrieves and processes file objects."""
+    # Configure mock for os.getenv
+    mock_os_getenv.side_effect = lambda key: 'fake_key' if key in ['PORTAL_KEY', 'PORTAL_SECRET_KEY'] else None
+
+    # Configure mock for requests.get
+    # First call for the main query
+    mock_query_response = MockResponse(
+        {'@graph': [{'accession': 'ACC1'}, {'accession': 'ACC2'}]},
+        200
+    )
+    # Second call for ACC1 details
+    mock_acc1_response = MockResponse(
+        {'s3_uri': 's3://bucket/file1.txt', 'accession': 'ACC1', 'other_data': 'foo', 'no_file_available': False},
+        200
+    )
+    # Third call for ACC2 details
+    mock_acc2_response = MockResponse(
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'other_data': 'bar', 'no_file_available': False},
+        200
+    )
+    mock_requests_get.side_effect = [mock_query_response, mock_acc1_response, mock_acc2_response]
+
+    backend_uri = "http://fake-backend.com"
+    query = "/search/?type=File"
+    
+    expected_files = [
+        {'s3_uri': 's3://bucket/file1.txt', 'accession': 'ACC1', 'other_data': 'foo', 'no_file_available': False},
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'other_data': 'bar', 'no_file_available': False}
+    ]
+
+    retrieved_files = fetch_files_from_backend(backend_uri, query)
+
+    assert retrieved_files == expected_files
+    
+    # Verify calls to requests.get
+    expected_query_url = f"{backend_uri}/search/?type=File&format=json&limit=all"
+    expected_acc1_url = f"{backend_uri}/ACC1/?frame=object"
+    expected_acc2_url = f"{backend_uri}/ACC2/?frame=object"
+
+    mock_requests_get.assert_any_call(expected_query_url, auth=('fake_key', 'fake_key'))
+    mock_requests_get.assert_any_call(expected_acc1_url, auth=('fake_key', 'fake_key'))
+    mock_requests_get.assert_any_call(expected_acc2_url, auth=('fake_key', 'fake_key'))
+    assert mock_requests_get.call_count == 3
+
+@patch('src.checkfiles.os.getenv')
+@patch('src.checkfiles.requests.get') # requests.get is not used if auth fails early
+def test_fetch_files_from_backend_auth_failure(mock_requests_get, mock_os_getenv):
+    """Test fetch_files_from_backend when authentication keys are missing."""
+    mock_os_getenv.return_value = None # Simulate missing keys
+
+    retrieved_files = fetch_files_from_backend("http://fake-backend.com", "/search/?type=File")
+
+    assert retrieved_files == []
+    mock_requests_get.assert_not_called() # Should not attempt API call if auth fails
+
+@patch('src.checkfiles.os.getenv')
+@patch('src.checkfiles.requests.get')
+def test_fetch_files_from_backend_initial_query_http_error(mock_requests_get, mock_os_getenv):
+    """Test fetch_files_from_backend when the initial query results in an HTTP error."""
+    mock_os_getenv.side_effect = lambda key: 'fake_key' if key in ['PORTAL_KEY', 'PORTAL_SECRET_KEY'] else None
+    
+    mock_requests_get.side_effect = requests.exceptions.HTTPError("Simulated HTTP error")
+
+    retrieved_files = fetch_files_from_backend("http://fake-backend.com", "/search/?type=File")
+
+    assert retrieved_files == []
+    mock_requests_get.assert_called_once() # Should have attempted the initial query
+
+@patch('src.checkfiles.os.getenv')
+@patch('src.checkfiles.requests.get')
+def test_fetch_files_from_backend_item_fetch_http_error(mock_requests_get, mock_os_getenv):
+    """Test fetch_files_from_backend when fetching an item's details results in an HTTP error."""
+    mock_os_getenv.side_effect = lambda key: 'fake_key' if key in ['PORTAL_KEY', 'PORTAL_SECRET_KEY'] else None
+
+    mock_query_response = MockResponse(
+        {'@graph': [{'accession': 'ACC1'}, {'accession': 'ACC2'}]},
+        200
+    )
+    # ACC1 fetch fails, ACC2 succeeds
+    mock_acc2_response = MockResponse(
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'no_file_available': False},
+        200
+    )
+    mock_requests_get.side_effect = [
+        mock_query_response, 
+        requests.exceptions.HTTPError("Simulated HTTP error for ACC1"),
+        mock_acc2_response
+    ]
+
+    # If an HTTPError for an item is caught by the main try-except in fetch_files_from_backend,
+    # the function will return []. The test should reflect this.
+    expected_files = [] 
+
+    retrieved_files = fetch_files_from_backend("http://fake-backend.com", "/search/?type=File")
+
+    assert retrieved_files == expected_files
+    # Call count will be 2: initial query, then ACC1 fetch which fails and aborts.
+    assert mock_requests_get.call_count == 2 
+
+@patch('src.checkfiles.os.getenv')
+@patch('src.checkfiles.requests.get')
+def test_fetch_files_from_backend_skips_no_file_available(mock_requests_get, mock_os_getenv):
+    """Test that files marked with no_file_available=True are skipped."""
+    mock_os_getenv.side_effect = lambda key: 'fake_key' if key in ['PORTAL_KEY', 'PORTAL_SECRET_KEY'] else None
+
+    mock_query_response = MockResponse(
+        {'@graph': [{'accession': 'ACC1'}, {'accession': 'ACC2'}]},
+        200
+    )
+    mock_acc1_response = MockResponse(
+        {'s3_uri': 's3://bucket/file1.txt', 'accession': 'ACC1', 'no_file_available': True}, # ACC1 is not available
+        200
+    )
+    mock_acc2_response = MockResponse(
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'no_file_available': False},
+        200
+    )
+    mock_requests_get.side_effect = [mock_query_response, mock_acc1_response, mock_acc2_response]
+
+    expected_files = [
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'no_file_available': False}
+    ]
+
+    retrieved_files = fetch_files_from_backend("http://fake-backend.com", "/search/?type=File")
+    assert retrieved_files == expected_files
+    assert mock_requests_get.call_count == 3
+
+@patch('src.checkfiles.os.getenv')
+@patch('src.checkfiles.requests.get')
+def test_fetch_files_from_backend_skips_missing_s3_uri(mock_requests_get, mock_os_getenv):
+    """Test that files missing an s3_uri are skipped."""
+    mock_os_getenv.side_effect = lambda key: 'fake_key' if key in ['PORTAL_KEY', 'PORTAL_SECRET_KEY'] else None
+
+    mock_query_response = MockResponse(
+        {'@graph': [{'accession': 'ACC1'}, {'accession': 'ACC2'}]},
+        200
+    )
+    mock_acc1_response = MockResponse(
+        {'accession': 'ACC1', 'no_file_available': False}, # ACC1 is missing s3_uri
+        200
+    )
+    mock_acc2_response = MockResponse(
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'no_file_available': False},
+        200
+    )
+    mock_requests_get.side_effect = [mock_query_response, mock_acc1_response, mock_acc2_response]
+
+    expected_files = [
+        {'s3_uri': 's3://bucket/file2.fastq.gz', 'accession': 'ACC2', 'no_file_available': False}
+    ]
+
+    retrieved_files = fetch_files_from_backend("http://fake-backend.com", "/search/?type=File")
+    assert retrieved_files == expected_files
+    assert mock_requests_get.call_count == 3
+
+
+# Tests for fetch_schema_for_type
+@patch('src.checkfiles.requests.get')
+def test_fetch_schema_for_type_success(mock_requests_get):
+    """Test fetch_schema_for_type successfully retrieves and parses schema properties."""
+    mock_portal_uri = "http://fake-portal.com"
+    mock_obj_type = "Experiment"
+    mock_auth = ('test_key', 'test_secret')
+    
+    expected_schema_properties = {
+        "assay_title": {"type": "string"},
+        "description": {"type": "string"}
+    }
+    mock_response_json = {"properties": expected_schema_properties}
+    mock_requests_get.return_value = MockResponse(mock_response_json, 200)
+
+    schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
+
+    assert schema_properties == expected_schema_properties
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
+    mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
+
+
+@patch('src.checkfiles.requests.get')
+def test_fetch_schema_for_type_http_error(mock_requests_get):
+    """Test fetch_schema_for_type returns empty dict on HTTP error."""
+    mock_portal_uri = "http://fake-portal.com"
+    mock_obj_type = "Experiment"
+    mock_auth = ('test_key', 'test_secret')
+
+    # Simulate an HTTP error
+    mock_requests_get.side_effect = requests.exceptions.HTTPError("Simulated HTTP error")
+
+    schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
+
+    assert schema_properties == {}
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
+    mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
+
+
+@patch('src.checkfiles.requests.get')
+def test_fetch_schema_for_type_json_decode_error(mock_requests_get):
+    """Test fetch_schema_for_type returns empty dict on JSON decode error."""
+    mock_portal_uri = "http://fake-portal.com"
+    mock_obj_type = "Experiment"
+    mock_auth = ('test_key', 'test_secret')
+
+    # Simulate a JSONDecodeError by having .json() raise it
+    mock_response = MagicMock()
+    mock_response.ok = True
+    mock_response.json.side_effect = json.JSONDecodeError("Simulated JSON error", "doc", 0)
+    mock_requests_get.return_value = mock_response
+
+    schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
+
+    assert schema_properties == {}
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
+    mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
+
+
+@patch('src.checkfiles.requests.get')
+def test_fetch_schema_for_type_missing_properties_key(mock_requests_get):
+    """Test fetch_schema_for_type returns empty dict if 'properties' key is missing."""
+    mock_portal_uri = "http://fake-portal.com"
+    mock_obj_type = "Experiment"
+    mock_auth = ('test_key', 'test_secret')
+    
+    mock_response_json = {"some_other_key": "data"} # Missing 'properties'
+    mock_requests_get.return_value = MockResponse(mock_response_json, 200)
+
+    schema_properties = fetch_schema_for_type(mock_portal_uri, mock_obj_type, mock_auth)
+
+    assert schema_properties == {}
+    expected_url = f"{mock_portal_uri}/profiles/{mock_obj_type}/?format=json"
+    mock_requests_get.assert_called_once_with(expected_url, auth=mock_auth)
+
+
+# Tests for convert_results_to_validation_records
+@patch('src.checkfiles.fetch_etag_for_uuid')
+@patch('src.checkfiles.create_validation_record')
+def test_convert_results_to_validation_records_success(mock_create_validation_record, mock_fetch_etag):
+    """Test convert_results_to_validation_records successfully converts data."""
+    mock_portal_uri = "http://fake-portal.com"
+    mock_auth = ('test_key', 'test_secret')
+    
+    raw_results = [
+        {'success': True, 'identifier': 'ID1', 'file_path': 's3://bucket/file1.txt', 'results': {'stat1': 'val1'}},
+        {'success': True, 'identifier': 'ID2', 'file_path': 's3://bucket/file2.txt', 'results': {'stat2': 'val2'}},
+        {'success': False, 'identifier': 'ID3', 'file_path': 's3://bucket/file3.txt'} # Should be skipped
+    ]
+    file_objects = [
+        {'uuid': 'uuid1', 'accession': 'ID1'},
+        {'uuid': 'uuid2', 'accession': 'ID2'},
+        {'uuid': 'uuid3', 'accession': 'ID3'}
+    ]
+
+    # Mock fetch_etag_for_uuid to return specific etags
+    mock_fetch_etag.side_effect = ['etag1', 'etag2']
+    
+    # Create expected validation records
+    record1 = FileValidationRecord('s3://bucket/file1.txt', 'uuid1', 'etag1')
+    record1.validation_success = True
+    record1.info = {'stat1': 'val1'}
+    
+    record2 = FileValidationRecord('s3://bucket/file2.txt', 'uuid2', 'etag2')
+    record2.validation_success = True
+    record2.info = {'stat2': 'val2'}
+    
+    mock_create_validation_record.side_effect = [record1, record2]
+
+    validation_records = convert_results_to_validation_records(raw_results, file_objects, mock_portal_uri, mock_auth)
+
+    assert len(validation_records) == 2
+    
+    # Compare first record
+    assert validation_records[0].file_path == record1.file_path
+    assert validation_records[0].uuid == record1.uuid
+    assert validation_records[0].original_etag == record1.original_etag
+    assert validation_records[0].validation_success == record1.validation_success
+    assert validation_records[0].info == record1.info
+    
+    # Compare second record
+    assert validation_records[1].file_path == record2.file_path
+    assert validation_records[1].uuid == record2.uuid
+    assert validation_records[1].original_etag == record2.original_etag
+    assert validation_records[1].validation_success == record2.validation_success
+    assert validation_records[1].info == record2.info
+
+    # Verify fetch_etag_for_uuid was called correctly for each successful result
+    mock_fetch_etag.assert_any_call(mock_portal_uri, 'uuid1', mock_auth)
+    mock_fetch_etag.assert_any_call(mock_portal_uri, 'uuid2', mock_auth)
+    assert mock_fetch_etag.call_count == 2
+
+    # Verify create_validation_record was called correctly for each successful result
+    mock_create_validation_record.assert_any_call(raw_results[0], raw_results[0]['file_path'], 'uuid1', 'etag1')
+    mock_create_validation_record.assert_any_call(raw_results[1], raw_results[1]['file_path'], 'uuid2', 'etag2')
+    assert mock_create_validation_record.call_count == 2
+
+@patch('builtins.open', new_callable=mock_open)
+@patch('os.path.exists', return_value=True)
+@patch('os.path.getsize', return_value=100)
+@patch('os.makedirs')
+@patch('os.fsync')
+def test_write_result_to_progress_log_file_locking(mock_fsync, mock_makedirs, mock_getsize, mock_exists, mock_file_open):
+    """Test file locking and atomic writes in write_result_to_progress_log."""
+    # Mock file operations
+    mock_exists.return_value = True
+    mock_getsize.return_value = 100  # Non-empty file
+    
+    # Create a mock validation record
+    record = FileValidationRecord(
+        file_path="/path/to/test.h5ad",
+        uuid="test-uuid-123"
+    )
+    record.validation_success = True
+    record.info = {
+        'file_size': 1000,
+        'md5sum': 'abc123',
+        'sha256': 'def456',
+        'crc32c': '7890',
+        'observation_count': 100,
+        'genomes': ['GRCh38'],
+        'feature_counts': [{'feature_type': 'gene', 'feature_count': 1000}]
+    }
+    record.errors = {}
+    
+    # Call function
+    write_result_to_progress_log(record)
+    
+    # Verify file operations
+    mock_file_open.assert_called_once()
+    handle = mock_file_open()
+    handle.write.assert_called()
+    handle.flush.assert_called_once()
+    mock_fsync.assert_called_once()
+
+
+
+def test_display_summary():
+    """Test display summary functionality."""
+    # Create test results
+    record1 = FileValidationRecord(
+        file_path="/path/to/file1.h5ad",
+        uuid="uuid1"
+    )
+    record1.validation_success = True
+    record1.info = {'file_size': 1000}
+    
+    record2 = FileValidationRecord(
+        file_path="/path/to/file2.h5ad",
+        uuid="uuid2"
+    )
+    record2.validation_success = False
+    record2.errors = {'validation_error': 'Test error'}
+    
+    record3 = FileValidationRecord(
+        file_path="/path/to/file3.h5ad",
+        uuid="uuid3"
+    )
+    record3.validation_success = True
+    record3.info = {'file_size': 2000, 'warnings': {'warning1': 'Test warning'}}
+    
+    results = [record1, record2, record3]
+    
+    # Capture stdout
+    with patch('sys.stdout', new=StringIO()) as fake_out:
+        display_summary(results)
+        output = fake_out.getvalue()
+        
+        # Verify output contains expected information
+        assert "file1.h5ad" in output
+        assert "file2.h5ad" in output
+        assert "file3.h5ad" in output
+        assert "Test error" in output
+        assert "Test warning" in output

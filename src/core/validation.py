@@ -197,32 +197,30 @@ def create_validation_record(result: Dict[str, Any], file_path: str, uuid: str =
     """
     validation_record = FileValidationRecord(file_path, uuid, etag)
     
-    # Set validation status
-    if 'success' in result:
-        validation_record.validation_success = result['success']
+    # Set validation success
+    if 'valid' in result:
+        validation_record.validation_success = result['valid']
     elif 'results' in result and 'valid' in result['results']:
         validation_record.validation_success = result['results']['valid']
+    elif 'success' in result:
+        validation_record.validation_success = result['success']
     
-    # Add stats and metadata as info
-    if 'results' in result and 'stats' in result['results']:
+    # Add stats and metadata
+    if 'stats' in result:
+        validation_record.update_info(result['stats'])
+    elif 'results' in result and 'stats' in result['results']:
         validation_record.update_info(result['results']['stats'])
     
-    # Add any platform, read_count, read_length, flowcell_details etc. from results
-    if 'results' in result:
-        for key in ['platform', 'read_count', 'read_length', 'flowcell_details', 'md5sum', 
-                   'sha256', 'crc32c', 'content_md5sum', 'file_size', 'valid']:
-            if key in result['results']:
-                validation_record.update_info({key: result['results'][key]})
-    
-    # Explicitly set valid flag in info if it exists in results
-    if 'results' in result and 'valid' in result['results']:
-        validation_record.update_info({'valid': result['results']['valid']})
-    
     # Add errors
-    if 'error' in result:
-        validation_record.update_errors({'validation_error': result['error']})
+    if 'errors' in result:
+        validation_record.update_errors(result['errors'])
     elif 'results' in result and 'errors' in result['results']:
         validation_record.update_errors(result['results']['errors'])
+    elif 'error' in result:
+        validation_record.update_errors({'validation_error': result['error']})
+    
+    # Explicitly add valid flag to info for consistency
+    validation_record.update_info({'valid': validation_record.validation_success})
     
     return validation_record
 
@@ -309,11 +307,15 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
 
                 # Create validation record
                 record = FileValidationRecord(file_path, identifier, etag)
-                record.validation_success = True
+                # Use validation_results['valid'] for validation_success
+                record.validation_success = validation_results.get('valid', False)
                 record.update_info(validation_results.get('stats', {}))
+                # Explicitly copy 'valid' to info for consistency
+                record.update_info({'valid': validation_results.get('valid', False)})
                 record.update_errors(validation_results.get('errors', {}))
                 
-                track_validation_progress(file_path, progress_tracker, "Completed", True, validation_results)
+                track_validation_progress(file_path, progress_tracker, "Completed", 
+                                         validation_results.get('valid', False), validation_results)
                 return record
                 
             except Exception as e:
@@ -358,16 +360,20 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                 track_validation_progress(file_path, progress_tracker, "Validating (stream)", None)
                 logger.debug("Calling validator.validate_stream")
                 
-                # --- THIS IS THE CORE CHANGE: pass is_gzipped only to validate_stream ---
+                # Pass is_gzipped to validate_stream
                 validation_results = validator.validate_stream(stream_to_validate, is_gzipped=is_gzipped) 
                 
                 # Create validation record
                 record = FileValidationRecord(file_path, identifier, etag)
-                record.validation_success = True
+                # Use validation_results['valid'] for validation_success
+                record.validation_success = validation_results.get('valid', False)
                 record.update_info(validation_results.get('stats', {}))
+                # Explicitly copy 'valid' to info for consistency
+                record.update_info({'valid': validation_results.get('valid', False)})
                 record.update_errors(validation_results.get('errors', {}))
                 
-                track_validation_progress(file_path, progress_tracker, "Completed", True, validation_results)
+                track_validation_progress(file_path, progress_tracker, "Completed", 
+                                         validation_results.get('valid', False), validation_results)
                 return record
                 
         except Exception as e:
@@ -493,22 +499,20 @@ def download_and_validate_random_access_file(s3_path: str, file_format: str, deb
             validation_results["stats"] = {}
         validation_results["stats"].update(hash_stats)
 
-        # Create the final result
-        local_result = {
-            "file_path": s3_path,  # Use the original S3 path
-            "results": validation_results, # Now includes merged stats
-            "success": validation_results.get("valid", False),
-            "identifier": identifier
-        }
+        # Use validation_results['valid'] directly instead of creating a separate success field
+        # This ensures consistency with the rest of the validation code
+        is_valid = validation_results.get('valid', False)
         
         if progress_tracker:
-            progress_tracker.complete_file(s3_path, local_result["success"], validation_results)
+            progress_tracker.complete_file(s3_path, is_valid, validation_results)
         
-        # Create validation record
+        # Create validation record directly from validation_results
         record = FileValidationRecord(s3_path, identifier, etag)
-        record.validation_success = local_result["success"]
-        record.update_info(local_result["results"]["stats"])
-        record.update_errors(local_result["results"].get("errors", {}))
+        record.validation_success = is_valid
+        record.update_info(validation_results.get('stats', {}))
+        # Explicitly copy 'valid' to info for consistency
+        record.update_info({'valid': is_valid})
+        record.update_errors(validation_results.get('errors', {}))
         
         return record
     
@@ -560,7 +564,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
     logger.info(f"Starting validation of S3 file: {s3_path} with format: {file_format}")
     
     # Special handling for file formats that require random access (HDF5, H5AD)
-    if file_format.lower() in ['hdf5', 'h5ad']:
+    if file_format.lower() in ['hdf5', 'h5ad', 'h5']:
         logger.info(f"File format {file_format} requires random access. Using download_and_validate_random_access_file.")
         return download_and_validate_random_access_file(
             s3_path=s3_path,
@@ -617,23 +621,27 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
                 
             validation_results = validator.validate_stream(stream_for_validator, is_gzipped=is_gzipped)
         finally:
-             if hasattr(validation_stream_raw, 'close'): validation_stream_raw.close() # Ensure stream resources are cleaned up
-             
+            if hasattr(validation_stream_raw, 'close'): validation_stream_raw.close() # Ensure stream resources are cleaned up
+            
         logger.debug("Validation completed")
         
-        if progress_tracker:
-            progress_tracker.complete_file(s3_path, True, validation_results)
-        
         # Combine results
-        validation_results['stats'] = {**validation_results.get('stats', {}), **hash_stats}
+        if "stats" not in validation_results:
+            validation_results["stats"] = {}
+        validation_results["stats"].update(hash_stats)
+        
+        # Get valid status directly from validation_results
+        is_valid = validation_results.get('valid', False)
+        
+        if progress_tracker:
+            progress_tracker.complete_file(s3_path, is_valid, validation_results)
         
         # Create validation record
         record = FileValidationRecord(s3_path, identifier, etag)
-        record.validation_success = True
+        record.validation_success = is_valid
         record.update_info(validation_results.get('stats', {}))
-        # Copy valid flag from validation results to info dictionary
-        if 'valid' in validation_results:
-            record.update_info({'valid': validation_results['valid']})
+        # Explicitly copy 'valid' to info for consistency
+        record.update_info({'valid': is_valid})
         record.update_errors(validation_results.get('errors', {}))
         
         return record
