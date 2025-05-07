@@ -843,3 +843,61 @@ def test_feature_type_validation_edge_cases(validator, mock_anndata):
     assert 'var.feature_types.invalid' in errors
     assert errors['var.feature_types.invalid']['count'] == 2
     assert errors['var.feature_types.invalid']['invalid_type'] == 'Invalid Type' 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_multiple_feature_types_validation(validator):
+    """Test validation of H5AD file with multiple feature types."""
+    if not SCANPY_AVAILABLE:
+        pytest.skip("scanpy/anndata not available for test setup")
+        
+    # Create test data with multiple feature types
+    N_OBS = 10
+    N_VARS = 15
+    
+    # Create feature types distribution
+    feature_types = ['Gene Expression'] * 10 + ['Peaks'] * 3 + ['Antibody Capture'] * 2
+    gene_ids = [f"ENSG{str(i).zfill(11)}" for i in range(10)] + \
+               [f"PEAK_{i}" for i in range(3)] + \
+               [f"AB_{i}" for i in range(2)]
+    
+    # Create AnnData object
+    X = np.random.normal(size=(N_OBS, N_VARS)).astype(np.float32)
+    obs = pd.DataFrame(index=[f"CELL_{i}" for i in range(N_OBS)])
+    var = pd.DataFrame(index=[f"FEATURE_{i}" for i in range(N_VARS)])
+    
+    # Add feature types and gene IDs
+    var['feature_types'] = feature_types
+    var['gene_ids'] = gene_ids
+    var['gene_versions'] = [f"{gid}.1" for gid in gene_ids]
+    var['genome'] = ['GRCh38'] * N_VARS
+    
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+    
+    # Write to temporary file
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+    adata.write_h5ad(filename)
+    
+    try:
+        # Validate the file
+        result = validator.validate_file(filename)
+        
+        # Check validation results
+        assert result['valid'] is True
+        assert not result['errors']
+        assert 'feature_counts' in result['stats']
+        
+        # Verify feature type counts
+        feature_counts = result['stats']['feature_counts']
+        # Convert list of dicts to dict for easier checking
+        feature_counts_dict = {fc['feature_type']: fc['feature_count'] for fc in feature_counts}
+        assert feature_counts_dict['gene'] == 10  # Gene Expression maps to 'gene'
+        assert feature_counts_dict['peak'] == 3   # Peaks maps to 'peak'
+        assert feature_counts_dict['antibody capture'] == 2  # Antibody Capture maps to 'antibody capture'
+        
+        # Verify gene ID validation for each feature type
+        assert 'gene_ids_not_ensg' not in result['errors']  # Should not error for non-ENSG IDs in non-gene features
+        
+    finally:
+        # Clean up
+        os.unlink(filename) 
