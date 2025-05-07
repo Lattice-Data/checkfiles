@@ -50,7 +50,9 @@ def mock_optional_imports(monkeypatch):
             mock_module = MagicMock()
             monkeypatch.setitem(sys.modules, module_name, mock_module)
     
-    # Verify core modules are available
+    # Import and verify core modules are available
     for module_name in CORE_MODULES:
-        if module_name not in sys.modules:
+        try:
+            __import__(module_name)
+        except ImportError:
             raise ImportError(f"Required module {module_name} is not installed. Run: pip install '.[test]'") 

@@ -59,6 +59,52 @@ def test_validate_gzip_format():
         assert 'gzip_error' in result
         assert 'is a directory' in result['gzip_error'].lower()
 
+def test_validate_gzip_format_s3():
+    """Test the validate_gzip_format function with S3 paths."""
+    # Mock subprocess.check_output for successful cases
+    with patch('subprocess.check_output') as mock_check_output:
+        # Test valid gzip file in S3
+        # First call returns magic number, second call verifies header structure
+        mock_check_output.side_effect = [
+            b'\x1f\x8b',  # First call: magic number
+            b''  # Second call: header verification (empty response is fine)
+        ]
+        result = validate_gzip_format("s3://bucket/valid.gz")
+        assert result == {}  # Empty dict means no errors
+        
+        # Verify the correct commands were used
+        assert mock_check_output.call_count == 2
+        first_cmd = mock_check_output.call_args_list[0][0][0]
+        second_cmd = mock_check_output.call_args_list[1][0][0]
+        assert "aws s3 cp s3://bucket/valid.gz - --range 0-1" in first_cmd
+        assert "aws s3 cp s3://bucket/valid.gz - --range 0-9 | gunzip -c" in second_cmd
+    
+    # Test invalid gzip file in S3
+    with patch('subprocess.check_output') as mock_check_output:
+        mock_check_output.return_value = b'PK'  # Invalid magic number (ZIP format)
+        result = validate_gzip_format("s3://bucket/invalid.gz")
+        assert 'gzip_error' in result
+        assert 'magic number' in result['gzip_error'].lower()
+    
+    # Test S3 access error
+    with patch('subprocess.check_output') as mock_check_output:
+        mock_check_output.side_effect = subprocess.CalledProcessError(
+            1, "aws s3 cp", stderr=b"AccessDenied: Access Denied"
+        )
+        result = validate_gzip_format("s3://bucket/access-denied.gz")
+        assert 'gzip_error' in result
+        assert 'access denied' in result['gzip_error'].lower()
+    
+    # Test non-existent S3 file
+    with patch('subprocess.check_output') as mock_check_output:
+        mock_check_output.side_effect = subprocess.CalledProcessError(
+            1, "aws s3 cp", stderr=b"NoSuchKey: The specified key does not exist"
+        )
+        result = validate_gzip_format("s3://bucket/nonexistent.gz")
+        assert 'gzip_error' in result
+        assert 'invalid gzip header structure' in result['gzip_error'].lower()
+        assert 'nosuchkey' in result['gzip_error'].lower()
+
 def test_stream_local_file():
     """Test the stream_local_file function with various file types."""
     # Test with a regular text file
