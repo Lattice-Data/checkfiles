@@ -639,36 +639,53 @@ def test_validate_s3_file(validator):
         adata.write_h5ad(filename)
     
     try:
-        with patch('subprocess.run') as mock_run, \
+        # Mock the hash function to return a consistent value
+        with patch('builtins.hash', return_value=43584700), \
+             patch('subprocess.run') as mock_run, \
              patch('os.path.exists') as mock_exists, \
              patch('os.makedirs') as mock_makedirs, \
              patch('os.remove') as mock_remove, \
              patch('tempfile.mkstemp') as mock_mkstemp, \
              patch('h5py.is_hdf5', return_value=True), \
-             patch('scanpy.read_h5ad') as mock_read:
+             patch('h5py.File') as mock_h5py_file, \
+             patch('scanpy.read_h5ad') as mock_read, \
+             patch('os.path.getsize', return_value=1000), \
+             patch('os.path.dirname', return_value='/mnt/scratch'), \
+             patch('os.path.basename', return_value='file.h5ad'), \
+             patch.object(validator, '_check_compression') as mock_compression:
             
             # Mock successful AWS CLI download
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "Success"
             
-            # Mock tempfile creation
+            # Mock tempfile creation to return our test file
             mock_mkstemp.return_value = (123, filename)
             
             # Mock file existence checks
             mock_exists.return_value = True
             
-            # Mock scanpy read
+            # Mock h5py.File to return a context manager
+            mock_h5py_file.return_value.__enter__.return_value = MagicMock()
+            
+            # Mock scanpy read to return our test AnnData
             mock_read.return_value = adata
             
-            # Test S3 validation
-            result = validator.validate_s3_file("s3://bucket/file.h5ad")
+            # Mock compression check to do nothing
+            mock_compression.return_value = None
             
-            # Verify AWS CLI was called
+            # Test S3 validation
+            s3_uri = "s3://bucket/file.h5ad"
+            result = validator.validate_s3_file(s3_uri)
+            
+            # Verify AWS CLI was called with correct command
             mock_run.assert_called_once()
-            assert "aws s3 cp" in mock_run.call_args[0][0]
+            actual_cmd = mock_run.call_args[0][0]
+            expected_cmd = f"aws s3 cp {s3_uri} /mnt/scratch/h5ad_43584700_file.h5ad"
+            assert actual_cmd == expected_cmd
+            assert mock_run.call_args[1]['shell'] is True
             
             # Verify cleanup
-            mock_remove.assert_called_once_with(filename)
+            mock_remove.assert_called_once_with('/mnt/scratch/h5ad_43584700_file.h5ad')
             
             # Verify validation result
             assert result['valid'] is True
