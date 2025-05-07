@@ -628,3 +628,201 @@ def test_validate_par_y_genes_duplication(validator, mock_anndata):
     assert errors['var.gene_ids.par_y.duplication']['severity'] == 'error'
     assert errors['var.gene_ids.par_y.duplication']['gene_id'] == "ENSG00000000001_PAR_Y"
     assert errors['var.gene_ids.par_y.duplication']['message'] == "PAR_Y gene ID ENSG00000000001_PAR_Y must correspond to at least 2 symbols" 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_s3_file(validator):
+    """Test validation of an S3-stored H5AD file."""
+    # Create a temporary file with valid H5AD content
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+        adata = _create_base_adata(with_errors=False)
+        adata.write_h5ad(filename)
+    
+    try:
+        with patch('subprocess.run') as mock_run, \
+             patch('os.path.exists') as mock_exists, \
+             patch('os.makedirs') as mock_makedirs, \
+             patch('os.remove') as mock_remove, \
+             patch('tempfile.mkstemp') as mock_mkstemp, \
+             patch('h5py.is_hdf5', return_value=True), \
+             patch('scanpy.read_h5ad') as mock_read:
+            
+            # Mock successful AWS CLI download
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "Success"
+            
+            # Mock tempfile creation
+            mock_mkstemp.return_value = (123, filename)
+            
+            # Mock file existence checks
+            mock_exists.return_value = True
+            
+            # Mock scanpy read
+            mock_read.return_value = adata
+            
+            # Test S3 validation
+            result = validator.validate_s3_file("s3://bucket/file.h5ad")
+            
+            # Verify AWS CLI was called
+            mock_run.assert_called_once()
+            assert "aws s3 cp" in mock_run.call_args[0][0]
+            
+            # Verify cleanup
+            mock_remove.assert_called_once_with(filename)
+            
+            # Verify validation result
+            assert result['valid'] is True
+            assert 'validated' in result['stats']
+            assert result['stats']['validated'] is True
+            
+    finally:
+        # Clean up the test file
+        if os.path.exists(filename):
+            os.unlink(filename)
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_s3_file_download_error(validator):
+    """Test handling of S3 download errors."""
+    with patch('subprocess.run') as mock_run:
+        # Mock failed AWS CLI download
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "Access Denied"
+        
+        result = validator.validate_s3_file("s3://bucket/file.h5ad")
+        
+        assert result['valid'] is False
+        assert 'download_error' in result['errors']
+        assert "Access Denied" in result['errors']['download_error']
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_date_formatted_symbols_validation(validator, mock_anndata):
+    """Test validation of date-formatted symbols."""
+    # Add date-formatted symbols to var index
+    mock_anndata.var.index = pd.Index(['Mar-1', 'Dec-1', 'GENE_1', '1-Mar', 'GENE_2'])
+    
+    errors = {}
+    validator._check_date_formatted_symbols(mock_anndata, errors)
+    
+    assert 'date_formatted_symbols' in errors
+    assert 'Mar-1' in errors['date_formatted_symbols']
+    assert 'Dec-1' in errors['date_formatted_symbols']
+    assert '1-Mar' in errors['date_formatted_symbols']
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_gene_version_format_validation(validator, mock_anndata):
+    """Test validation of gene version formats."""
+    # Create a smaller test dataset
+    test_data = {
+        'gene_versions': [
+            'ENSG00000000001.1',  # Valid
+            'ENSG00000000002',    # Missing version
+            'ENSG00000000003.1_PAR_Y',  # Valid PAR_Y
+            'ENSG00000000004',    # Missing version
+            'ENSG00000000005.1'   # Valid
+        ]
+    }
+    test_index = [f'GENE_{i}' for i in range(5)]
+    
+    # Create a new mock AnnData with the correct size
+    mock_anndata.var = pd.DataFrame(index=test_index)
+    mock_anndata.var['gene_versions'] = pd.Series(test_data['gene_versions'], index=test_index)
+    mock_anndata.var['gene_ids'] = pd.Series([f'ENSG{str(i).zfill(11)}' for i in range(5)], index=test_index)
+    mock_anndata.var['feature_types'] = pd.Series(['Gene Expression'] * 5, index=test_index)
+    
+    errors = {}
+    warnings = {}
+    stats = {}
+    validator._validate_gene_ids(mock_anndata, errors, warnings, stats)
+    
+    assert 'var.gene_versions.format' in errors
+    assert len(errors['var.gene_versions.format']['examples']) == 2  # Two invalid versions
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_compression_check_scenarios(validator):
+    """Test compression check with various scenarios."""
+    # Create test data
+    adata = _create_base_adata(with_errors=False)
+    
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+        # Write with no compression
+        adata.write_h5ad(filename, compression=None)
+        
+        # Create a much larger file to ensure compression check triggers
+        with open(filename, 'ab') as f:
+            f.write(b'0' * 1000000)  # Add 1MB of zeros
+        
+        errors = {}
+        validator._check_compression(filename, adata, errors)
+        
+        # Should warn about compression
+        assert 'compression' in errors
+        assert 'File size' in errors['compression']
+        assert 'potential gzip compressed size' in errors['compression']
+        
+        # Clean up
+        os.unlink(filename)
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_critical_error_handling(validator):
+    """Test handling of critical errors in format_validation_result."""
+    # Test with missing feature_types
+    errors = {
+        'var.feature_types.missing': 'Required field missing'
+    }
+    result = validator.format_validation_result(True, errors=errors)
+    assert result['valid'] is False
+    assert result['stats']['validated'] is False
+    
+    # Test with missing gene_ids
+    errors = {
+        'var.gene_ids.missing': 'Required field missing'
+    }
+    result = validator.format_validation_result(True, errors=errors)
+    assert result['valid'] is False
+    assert result['stats']['validated'] is False
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_multiple_genome_validation(validator, mock_anndata):
+    """Test validation of multiple genome annotations."""
+    # Set up multiple genomes
+    mock_anndata.var['genome'] = pd.Series(
+        ['GRCh38' if i % 2 == 0 else 'mm10' for i in range(1000)],
+        index=mock_anndata.var_names
+    )
+    
+    stats = {}
+    validator._validate_genomes(mock_anndata, stats)
+    
+    assert 'genomes' in stats
+    assert set(stats['genomes']) == {'GRCh38', 'mm10'}
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_feature_type_validation_edge_cases(validator, mock_anndata):
+    """Test feature type validation with edge cases."""
+    # Test with NaN feature types
+    mock_anndata.var['feature_types'] = pd.Series(
+        ['Gene Expression'] * 998 + [np.nan] * 2,
+        index=mock_anndata.var_names
+    )
+    
+    errors = {}
+    stats = {}
+    validator._validate_feature_types(mock_anndata, errors, stats)
+    
+    assert 'var.feature_types.undefined' in errors
+    assert errors['var.feature_types.undefined']['count'] == 2
+    
+    # Test with invalid feature type
+    mock_anndata.var['feature_types'] = pd.Series(
+        ['Gene Expression'] * 998 + ['Invalid Type'] * 2,
+        index=mock_anndata.var_names
+    )
+    
+    errors = {}
+    stats = {}
+    validator._validate_feature_types(mock_anndata, errors, stats)
+    
+    assert 'var.feature_types.invalid' in errors
+    assert errors['var.feature_types.invalid']['count'] == 2
+    assert errors['var.feature_types.invalid']['invalid_type'] == 'Invalid Type' 
