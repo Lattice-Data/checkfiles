@@ -52,6 +52,10 @@ fi
 # Install package with all dependencies for AMI
 echo "Installing package with AMI dependencies..."
 cd /opt/checkfiles || { echo "ERROR: Cannot change to /opt/checkfiles directory"; exit 1; }
+
+# Install hatchling for PEP 660 support
+pip3 install --no-cache-dir hatchling
+
 # Install with AMI-specific dependencies
 pip3 install --no-cache-dir ".[ami]"
 

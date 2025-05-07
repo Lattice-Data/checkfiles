@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "checkfiles"
@@ -49,4 +49,17 @@ ami = [
     "types-boto3==1.0.2",
     "numpy==1.24.3",
     "h5py==3.10.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/checkfiles",
+    "src/core",
+    "src/validators",
+    "src/worker",
+    "src/utils",
+    "src/tracking",
+    "src/cli",
+    "src/models",
+    "src/backend"
 ]
