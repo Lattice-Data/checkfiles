@@ -475,9 +475,9 @@ class H5adValidator(BaseValidator): # Changed inheritance
                     logger.debug(f"Checking potential PAR_Y gene ID: {g_id}")
                     
                     # Check Suffix
-                    if not g_id.endswith('_PAR_Y'):
+                    if not g_id.upper().endswith('_PAR_Y'):
                         errors[f'var.gene_ids.par_y.suffix'] = {
-                            'message': f"PAR_Y gene ID '{g_id}' must end with '_PAR_Y'",
+                            'message': f"PAR_Y gene ID '{g_id}' must end with '_PAR_Y' (case-insensitive)",
                             'location': 'var.gene_ids',
                             'field': 'gene_ids',
                             'severity': 'error',

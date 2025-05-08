@@ -662,7 +662,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         file_path,
                         file_format,
                         debug,
-                        None,  # Pass None instead of validator instance
+                        validator,  # Pass the provided validator instance
                         None   # Don't pass progress_tracker to worker processes
                     )
                 )
@@ -738,7 +738,7 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         s3_path,
                         s3_file_format,  # Use the format for this specific file
                         debug,
-                        None,  # Pass None instead of validator instance
+                        validator,  # Pass the provided validator instance
                         None,  # Don't pass progress_tracker to worker processes
                         identifier,  # Pass the identifier if available
                         True,  # Return a FileValidationRecord

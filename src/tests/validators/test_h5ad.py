@@ -962,3 +962,240 @@ def test_compression_efficiency_validation(validator):
         # Clean up
         os.unlink(filename1)
         os.unlink(filename2) 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_s3_file_comprehensive(validator):
+    """Test comprehensive S3 validation scenarios including debug mode and error handling."""
+    # Create a temporary file with valid H5AD content
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+        adata = _create_base_adata(with_errors=False)
+        adata.write_h5ad(filename)
+    
+    try:
+        # Test scenarios
+        test_cases = [
+            {
+                "name": "debug_mode",
+                "s3_uri": "s3://bucket/debug.h5ad",
+                "debug": True,
+                "mock_returncode": 0,
+                "mock_stdout": "Debug output",
+                "expected_valid": True
+            },
+            {
+                "name": "critical_error",
+                "s3_uri": "s3://bucket/critical.h5ad",
+                "debug": False,
+                "mock_returncode": 0,
+                "mock_stdout": "Success",
+                "expected_valid": False,
+                "mock_adata": _create_base_adata(with_errors=True)  # Create invalid data
+            },
+            {
+                "name": "cleanup_error",
+                "s3_uri": "s3://bucket/cleanup.h5ad",
+                "debug": False,
+                "mock_returncode": 0,
+                "mock_stdout": "Success",
+                "expected_valid": True,
+                "mock_remove_error": True
+            }
+        ]
+
+        for case in test_cases:
+            with patch('builtins.hash', return_value=43584700), \
+                 patch('subprocess.run') as mock_run, \
+                 patch('os.path.exists') as mock_exists, \
+                 patch('os.makedirs') as mock_makedirs, \
+                 patch('os.remove') as mock_remove, \
+                 patch('tempfile.mkstemp') as mock_mkstemp, \
+                 patch('h5py.is_hdf5', return_value=True), \
+                 patch('h5py.File') as mock_h5py_file, \
+                 patch('scanpy.read_h5ad') as mock_read, \
+                 patch('os.path.getsize', return_value=1000), \
+                 patch('os.path.dirname', return_value='/mnt/scratch'), \
+                 patch('os.path.basename', return_value='file.h5ad'), \
+                 patch.object(validator, '_check_compression') as mock_compression:
+                
+                # Mock AWS CLI download
+                mock_run.return_value.returncode = case['mock_returncode']
+                mock_run.return_value.stdout = case['mock_stdout']
+                
+                # Mock tempfile creation
+                mock_mkstemp.return_value = (123, filename)
+                
+                # Mock file existence
+                mock_exists.return_value = True
+                
+                # Mock h5py.File
+                mock_h5py_file.return_value.__enter__.return_value = MagicMock()
+                
+                # Mock scanpy read
+                mock_read.return_value = case.get('mock_adata', adata)
+                
+                # Mock compression check
+                mock_compression.return_value = None
+                
+                # Mock cleanup error if specified
+                if case.get('mock_remove_error'):
+                    mock_remove.side_effect = Exception("Cleanup failed")
+                
+                # Test S3 validation
+                result = validator.validate_s3_file(case['s3_uri'], debug=case['debug'])
+                
+                # Verify AWS CLI command
+                mock_run.assert_called_once()
+                actual_cmd = mock_run.call_args[0][0]
+                expected_cmd = f"aws s3 cp {case['s3_uri']} /mnt/scratch/h5ad_43584700_file.h5ad"
+                assert actual_cmd == expected_cmd
+                
+                # Verify debug mode
+                if case['debug']:
+                    assert mock_run.call_args[1]['capture_output'] is True
+                    assert mock_run.call_args[1]['text'] is True
+                
+                # Verify validation result
+                assert result['valid'] == case['expected_valid']
+                
+                # Verify cleanup
+                if not case.get('mock_remove_error'):
+                    mock_remove.assert_called_once_with('/mnt/scratch/h5ad_43584700_file.h5ad')
+                
+                # Reset mocks for next iteration
+                mock_run.reset_mock()
+                mock_remove.reset_mock()
+                
+    finally:
+        # Clean up the test file
+        if os.path.exists(filename):
+            os.unlink(filename) 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_par_y_genes_comprehensive(validator):
+    """Test comprehensive PAR_Y gene validation scenarios."""
+    # Create test data with various PAR_Y gene scenarios
+    test_cases = [
+        {
+            "name": "valid_par_y",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y",  # Valid PAR_Y
+                "ENSG00000000001_PAR_Y",  # Duplicate for first PAR_Y
+                "ENSG00000000002_PAR_Y",  # Another valid PAR_Y
+                "ENSG00000000002_PAR_Y",  # Duplicate for second PAR_Y
+                "ENSG00000000003"         # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000001.1_PAR_Y",  # Valid version
+                "ENSG00000000001.1_PAR_Y",  # Duplicate version
+                "ENSG00000000002.1_PAR_Y",  # Valid version
+                "ENSG00000000002.1_PAR_Y",  # Duplicate version
+                "ENSG00000000003.1"         # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # First symbol for first PAR_Y
+                "GENE_1_dup",  # Second symbol for first PAR_Y
+                "GENE_2",      # First symbol for second PAR_Y
+                "GENE_2_dup",  # Second symbol for second PAR_Y
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": []
+        },
+        {
+            "name": "invalid_suffix",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y_INVALID",  # Invalid suffix (contains PAR_Y but doesn't end with _PAR_Y)
+                "ENSG00000000001_PAR_Y_INVALID",  # Duplicate invalid
+                "ENSG00000000002_PAR_Y",         # Valid PAR_Y
+                "ENSG00000000002_PAR_Y",         # Duplicate valid
+                "ENSG00000000003"                # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000001.1_PAR_Y_INVALID",  # Invalid version
+                "ENSG00000000001.1_PAR_Y_INVALID",  # Duplicate invalid
+                "ENSG00000000002.1_PAR_Y",         # Valid version
+                "ENSG00000000002.1_PAR_Y",         # Duplicate valid
+                "ENSG00000000003.1"                # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # First symbol
+                "GENE_1_dup",  # Second symbol
+                "GENE_2",      # First symbol
+                "GENE_2_dup",  # Second symbol
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": ["var.gene_ids.par_y.suffix"]
+        },
+        {
+            "name": "version_mismatch",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y",   # Valid PAR_Y
+                "ENSG00000000001_PAR_Y",   # Duplicate
+                "ENSG00000000002_PAR_Y",   # Valid PAR_Y
+                "ENSG00000000002_PAR_Y",   # Duplicate
+                "ENSG00000000003"          # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000002.1_PAR_Y", # Version mismatch (should be 00001)
+                "ENSG00000000002.1_PAR_Y", # Duplicate mismatch
+                "ENSG00000000002.1_PAR_Y", # Valid version
+                "ENSG00000000002.1_PAR_Y", # Duplicate valid
+                "ENSG00000000003.1"        # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # First symbol
+                "GENE_1_dup",  # Second symbol
+                "GENE_2",      # First symbol
+                "GENE_2_dup",  # Second symbol
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": ["var.gene_ids.par_y.version_mismatch"]
+        },
+        {
+            "name": "missing_duplication",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y",   # Valid PAR_Y (no duplicate)
+                "ENSG00000000002_PAR_Y",   # Valid PAR_Y
+                "ENSG00000000002_PAR_Y",   # Duplicate
+                "ENSG00000000003"          # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000001.1_PAR_Y", # Valid version
+                "ENSG00000000002.1_PAR_Y", # Valid version
+                "ENSG00000000002.1_PAR_Y", # Duplicate valid
+                "ENSG00000000003.1"        # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # Only one symbol (should error)
+                "GENE_2",      # First symbol
+                "GENE_2_dup",  # Second symbol
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": ["var.gene_ids.par_y.duplication"]
+        }
+    ]
+
+    for case in test_cases:
+        # Create AnnData object for this test case
+        var_data = {
+            'gene_ids': case['gene_ids'],
+            'gene_versions': case['gene_versions'],
+            'feature_types': ['Gene Expression'] * len(case['gene_ids'])
+        }
+        
+        # Create DataFrame with the symbols as index
+        var_df = pd.DataFrame(var_data, index=case['symbols'])
+        adata = ad.AnnData(var=var_df)
+        
+        # Run validation
+        errors = {}
+        validator._validate_par_y_genes(adata, errors)
+        
+        # Verify errors
+        if case['expected_errors']:
+            assert len(errors) > 0, f"Expected errors for case {case['name']} but found none"
+            for expected_error in case['expected_errors']:
+                assert any(error.startswith(expected_error) for error in errors), \
+                    f"Expected error {expected_error} not found in {errors} for case {case['name']}"
+        else:
+            assert len(errors) == 0, f"Unexpected errors {errors} for case {case['name']}" 
