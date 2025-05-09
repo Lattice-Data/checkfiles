@@ -2,145 +2,95 @@
 
 # Checkfiles
 
-A scalable system for processing and validating files. It supports both local validation via Docker containers and AWS cloud-based architecture. This project provides infrastructure and automation for validation workflows.
+A scalable system for processing and validating files. It supports both local validation on your computer and remote validation using cloud services. This project provides tools and automation for validation workflows.
 
 ## Table of Contents
 - [Overview](#overview)
-- [Architecture](#architecture)
 - [Getting Started](#getting-started)
-  - [Using AWS Step Functions](#using-aws-step-functions)
 - [Command Reference](#command-reference)
 - [Supported File Formats](#supported-file-formats)
 - [Monitoring and Logs](#monitoring-and-logs)
-
-
+- [Architecture](#architecture)
 - [Contributing](#contributing)
 - [License](#license)
 - [Support](#support)
 
 ## Overview
 
-Checkfiles is a system that supports both local and cloud-based deployments:
-- Supports both local validation via Docker containers and cloud-based deployment.
-- Monitors for new file uploads
-- Processes and validates files (FASTQ, H5, H5AD formats supported)
-- Tracks processing status
-- Provides metrics and monitoring
-- Scales automatically based on workload
-
-## Architecture
-
-The system consists of several components:
-
-### 1. AWS Lambda Functions (`cdk/checkfiles_runner/lambdas/`)
-- `check_pending`: Monitors for pending files
-- `create_instance`: Manages processing instances
-- `run_checkfiles`: Executes file validation
-- `get_status`: Provides status information
-- `counter`: Tracks processing metrics
-
-### 2. Infrastructure (`cdk/`)
-- AWS CDK-based infrastructure as code
-- Automated deployment pipelines
-- Resource management and scaling
-
-### 3. AMI Builder (`packer/`)
-- Custom AMI creation for processing instances
-- Environment configuration
-- Dependency management
-
-### 4. Source Code (`src/`)
-- Core processing logic
-- Utility functions
-- Test suites
+Checkfiles is a versatile file validation system that:
+- Supports validation both on your local computer and through cloud-based services
+- Performs format-specific validation of files (FASTQ, H5, H5AD formats supported)
+- Tracks progress of the validation process
+- Provides file format specific summary statistics
+- Automatically scales up cloud-based validation according to the quantity of files
 
 ## Getting Started
 
-**Note**: The AWS Step Functions instructions below are intended only for advanced users who need to deploy a new Step Function for file validation. Lattice curators should follow the validation execution instructions in `docker/README.md` or `cdk/README.md` instead of deploying AWS Step Function.
+### Clone the Repository
 
-### Using AWS Step Functions
-
-The AWS Step Functions method is recommended for production use and large-scale file processing.
-
-#### Step 1: Deploy the CDK stack
+Start by cloning the repository to your local machine:
 
 ```bash
-# Navigate to CDK directory
-cd cdk
-
-# Deploy the stack
-cdk deploy RunCheckfilesStepFunctionProduction --profile your-aws-profile
+git clone https://github.com/Lattice-Data/checkfiles.git
+cd checkfiles
 ```
 
-The deployment will take several minutes. When complete, you'll see outputs including the Step Function's ARN.
+### Choose Your Validation Method
 
-#### Step 2: Start a Step Function execution
+Checkfiles supports two primary validation methods:
 
-1. Open the AWS Management Console
-2. Navigate to Step Functions
-3. Find the deployed state machine (named like "RunCheckfilesStepFunctionProduction")
-4. Click "Start execution"
-5. Enter input parameters in JSON format:
+1. **Local validation using Docker** - For validating files on your own computer (including both local files and files stored in S3 buckets)
+   * Follow the instructions in the [Docker README](docker/README.md) for setup and execution
 
-```json
-{
-  "query": "/report/?type=RawSequenceFile&lab.title=Calliope+Dendrou%2C+Oxford&read_type=i5+index",
-  "instance_name_suffix": "mike",
-  "backend_uri": "https://www.lattice-data.org/",
-  "update": false
-}
-```
-
-6. Click "Start execution"
-
-#### Step 3: Monitor the execution
-
-1. The execution diagram will show progress through the workflow steps
-2. Each state will turn green when successful or red if it fails
-3. Click on individual states to see input/output data
-4. The final state will show validation results
-
-#### Step 4: View logs in CloudWatch
-
-1. Open CloudWatch in the AWS Management Console
-2. Navigate to "Log groups"
-3. Find log groups with names containing "RunCheckfiles"
-4. Click on a log group to view execution logs
-5. Filter logs using the search bar for specific information
+2. **Cloud-based validation** - For validating files submitted to production portal ("https://www.lattice-data.org/") or demo data portal using query-based file selection
+   * Follow the instructions in the [CDK README](cdk/README.md) for setup and execution
 
 ## Command Reference
 
 ### Common Parameters
+The following parameters can be used with both local and cloud-based execution:
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `-d`, `--debug` | Enable debug output | `-d` |
+| `-t`, `--threads` | Number of processing threads | `-t 4` |
+
+### Local Execution Parameters (Docker)
+The following parameters are used with local Docker-based execution:
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `-f`, `--file-format` | File format to validate | `-f fastq` |
 | `-l`, `--local-file` | Local file path(s) | `-l /path/to/file.fastq.gz` |
 | `-s3`, `--s3-file` | S3 file URI(s) | `-s3 s3://bucket/file.fastq.gz` |
-| `-d`, `--debug` | Enable debug output | `-d` |
-| `-t`, `--threads` | Number of processing threads | `-t 4` |
+
+### Cloud-Based Execution Parameters
+The following parameters are only used for cloud-based execution:
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
 | `--backend-uri` | URI of backend service | `--backend-uri https://api.example.com` |
 | `--query` | Query string for backend | `--query "type=file&format=fastq"` |
 | `--update` | Update backend with results | `--update` |
 
-### Docker-specific Options
+### Thread Count Calculation
 
-When using Docker, paths inside the container start with `/app`:
+Think of threads like workers that process your files. When you use the `-t` parameter, here's how the program decides how many workers to use:
 
-```bash
+- By default, the program uses as many workers as your computer has (but never more than the number of files you're checking)
+- If you ask for fewer workers with `-t 2`, the program will only use that many
+- The program will always use at least 1 worker
+- **The more workers you provide, the more files can be validated in parallel, which significantly speeds up processing when handling multiple files**
 
-# Using host path (automatically translated)
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /Users/yourusername/path/to/file.fastq
-```
-
+Example: If your computer has 8 cores (workers available), but you only have 5 files to check, the program will use 5 workers. If you specify `-t 3`, it will only use 3 workers.
 
 ## Supported File Formats
 
 Checkfiles currently supports the following file formats:
 
-- **FASTQ**: DNA/RNA sequence reads (`.fastq`, `.fq`, with optional `.gz` compression)
-- **H5**: Hierarchical data format (`.h5`)
-- **H5AD**: AnnData single-cell genomics data (`.h5ad`)
+- **FASTQ**: compressed sequencing reads (`.fastq.gz`)
+- **H5**: Single-cell hierarchical data matrix (`.h5`)
+- **H5AD**: AnnData annotated single-cell data matrix (`.h5ad`)
 
 Each format has specific validators that check for:
 - Format compliance
@@ -149,37 +99,31 @@ Each format has specific validators that check for:
 - Metadata correctness
 - Size and compression verification
 
-## Monitoring and Logs
+## Architecture
 
-### Docker Logs
+For those interested in the technical implementation, the system consists of several components:
 
-When using Docker, logs are saved to:
-- `logs/validation_progress.log`: Shows summary of each validation
-- `logs/checkfiles_debug.log`: Detailed debug information
+### 1. Cloud Functions
+- Monitor for pending files
+- Manage processing instances
+- Execute file validation
+- Provide status information
+- Track processing metrics
 
-### AWS CloudWatch Logs
+### 2. Infrastructure
+- Cloud-based infrastructure as code
+- Automated deployment pipelines
+- Resource management and scaling
 
-When using AWS Step Functions, logs are available in CloudWatch:
-1. Open the AWS Management Console
-2. Navigate to CloudWatch → Log groups
-3. Look for groups with names containing:
-   - `/aws/lambda/RunCheckfiles`
-   - `/aws/states/RunCheckfilesStepFunction`
+### 3. Machine Image Builder
+- Custom machine image creation for processing instances
+- Environment configuration
+- Dependency management
 
-### Common Log Messages
-
-- `Successfully processed: X` - Number of files processed
-- `Valid files: Y` - Number of valid files
-- `Invalid files: Z` - Number of invalid files
-- `Failed to process: N` - Files that couldn't be processed
-
-
-
-### Testing
-```bash
-# Run unit tests
-python -m pytest src/tests/
-```
+### 4. Source Code
+- Core processing logic
+- Utility functions
+- Test suites
 
 ## Contributing
 
