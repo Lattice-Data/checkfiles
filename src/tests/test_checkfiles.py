@@ -23,6 +23,8 @@ import json
 import requests
 import concurrent.futures
 from io import StringIO
+import importlib
+import builtins # Import the builtins module to patch __import__
 
 # Add the parent directory to path to make imports work
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -33,6 +35,7 @@ from src.core.validation import initialize_validator, validate_local_file, valid
 from src.tracking.progress import SimpleActivityTracker
 from src.checkfiles import write_result_to_progress_log, main, process_files_in_parallel, fetch_files_from_backend, fetch_schema_for_type, convert_results_to_validation_records, detect_format_from_filename, robust_initialize_validator, display_summary
 from src.models.validation_record import FileValidationRecord
+from src.validators.fastq.validator import FastqValidator
 
 # Define sample H5AD result structure
 SAMPLE_H5AD_RESULT = create_validation_record({
@@ -1276,3 +1279,60 @@ def test_display_summary():
         assert "file3.h5ad" in output
         assert "Test error" in output
         assert "Test warning" in output
+
+
+def test_display_summary_comprehensive():
+    """Test comprehensive summary display with various result types and error conditions."""
+    results = []
+    
+    # 1. Successful H5AD validation
+    h5ad_result = FileValidationRecord("test.h5ad")
+    h5ad_result.validation_success = True
+    h5ad_result.info = {
+        "file_size": 1000,
+        "md5sum": "abc123",
+        "observation_count": 100,
+        "genomes": ["GRCh38"],
+        "feature_counts": [{"feature_type": "gene", "feature_count": 1000}],
+        "is_hdf5": True
+    }
+    results.append(h5ad_result)
+    
+    # 2. Failed validation with content error
+    content_error_record = FileValidationRecord("invalid.fastq")
+    content_error_record.validation_success = False
+    content_error_record.update_errors({
+        "format_error": "Invalid FASTQ format in test",
+        "read_error": "Quality scores do not match sequence length in test"
+    })
+    results.append(content_error_record)
+    
+    # 3. Successful validation with warnings
+    warning_result = FileValidationRecord("warning.fastq")
+    warning_result.validation_success = True
+    warning_result.info = {
+        "file_size": 2000,
+        "md5sum": "def456",
+        "warnings": {
+            "quality_scores": "Low quality scores detected in test",
+            "read_length": "Variable read lengths in test"
+        }
+    }
+    results.append(warning_result)
+
+    with patch('sys.stdout', new=StringIO()) as fake_out:
+        display_summary(results)
+        output = fake_out.getvalue()
+        
+        # Verify summary statistics
+        assert "Total files submitted: 3" in output, "Summary: Total files submitted mismatch"
+        assert "Files with valid content: 2" in output, "Summary: Files with valid content mismatch"
+        assert "Files with invalid content: 1" in output, "Summary: Files with invalid content mismatch"
+        assert "Files that failed processing (e.g., download/read errors): 0" in output, f"Summary: Files that failed processing mismatch. Output:\n{output}"
+        
+        # Verify detailed results for content error
+        assert "invalid.fastq: Invalid content" in output, f"Detailed: Content error line for invalid.fastq not found. Output:\n{output}"
+        assert "Invalid FASTQ format in test" in output, f"Detailed: Specific error message for invalid.fastq not found. Output:\n{output}"
+
+# Store original __import__ for delegation
+original_builtin_import = builtins.__import__

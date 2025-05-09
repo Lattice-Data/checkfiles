@@ -628,3 +628,574 @@ def test_validate_par_y_genes_duplication(validator, mock_anndata):
     assert errors['var.gene_ids.par_y.duplication']['severity'] == 'error'
     assert errors['var.gene_ids.par_y.duplication']['gene_id'] == "ENSG00000000001_PAR_Y"
     assert errors['var.gene_ids.par_y.duplication']['message'] == "PAR_Y gene ID ENSG00000000001_PAR_Y must correspond to at least 2 symbols" 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_s3_file(validator):
+    """Test validation of an S3-stored H5AD file."""
+    # Create a temporary file with valid H5AD content
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+        adata = _create_base_adata(with_errors=False)
+        adata.write_h5ad(filename)
+    
+    try:
+        # Mock the hash function to return a consistent value
+        with patch('builtins.hash', return_value=43584700), \
+             patch('subprocess.run') as mock_run, \
+             patch('os.path.exists') as mock_exists, \
+             patch('os.makedirs') as mock_makedirs, \
+             patch('os.remove') as mock_remove, \
+             patch('tempfile.mkstemp') as mock_mkstemp, \
+             patch('h5py.is_hdf5', return_value=True), \
+             patch('h5py.File') as mock_h5py_file, \
+             patch('scanpy.read_h5ad') as mock_read, \
+             patch('os.path.getsize', return_value=1000), \
+             patch('os.path.dirname', return_value='/mnt/scratch'), \
+             patch('os.path.basename', return_value='file.h5ad'), \
+             patch.object(validator, '_check_compression') as mock_compression:
+            
+            # Mock successful AWS CLI download
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "Success"
+            
+            # Mock tempfile creation to return our test file
+            mock_mkstemp.return_value = (123, filename)
+            
+            # Mock file existence checks
+            mock_exists.return_value = True
+            
+            # Mock h5py.File to return a context manager
+            mock_h5py_file.return_value.__enter__.return_value = MagicMock()
+            
+            # Mock scanpy read to return our test AnnData
+            mock_read.return_value = adata
+            
+            # Mock compression check to do nothing
+            mock_compression.return_value = None
+            
+            # Test S3 validation
+            s3_uri = "s3://bucket/file.h5ad"
+            result = validator.validate_s3_file(s3_uri)
+            
+            # Verify AWS CLI was called with correct command
+            mock_run.assert_called_once()
+            actual_cmd = mock_run.call_args[0][0]
+            expected_cmd = f"aws s3 cp {s3_uri} /mnt/scratch/h5ad_43584700_file.h5ad"
+            assert actual_cmd == expected_cmd
+            assert mock_run.call_args[1]['shell'] is True
+            
+            # Verify cleanup
+            mock_remove.assert_called_once_with('/mnt/scratch/h5ad_43584700_file.h5ad')
+            
+            # Verify validation result
+            assert result['valid'] is True
+            assert 'validated' in result['stats']
+            assert result['stats']['validated'] is True
+            
+    finally:
+        # Clean up the test file
+        if os.path.exists(filename):
+            os.unlink(filename)
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_s3_file_download_error(validator):
+    """Test handling of S3 download errors."""
+    with patch('subprocess.run') as mock_run:
+        # Mock failed AWS CLI download
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "Access Denied"
+        
+        result = validator.validate_s3_file("s3://bucket/file.h5ad")
+        
+        assert result['valid'] is False
+        assert 'download_error' in result['errors']
+        assert "Access Denied" in result['errors']['download_error']
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_date_formatted_symbols_validation(validator, mock_anndata):
+    """Test validation of date-formatted symbols."""
+    # Add date-formatted symbols to var index
+    mock_anndata.var.index = pd.Index(['Mar-1', 'Dec-1', 'GENE_1', '1-Mar', 'GENE_2'])
+    
+    errors = {}
+    validator._check_date_formatted_symbols(mock_anndata, errors)
+    
+    assert 'date_formatted_symbols' in errors
+    assert 'Mar-1' in errors['date_formatted_symbols']
+    assert 'Dec-1' in errors['date_formatted_symbols']
+    assert '1-Mar' in errors['date_formatted_symbols']
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_gene_version_format_validation(validator, mock_anndata):
+    """Test validation of gene version formats."""
+    # Create a smaller test dataset
+    test_data = {
+        'gene_versions': [
+            'ENSG00000000001.1',  # Valid
+            'ENSG00000000002',    # Missing version
+            'ENSG00000000003.1_PAR_Y',  # Valid PAR_Y
+            'ENSG00000000004',    # Missing version
+            'ENSG00000000005.1'   # Valid
+        ]
+    }
+    test_index = [f'GENE_{i}' for i in range(5)]
+    
+    # Create a new mock AnnData with the correct size
+    mock_anndata.var = pd.DataFrame(index=test_index)
+    mock_anndata.var['gene_versions'] = pd.Series(test_data['gene_versions'], index=test_index)
+    mock_anndata.var['gene_ids'] = pd.Series([f'ENSG{str(i).zfill(11)}' for i in range(5)], index=test_index)
+    mock_anndata.var['feature_types'] = pd.Series(['Gene Expression'] * 5, index=test_index)
+    
+    errors = {}
+    warnings = {}
+    stats = {}
+    validator._validate_gene_ids(mock_anndata, errors, warnings, stats)
+    
+    assert 'var.gene_versions.format' in errors
+    assert len(errors['var.gene_versions.format']['examples']) == 2  # Two invalid versions
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_compression_check_scenarios(validator):
+    """Test compression check with various scenarios."""
+    # Create test data
+    adata = _create_base_adata(with_errors=False)
+    
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+        # Write with no compression
+        adata.write_h5ad(filename, compression=None)
+        
+        # Create a much larger file to ensure compression check triggers
+        with open(filename, 'ab') as f:
+            f.write(b'0' * 1000000)  # Add 1MB of zeros
+        
+        errors = {}
+        validator._check_compression(filename, adata, errors)
+        
+        # Should warn about compression
+        assert 'compression' in errors
+        assert 'File size' in errors['compression']
+        assert 'potential gzip compressed size' in errors['compression']
+        
+        # Clean up
+        os.unlink(filename)
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_critical_error_handling(validator):
+    """Test handling of critical errors in format_validation_result."""
+    # Test with missing feature_types
+    errors = {
+        'var.feature_types.missing': 'Required field missing'
+    }
+    result = validator.format_validation_result(True, errors=errors)
+    assert result['valid'] is False
+    assert result['stats']['validated'] is False
+    
+    # Test with missing gene_ids
+    errors = {
+        'var.gene_ids.missing': 'Required field missing'
+    }
+    result = validator.format_validation_result(True, errors=errors)
+    assert result['valid'] is False
+    assert result['stats']['validated'] is False
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_multiple_genome_validation(validator, mock_anndata):
+    """Test validation of multiple genome annotations."""
+    # Set up multiple genomes
+    mock_anndata.var['genome'] = pd.Series(
+        ['GRCh38' if i % 2 == 0 else 'mm10' for i in range(1000)],
+        index=mock_anndata.var_names
+    )
+    
+    stats = {}
+    validator._validate_genomes(mock_anndata, stats)
+    
+    assert 'genomes' in stats
+    assert set(stats['genomes']) == {'GRCh38', 'mm10'}
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_feature_type_validation_edge_cases(validator, mock_anndata):
+    """Test feature type validation with edge cases."""
+    # Test with NaN feature types
+    mock_anndata.var['feature_types'] = pd.Series(
+        ['Gene Expression'] * 998 + [np.nan] * 2,
+        index=mock_anndata.var_names
+    )
+    
+    errors = {}
+    stats = {}
+    validator._validate_feature_types(mock_anndata, errors, stats)
+    
+    assert 'var.feature_types.undefined' in errors
+    assert errors['var.feature_types.undefined']['count'] == 2
+    
+    # Test with invalid feature type
+    mock_anndata.var['feature_types'] = pd.Series(
+        ['Gene Expression'] * 998 + ['Invalid Type'] * 2,
+        index=mock_anndata.var_names
+    )
+    
+    errors = {}
+    stats = {}
+    validator._validate_feature_types(mock_anndata, errors, stats)
+    
+    assert 'var.feature_types.invalid' in errors
+    assert errors['var.feature_types.invalid']['count'] == 2
+    assert errors['var.feature_types.invalid']['invalid_type'] == 'Invalid Type' 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_multiple_feature_types_validation(validator):
+    """Test validation of H5AD file with multiple feature types."""
+    if not SCANPY_AVAILABLE:
+        pytest.skip("scanpy/anndata not available for test setup")
+        
+    # Create test data with multiple feature types
+    N_OBS = 10
+    N_VARS = 15
+    
+    # Create feature types distribution
+    feature_types = ['Gene Expression'] * 10 + ['Peaks'] * 3 + ['Antibody Capture'] * 2
+    gene_ids = [f"ENSG{str(i).zfill(11)}" for i in range(10)] + \
+               [f"PEAK_{i}" for i in range(3)] + \
+               [f"AB_{i}" for i in range(2)]
+    
+    # Create AnnData object
+    X = np.random.normal(size=(N_OBS, N_VARS)).astype(np.float32)
+    obs = pd.DataFrame(index=[f"CELL_{i}" for i in range(N_OBS)])
+    var = pd.DataFrame(index=[f"FEATURE_{i}" for i in range(N_VARS)])
+    
+    # Add feature types and gene IDs
+    var['feature_types'] = feature_types
+    var['gene_ids'] = gene_ids
+    var['gene_versions'] = [f"{gid}.1" for gid in gene_ids]
+    var['genome'] = ['GRCh38'] * N_VARS
+    
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+    
+    # Write to temporary file
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+    adata.write_h5ad(filename)
+    
+    try:
+        # Validate the file
+        result = validator.validate_file(filename)
+        
+        # Check validation results
+        assert result['valid'] is True
+        assert not result['errors']
+        assert 'feature_counts' in result['stats']
+        
+        # Verify feature type counts
+        feature_counts = result['stats']['feature_counts']
+        # Convert list of dicts to dict for easier checking
+        feature_counts_dict = {fc['feature_type']: fc['feature_count'] for fc in feature_counts}
+        assert feature_counts_dict['gene'] == 10  # Gene Expression maps to 'gene'
+        assert feature_counts_dict['peak'] == 3   # Peaks maps to 'peak'
+        assert feature_counts_dict['antibody capture'] == 2  # Antibody Capture maps to 'antibody capture'
+        
+        # Verify gene ID validation for each feature type
+        assert 'gene_ids_not_ensg' not in result['errors']  # Should not error for non-ENSG IDs in non-gene features
+        
+    finally:
+        # Clean up
+        os.unlink(filename) 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_compression_efficiency_validation(validator):
+    """Test validation of compression efficiency in H5AD files."""
+    if not SCANPY_AVAILABLE:
+        pytest.skip("scanpy/anndata not available for test setup")
+        
+    # Create test data
+    N_OBS = 100  # Larger dataset to ensure meaningful compression
+    N_VARS = 1000
+    
+    # Create AnnData object with sparse data
+    X = np.random.normal(size=(N_OBS, N_VARS)).astype(np.float32)
+    # Make it sparse by setting most values to 0
+    X[X < 0.5] = 0
+    
+    obs = pd.DataFrame(index=[f"CELL_{i}" for i in range(N_OBS)])
+    var = pd.DataFrame(index=[f"GENE_{i}" for i in range(N_VARS)])
+    
+    # Add required columns
+    var['feature_types'] = ['Gene Expression'] * N_VARS
+    var['gene_ids'] = [f"ENSG{str(i).zfill(11)}" for i in range(N_VARS)]
+    var['gene_versions'] = [f"ENSG{str(i).zfill(11)}.1" for i in range(N_VARS)]
+    var['genome'] = ['GRCh38'] * N_VARS
+    
+    adata = ad.AnnData(X=X, obs=obs, var=var)
+    
+    # Create two temporary files with different compression settings
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp1, \
+         tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp2:
+        filename1 = tmp1.name  # Will use gzip compression
+        filename2 = tmp2.name  # Will use minimal compression
+    
+    try:
+        # Write files with different compression settings
+        adata.write_h5ad(filename1, compression='gzip')  # Explicit gzip compression
+        adata.write_h5ad(filename2, compression=None)  # No compression
+        
+        # Validate both files
+        result1 = validator.validate_file(filename1)
+        result2 = validator.validate_file(filename2)
+        
+        # Check that the gzip compressed file is valid
+        assert result1['valid'] is True  # gzip compression should be fine
+        assert 'compression' not in result1['errors']
+        
+        # Check that the uncompressed file is invalid due to compression warning
+        assert result2['valid'] is False  # Should be invalid due to compression
+        assert 'compression' in result2['errors']
+        assert 'File size' in result2['errors']['compression']
+        assert 'potential gzip compressed size' in result2['errors']['compression']
+        
+        # Verify file sizes
+        size1 = os.path.getsize(filename1)
+        size2 = os.path.getsize(filename2)
+        assert size1 < size2  # Compressed file should be smaller
+        
+    finally:
+        # Clean up
+        os.unlink(filename1)
+        os.unlink(filename2) 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_s3_file_comprehensive(validator):
+    """Test comprehensive S3 validation scenarios including debug mode and error handling."""
+    # Create a temporary file with valid H5AD content
+    with tempfile.NamedTemporaryFile(suffix='.h5ad', delete=False) as tmp:
+        filename = tmp.name
+        adata = _create_base_adata(with_errors=False)
+        adata.write_h5ad(filename)
+    
+    try:
+        # Test scenarios
+        test_cases = [
+            {
+                "name": "debug_mode",
+                "s3_uri": "s3://bucket/debug.h5ad",
+                "debug": True,
+                "mock_returncode": 0,
+                "mock_stdout": "Debug output",
+                "expected_valid": True
+            },
+            {
+                "name": "critical_error",
+                "s3_uri": "s3://bucket/critical.h5ad",
+                "debug": False,
+                "mock_returncode": 0,
+                "mock_stdout": "Success",
+                "expected_valid": False,
+                "mock_adata": _create_base_adata(with_errors=True)  # Create invalid data
+            },
+            {
+                "name": "cleanup_error",
+                "s3_uri": "s3://bucket/cleanup.h5ad",
+                "debug": False,
+                "mock_returncode": 0,
+                "mock_stdout": "Success",
+                "expected_valid": True,
+                "mock_remove_error": True
+            }
+        ]
+
+        for case in test_cases:
+            with patch('builtins.hash', return_value=43584700), \
+                 patch('subprocess.run') as mock_run, \
+                 patch('os.path.exists') as mock_exists, \
+                 patch('os.makedirs') as mock_makedirs, \
+                 patch('os.remove') as mock_remove, \
+                 patch('tempfile.mkstemp') as mock_mkstemp, \
+                 patch('h5py.is_hdf5', return_value=True), \
+                 patch('h5py.File') as mock_h5py_file, \
+                 patch('scanpy.read_h5ad') as mock_read, \
+                 patch('os.path.getsize', return_value=1000), \
+                 patch('os.path.dirname', return_value='/mnt/scratch'), \
+                 patch('os.path.basename', return_value='file.h5ad'), \
+                 patch.object(validator, '_check_compression') as mock_compression:
+                
+                # Mock AWS CLI download
+                mock_run.return_value.returncode = case['mock_returncode']
+                mock_run.return_value.stdout = case['mock_stdout']
+                
+                # Mock tempfile creation
+                mock_mkstemp.return_value = (123, filename)
+                
+                # Mock file existence
+                mock_exists.return_value = True
+                
+                # Mock h5py.File
+                mock_h5py_file.return_value.__enter__.return_value = MagicMock()
+                
+                # Mock scanpy read
+                mock_read.return_value = case.get('mock_adata', adata)
+                
+                # Mock compression check
+                mock_compression.return_value = None
+                
+                # Mock cleanup error if specified
+                if case.get('mock_remove_error'):
+                    mock_remove.side_effect = Exception("Cleanup failed")
+                
+                # Test S3 validation
+                result = validator.validate_s3_file(case['s3_uri'], debug=case['debug'])
+                
+                # Verify AWS CLI command
+                mock_run.assert_called_once()
+                actual_cmd = mock_run.call_args[0][0]
+                expected_cmd = f"aws s3 cp {case['s3_uri']} /mnt/scratch/h5ad_43584700_file.h5ad"
+                assert actual_cmd == expected_cmd
+                
+                # Verify debug mode
+                if case['debug']:
+                    assert mock_run.call_args[1]['capture_output'] is True
+                    assert mock_run.call_args[1]['text'] is True
+                
+                # Verify validation result
+                assert result['valid'] == case['expected_valid']
+                
+                # Verify cleanup
+                if not case.get('mock_remove_error'):
+                    mock_remove.assert_called_once_with('/mnt/scratch/h5ad_43584700_file.h5ad')
+                
+                # Reset mocks for next iteration
+                mock_run.reset_mock()
+                mock_remove.reset_mock()
+                
+    finally:
+        # Clean up the test file
+        if os.path.exists(filename):
+            os.unlink(filename) 
+
+@pytest.mark.skipif(not SCANPY_AVAILABLE or not H5PY_AVAILABLE, reason="scanpy/h5py needed")
+def test_validate_par_y_genes_comprehensive(validator):
+    """Test comprehensive PAR_Y gene validation scenarios."""
+    # Create test data with various PAR_Y gene scenarios
+    test_cases = [
+        {
+            "name": "valid_par_y",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y",  # Valid PAR_Y
+                "ENSG00000000001_PAR_Y",  # Duplicate for first PAR_Y
+                "ENSG00000000002_PAR_Y",  # Another valid PAR_Y
+                "ENSG00000000002_PAR_Y",  # Duplicate for second PAR_Y
+                "ENSG00000000003"         # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000001.1_PAR_Y",  # Valid version
+                "ENSG00000000001.1_PAR_Y",  # Duplicate version
+                "ENSG00000000002.1_PAR_Y",  # Valid version
+                "ENSG00000000002.1_PAR_Y",  # Duplicate version
+                "ENSG00000000003.1"         # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # First symbol for first PAR_Y
+                "GENE_1_dup",  # Second symbol for first PAR_Y
+                "GENE_2",      # First symbol for second PAR_Y
+                "GENE_2_dup",  # Second symbol for second PAR_Y
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": []
+        },
+        {
+            "name": "invalid_suffix",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y_INVALID",  # Invalid suffix (contains PAR_Y but doesn't end with _PAR_Y)
+                "ENSG00000000001_PAR_Y_INVALID",  # Duplicate invalid
+                "ENSG00000000002_PAR_Y",         # Valid PAR_Y
+                "ENSG00000000002_PAR_Y",         # Duplicate valid
+                "ENSG00000000003"                # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000001.1_PAR_Y_INVALID",  # Invalid version
+                "ENSG00000000001.1_PAR_Y_INVALID",  # Duplicate invalid
+                "ENSG00000000002.1_PAR_Y",         # Valid version
+                "ENSG00000000002.1_PAR_Y",         # Duplicate valid
+                "ENSG00000000003.1"                # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # First symbol
+                "GENE_1_dup",  # Second symbol
+                "GENE_2",      # First symbol
+                "GENE_2_dup",  # Second symbol
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": ["var.gene_ids.par_y.suffix"]
+        },
+        {
+            "name": "version_mismatch",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y",   # Valid PAR_Y
+                "ENSG00000000001_PAR_Y",   # Duplicate
+                "ENSG00000000002_PAR_Y",   # Valid PAR_Y
+                "ENSG00000000002_PAR_Y",   # Duplicate
+                "ENSG00000000003"          # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000002.1_PAR_Y", # Version mismatch (should be 00001)
+                "ENSG00000000002.1_PAR_Y", # Duplicate mismatch
+                "ENSG00000000002.1_PAR_Y", # Valid version
+                "ENSG00000000002.1_PAR_Y", # Duplicate valid
+                "ENSG00000000003.1"        # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # First symbol
+                "GENE_1_dup",  # Second symbol
+                "GENE_2",      # First symbol
+                "GENE_2_dup",  # Second symbol
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": ["var.gene_ids.par_y.version_mismatch"]
+        },
+        {
+            "name": "missing_duplication",
+            "gene_ids": [
+                "ENSG00000000001_PAR_Y",   # Valid PAR_Y (no duplicate)
+                "ENSG00000000002_PAR_Y",   # Valid PAR_Y
+                "ENSG00000000002_PAR_Y",   # Duplicate
+                "ENSG00000000003"          # Regular gene
+            ],
+            "gene_versions": [
+                "ENSG00000000001.1_PAR_Y", # Valid version
+                "ENSG00000000002.1_PAR_Y", # Valid version
+                "ENSG00000000002.1_PAR_Y", # Duplicate valid
+                "ENSG00000000003.1"        # Regular version
+            ],
+            "symbols": [
+                "GENE_1",      # Only one symbol (should error)
+                "GENE_2",      # First symbol
+                "GENE_2_dup",  # Second symbol
+                "GENE_3"       # Regular gene
+            ],
+            "expected_errors": ["var.gene_ids.par_y.duplication"]
+        }
+    ]
+
+    for case in test_cases:
+        # Create AnnData object for this test case
+        var_data = {
+            'gene_ids': case['gene_ids'],
+            'gene_versions': case['gene_versions'],
+            'feature_types': ['Gene Expression'] * len(case['gene_ids'])
+        }
+        
+        # Create DataFrame with the symbols as index
+        var_df = pd.DataFrame(var_data, index=case['symbols'])
+        adata = ad.AnnData(var=var_df)
+        
+        # Run validation
+        errors = {}
+        validator._validate_par_y_genes(adata, errors)
+        
+        # Verify errors
+        if case['expected_errors']:
+            assert len(errors) > 0, f"Expected errors for case {case['name']} but found none"
+            for expected_error in case['expected_errors']:
+                assert any(error.startswith(expected_error) for error in errors), \
+                    f"Expected error {expected_error} not found in {errors} for case {case['name']}"
+        else:
+            assert len(errors) == 0, f"Unexpected errors {errors} for case {case['name']}" 

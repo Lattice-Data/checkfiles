@@ -12,20 +12,6 @@ echo "3. Setting up symbolic links for module discovery"
 echo "4. Verifying the installation"
 echo ""
 
-# Create and set up /opt/checkfiles directory
-sudo mkdir -p /opt/checkfiles
-sudo chmod -R 777 /opt/checkfiles
-
-# Copy files from /tmp/build to /opt/checkfiles
-if [ -d /tmp/build ]; then
-    echo "Copying files from /tmp/build to /opt/checkfiles..."
-    sudo cp -r /tmp/build/* /opt/checkfiles/
-    sudo chmod -R 777 /opt/checkfiles
-else
-    echo "ERROR: /tmp/build directory not found"
-    exit 1
-fi
-
 # List directory contents for debugging
 echo "Checking /opt/checkfiles contents:"
 ls -la /opt/checkfiles
@@ -252,29 +238,16 @@ sudo cp -f /opt/checkfiles/src/utils/helpers/__init__.py "${SITE_PACKAGES}/src/u
 echo "Installing package in development mode..."
 cd /opt/checkfiles || { echo "ERROR: Cannot change to /opt/checkfiles directory"; exit 1; }
 
-# Verify Python setup files exist
-if [ ! -f setup.py ] && [ ! -f pyproject.toml ]; then
-    echo "WARNING: Neither setup.py nor pyproject.toml found in /opt/checkfiles"
-    echo "Creating a basic setup.py file..."
-    cat > setup.py << 'EOF'
-from setuptools import setup, find_packages
-
-setup(
-    name="checkfiles",
-    version="0.1.0",
-    packages=find_packages(),
-    install_requires=[
-        "crcmod>=1.7",
-        "h5py>=3.0.0",
-    ],
-)
-EOF
+# Verify Python setup file exists
+if [ ! -f pyproject.toml ]; then
+    echo "ERROR: pyproject.toml not found in /opt/checkfiles"
+    exit 1
 fi
 
 # Install needed dependencies
 echo "Installing Python dependencies..."
 sudo pip3 install crcmod==1.7
-sudo pip3 install -e .
+sudo pip3 install -e ".[ami]"
 
 # Create consistent import structure
 echo "Creating consistent module structure..."

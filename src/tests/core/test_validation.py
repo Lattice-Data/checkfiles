@@ -8,6 +8,8 @@ from io import BytesIO
 from unittest.mock import patch, MagicMock, mock_open, Mock
 import tempfile
 import hashlib
+import io
+import gzip
 
 from src.core.validation import (
     initialize_validator,
@@ -15,7 +17,8 @@ from src.core.validation import (
     download_and_validate_random_access_file,
     calculate_hashes_for_stream,
     validate_s3_file,
-    create_validation_record
+    create_validation_record,
+    track_validation_progress
 )
 from src.models.validation_record import FileValidationRecord
 from src.tracking.progress import SimpleActivityTracker, ProgressTrackingStream
@@ -357,4 +360,157 @@ def test_initialize_validator():
 def test_initialize_validator_unsupported_format():
     """Test validator initialization with unsupported format."""
     with pytest.raises(ValueError, match="Unsupported file format"):
-        initialize_validator('unsupported', 'test.txt') 
+        initialize_validator('unsupported', 'test.txt')
+
+def test_calculate_hashes_for_stream_regular():
+    """Test hash calculation for regular (non-gzipped) data."""
+    # Create test data
+    test_data = b"This is some test data for hash calculation"
+    input_stream = io.BytesIO(test_data)
+    
+    # Calculate expected hashes directly
+    expected_md5 = hashlib.md5(test_data).hexdigest()
+    expected_sha256 = hashlib.sha256(test_data).hexdigest()
+    
+    # Calculate hashes using the function
+    hash_stats = calculate_hashes_for_stream(input_stream, is_gzipped=False)
+    
+    # Verify calculated hashes
+    assert hash_stats['md5sum'] == expected_md5
+    assert hash_stats['sha256'] == expected_sha256
+    assert hash_stats['file_size'] == len(test_data)
+    assert 'content_md5sum' not in hash_stats
+    assert 'content_size' not in hash_stats
+
+def test_calculate_hashes_for_stream_gzipped():
+    """Test hash calculation for gzipped data."""
+    # Create test data
+    original_data = b"This is some test data that will be compressed"
+    
+    # Compress the data
+    compressed_data = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed_data, mode='wb') as gz:
+        gz.write(original_data)
+    
+    # Get the compressed bytes and reset the stream
+    compressed_bytes = compressed_data.getvalue()
+    compressed_data.seek(0)
+    
+    # Calculate expected hashes directly
+    expected_compressed_md5 = hashlib.md5(compressed_bytes).hexdigest()
+    expected_compressed_sha256 = hashlib.sha256(compressed_bytes).hexdigest()
+    expected_content_md5 = hashlib.md5(original_data).hexdigest()
+    
+    # Calculate hashes using the function
+    hash_stats = calculate_hashes_for_stream(compressed_data, is_gzipped=True)
+    
+    # Verify calculated hashes
+    assert hash_stats['md5sum'] == expected_compressed_md5
+    assert hash_stats['sha256'] == expected_compressed_sha256
+    assert hash_stats['file_size'] == len(compressed_bytes)
+    assert hash_stats['content_md5sum'] == expected_content_md5
+    assert hash_stats['content_size'] == len(original_data)
+
+def test_calculate_hashes_for_stream_empty():
+    """Test hash calculation for empty data."""
+    input_stream = io.BytesIO(b"")
+    
+    hash_stats = calculate_hashes_for_stream(input_stream, is_gzipped=False)
+    
+    assert hash_stats['file_size'] == 0
+    assert hash_stats['md5sum'] == hashlib.md5(b"").hexdigest()
+    assert hash_stats['sha256'] == hashlib.sha256(b"").hexdigest()
+
+def test_create_validation_record_basic():
+    """Test creating a validation record with basic data."""
+    result = {
+        'valid': True,
+        'stats': {'file_size': 1000},
+        'errors': {}
+    }
+    
+    record = create_validation_record(result, "test.h5ad")
+    
+    assert isinstance(record, FileValidationRecord)
+    assert record.validation_success is True
+    assert record.info['file_size'] == 1000
+    assert not record.errors
+
+def test_create_validation_record_with_errors():
+    """Test creating a validation record with errors."""
+    result = {
+        'valid': False,
+        'stats': {'file_size': 1000},
+        'errors': {'format': 'Invalid format'}
+    }
+    
+    record = create_validation_record(result, "test.h5ad")
+    
+    assert isinstance(record, FileValidationRecord)
+    assert record.validation_success is False
+    assert record.info['file_size'] == 1000
+    assert record.errors['format'] == 'Invalid format'
+
+def test_create_validation_record_with_uuid_and_etag():
+    """Test creating a validation record with UUID and ETag."""
+    result = {
+        'valid': True,
+        'stats': {'file_size': 1000},
+        'errors': {}
+    }
+    
+    uuid = "test-uuid"
+    etag = "test-etag"
+    
+    record = create_validation_record(result, "test.h5ad", uuid=uuid, etag=etag)
+    
+    assert isinstance(record, FileValidationRecord)
+    assert record.uuid == uuid
+    assert record.original_etag == etag
+
+def test_track_validation_progress():
+    """Test progress tracking functionality."""
+    mock_tracker = MagicMock(spec=SimpleActivityTracker)
+    file_path = "test.h5ad"
+    
+    # Test status update
+    track_validation_progress(file_path, mock_tracker, "Testing")
+    mock_tracker.update_progress.assert_called_with(file_path, status="Testing")
+    
+    # Test completion
+    results = {'valid': True, 'stats': {'file_size': 1000}}
+    track_validation_progress(file_path, mock_tracker, "Complete", True, results)
+    mock_tracker.complete_file.assert_called_with(file_path, True, results)
+
+def test_track_validation_progress_no_tracker():
+    """Test progress tracking with no tracker."""
+    # Should not raise any errors
+    track_validation_progress("test.h5ad", None, "Testing")
+    track_validation_progress("test.h5ad", None, "Complete", True, {})
+
+def test_initialize_validator_fastq():
+    """Test initializing FastqValidator."""
+    with patch('src.validators.fastq.FastqValidator') as mock_validator:
+        mock_validator.return_value = MagicMock()
+        validator = initialize_validator("fastq", "test.fastq.gz")
+        assert isinstance(validator, MagicMock)
+
+def test_initialize_validator_h5ad():
+    """Test initializing H5adValidator."""
+    with patch('src.validators.h5ad.H5adValidator') as mock_validator:
+        mock_validator.return_value = MagicMock()
+        validator = initialize_validator("h5ad", "test.h5ad")
+        assert isinstance(validator, MagicMock)
+
+def test_initialize_validator_invalid_format():
+    """Test initializing validator with invalid format."""
+    with pytest.raises(ValueError):
+        initialize_validator("invalid_format", "test.txt")
+
+def test_initialize_validator_import_error():
+    """Test handling of import errors during validator initialization."""
+    with patch('src.validators.fastq.FastqValidator', side_effect=ImportError("Test error")), \
+         patch('validators.fastq.FastqValidator', side_effect=ImportError("Test error")), \
+         patch('sys.path', []):  # Replace sys.path with an empty list
+        with pytest.raises(ImportError, match="Error importing FastqValidator from all paths: Test error, Test error"):
+            initialize_validator("fastq", "test.fastq.gz") 

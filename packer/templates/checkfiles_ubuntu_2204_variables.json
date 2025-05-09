@@ -7,7 +7,6 @@
         "../scripts/install_python_dependencies.sh",
         "../scripts/setup_validator_modules.sh",
         "../scripts/setup_environment_file.sh",
-        "../scripts/create_validator_stubs.sh",
         "../scripts/validate_ami.sh"
     ],
     "ami_type": "checkfiles_jammy_arm64_ami",

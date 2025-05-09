@@ -9,7 +9,6 @@ This module provides:
 import pytest
 import sys
 from unittest.mock import MagicMock
-import scipy.io
 
 # Register custom markers
 def pytest_configure(config):
@@ -19,30 +18,22 @@ def pytest_configure(config):
     )
 
 # List of optional modules that will be mocked if not available
-# These are marked as optional in requirements-test.txt
+# These may be conditionally used in the codebase but are not required
 OPTIONAL_MODULES = [
     'pysam',
     'pybigwig',
 ]
 
 # List of core modules that should be available
-# These are required in requirements-test.txt
+# These are defined in pyproject.toml under [project.dependencies]
 CORE_MODULES = [
     'scanpy', 
     'h5py', 
     'numpy',
     'pandas',
     'scipy',
-]
-
-# List of optional dependencies that might be needed for tests
-optional_deps = [
-    'h5py',
-    'scanpy',
-    'anndata',
-    'numpy',
-    'pandas',
-    'scipy',
+    'boto3',
+    'crcmod',
 ]
 
 @pytest.fixture(autouse=True)
@@ -59,7 +50,9 @@ def mock_optional_imports(monkeypatch):
             mock_module = MagicMock()
             monkeypatch.setitem(sys.modules, module_name, mock_module)
     
-    # Verify core modules are available
+    # Import and verify core modules are available
     for module_name in CORE_MODULES:
-        if module_name not in sys.modules:
-            raise ImportError(f"Required module {module_name} is not installed") 
+        try:
+            __import__(module_name)
+        except ImportError:
+            raise ImportError(f"Required module {module_name} is not installed. Run: pip install '.[test]'") 

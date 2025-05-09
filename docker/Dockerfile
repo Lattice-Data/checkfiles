@@ -49,7 +49,7 @@ RUN mkdir -p /opt/checkfiles /app/logs
 
 # Copy Python code and setup files
 COPY src /app/src
-COPY setup.py pyproject.toml /app/
+COPY pyproject.toml /app/
 
 # Create path wrapper script
 RUN echo '#!/bin/bash\n\
@@ -57,10 +57,8 @@ python3 /app/src/checkfiles.py "$@"\n\
 ' > /app/run.sh && chmod +x /app/run.sh
 
 # Install Python dependencies
-RUN pip3 install --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir numpy && \
-    pip3 install --no-cache-dir h5py scanpy && \
-    pip3 install --no-cache-dir -e .
+RUN pip3 install --upgrade pip && \
+    pip3 install --no-cache-dir .
 
 # Make the script executable
 RUN chmod +x /app/src/checkfiles.py

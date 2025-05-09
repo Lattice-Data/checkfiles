@@ -19,23 +19,16 @@ This guide explains how to run the Checkfiles validation tool using Docker, whic
 
 ## Quick Start
 
-1. Create a test data directory and add your files:
-```bash
-# From project root
-mkdir -p test_data
-# Add your .fastq.gz files to test_data/
-```
-
-2. Build and run:
+1. Build and run:
 ```bash
 # From project root
 docker compose -f docker/docker-compose.yml up
 ```
 
-3. In a new terminal window, run the validation:
+2. In a new terminal window, run the validation:
 ```bash
 # Validate a local file
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/your_file.fastq.gz
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /path/your_file.fastq.gz
 ```
 
 ## Step-by-Step Tutorial
@@ -52,16 +45,7 @@ After installation, verify Docker is running:
 docker --version
 ```
 
-### 2. Setting Up Test Files
-
-Create a directory for your test files:
-```bash
-mkdir -p test_data
-```
-
-You can now place any files you want to validate in this directory. For example, if you have FASTQ files (`.fastq` or `.fastq.gz`), copy them to the `test_data` directory.
-
-### 3. Starting the Docker Container
+### 2. Starting the Docker Container
 
 From the project root directory, run:
 ```bash
@@ -75,15 +59,15 @@ This command:
 
 The terminal will remain open showing logs. Leave this running and open a new terminal window for the next steps.
 
-### 4. Running Validation
+### 3. Running Validation
 
 In a new terminal window, navigate to the project root and run:
 
 ```bash
-docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /app/test_data/your_file.fastq.gz
+docker compose -f docker/docker-compose.yml run checkfiles -f fastq -l /path/your_file.fastq.gz
 ```
 
-Replace `your_file.fastq.gz` with the actual filename in your test_data directory.
+Replace `your_file.fastq.gz` with the actual filename.
 
 ### 5. Understanding the Results
 
