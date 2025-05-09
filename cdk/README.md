@@ -44,52 +44,61 @@ Before you begin, ensure you have:
   # Expected output: Python 3.11.x
   ```
 
-- AWS CLI installed and configured. You can install it using:
+- AWS CLI installed and configured. Choose ONE of these installation methods:
   ```bash
-  # Install AWS CLI with conda
+  # Option 1: Install AWS CLI with conda (recommended)
   conda install -c conda-forge awscli
   
-  # macOS with Homebrew
+  # Option 2: macOS with Homebrew
   brew install awscli
-  
-  # Linux/macOS with pip
-  pip install awscli
   
   # To verify installation:
   aws --version
   # Expected output: aws-cli/2.x.x Python/3.x.x ... 
   ```
 
-- Node.js v18+ installed:
+- Node.js v18+ installed. Choose ONE of these installation methods:
   ```bash
-  # macOS with Homebrew
+  # Option 1: macOS with Homebrew
   brew install node@18
   
-  # Using nvm (Node Version Manager) - recommended approach
-  # First install nvm if you don't have it:
+  # OR
+  
+  # Option 2: Using nvm (Node Version Manager)
+  # Step 1: Install nvm if you don't have it
   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
-  # Then install and use Node.js v18:
+  # Step 2: Install and use Node.js v18
   nvm install 18
   nvm use 18
   
-  # To verify installation:
+  # To verify installation (after using either option):
   node --version
   # Expected output: v18.x.x or higher
   ```
 
-- AWS CDK v2.1007.0+ installed:
+- AWS CDK v2.1007.0+ installed. Choose ONE of these installation methods:
   ```bash
-  # Install with npm (standard method)
+  # Option 1: Install with npm (standard method)
   npm install -g aws-cdk@2.1007.0
   
-  # Alternative method if npm is not available:
-  # 1. Download the CDK binary directly from GitHub:
-  # https://github.com/aws/aws-cdk/releases
+  # OR
   
-  # 2. Or install via conda (limited functionality):
+  # Option 2: If npm is not available
+  # Download the CDK binary directly from GitHub:
+  # https://github.com/aws/aws-cdk/releases
+  # After downloading:
+  # 1. Unzip the downloaded file
+  # 2. Make the binary executable:
+  #    chmod +x cdk
+  # 3. Move the binary to a directory in your PATH:
+  #    sudo mv cdk /usr/local/bin/
+  
+  # OR
+  
+  # Option 3: Install via conda
   conda install -c conda-forge aws-cdk-lib=2.1007.0
   
-  # To verify installation:
+  # To verify installation (after using any option):
   cdk --version
   # Expected output: 2.1007.0 (build ...)
   ```
@@ -122,17 +131,18 @@ aws configure
 You'll be prompted to enter:
 - AWS Access Key ID
 - AWS Secret Access Key
-- Default region (e.g., us-west-2)
+- Default region (e.g., us-west-1)
 - Default output format (json recommended)
 
 ### Step 3: Deploy the Step Function
 
 ```bash
 # Make sure you're in the cdk directory
-cd cdk
+cd checkfiles/cdk
 
 # Deploy to production (replace with your AWS profile if necessary)
 cdk deploy RunCheckfilesStepFunctionProduction --profile your-profile-name
+# Note: For Lattice AWS profile use --profile lattice-prod
 ```
 
 The deployment process:
@@ -146,7 +156,7 @@ The deployment will take approximately 5-10 minutes. When it's done, you'll see 
 ✅ RunCheckfilesStepFunctionProduction
 
 Outputs:
-RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-2:123456789012:stateMachine:RunCheckfilesStepFunctionProduction
+RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-1:123456789012:stateMachine:RunCheckfilesStepFunctionProduction
 ```
 
 Make note of this ARN as you'll need it for the next steps.
