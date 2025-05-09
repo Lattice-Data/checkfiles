@@ -34,6 +34,8 @@ This guide helps you run the Checkfiles validation tool using Docker. The tool v
    
    This step is crucial for running Checkfiles as it requires sufficient memory for processing large files.
 
+7. Important note for Mac users: When running Docker for the first time, you may see permission prompts asking to allow Docker to access your filesystem, network, etc. Be sure to approve these requests when they appear, as Docker needs these permissions to function properly.
+
 ### 2. AWS Credentials Setup (Required for S3 access)
 
 To validate files stored in Amazon S3, you need AWS credentials:
@@ -117,6 +119,7 @@ Command flag: `-f h5ad`
    ```bash
    docker compose -f docker/docker-compose.yml build
    ```
+   Note: Ensure Docker Engine (Docker Desktop on Mac) is running before executing this command.
 
 3. Run validation on a local file:
    ```bash
@@ -147,6 +150,7 @@ Command flag: `-f h5ad`
    ```bash
    docker compose -f docker/docker-compose.yml build
    ```
+   Note: Ensure Docker Engine (Docker Desktop on Mac) is running before executing this command.
 
 3. Make sure your AWS credentials are set up (see Prerequisites)
 
