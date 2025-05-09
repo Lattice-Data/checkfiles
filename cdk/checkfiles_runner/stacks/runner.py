@@ -644,6 +644,7 @@ class RunCheckfilesStepFunction(Stack):
         state_machine = StateMachine(
             self,
             'StateMachine',
+            state_machine_name="RunCheckfilesStateMachine",
             definition_body=DefinitionBody.from_chainable(definition)
         )
 

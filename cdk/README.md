@@ -33,7 +33,8 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 ### Step 2: Find Your State Machine
 
 1. In the Step Functions dashboard, click on "State machines"
-2. Look for "RunCheckfilesStepFunctionProduction" in the list
+2. Look for "RunCheckfilesStateMachine" in the list
+   > **Note:** If you don't see any state machines, check that you are in the **us-west-1** region in the top right corner of the AWS console
 3. Click on the state machine name
 
 ### Step 3: Start a New Execution
@@ -43,10 +44,10 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 
 ```json
 {
-  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz",
-  "file_format": "fastq",
-  "debug": true,
-  "threads": 4
+  "query": "/search/?type=RawSequenceFile&validated=false",
+  "instance_name_suffix": "idan-1",
+  "backend_uri": "https://www.lattice-data.org/",
+  "update": false
 }
 ```
 
