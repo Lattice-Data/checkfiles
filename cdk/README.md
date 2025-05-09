@@ -1,6 +1,6 @@
 # AWS Step Function Guide for Checkfiles
 
-This guide explains how to deploy and use the Checkfiles application utilizing AWS Step Functions. This method is recommended for processing files submitted to the Lattice data portal.
+This guide explains how to run (execute) a deployed AWS Step Function of Checkfiles. This method is recommended for processing files submitted to the Lattice data portal.
 
 ## Table of Contents
 - [What is AWS Step Functions?](#what-is-aws-step-functions)
@@ -21,7 +21,7 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 - Handles error conditions automatically
 - Provides detailed logs and metrics
 
-## Using Step Functions
+## Running (executing) Deployed Step Functions
 
 ### Step 1: Open the AWS Console
 
