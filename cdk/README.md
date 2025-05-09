@@ -17,8 +17,7 @@ This guide explains how to deploy and use the Checkfiles application using AWS S
 AWS Step Functions is a serverless workflow service that lets you coordinate multiple AWS services into business-critical applications. For Checkfiles, it:
 
 - Orchestrates the file validation process
-- Manages scaling based on workload
-- Provides visual monitoring of the validation workflow
+- Manages scaling based on number of files to be validated
 - Handles error conditions automatically
 - Provides detailed logs and metrics
 
@@ -26,27 +25,79 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 
 Before you begin, ensure you have:
 
-- AWS Account with administrator permissions
-- [AWS CLI](https://aws.amazon.com/cli/) installed and configured
-- [Python 3.11](https://www.python.org/downloads/) installed
-- [Node.js v18+](https://nodejs.org/) installed
+- AWS Account with appropriate permissions to create and manage:
+  - Step Functions
+  - Lambda functions
+  - IAM roles
+  - CloudWatch logs
+  - S3 bucket access
+
+- AWS CLI installed and configured. You can install it using:
+  ```bash
+  # macOS with Homebrew
+  brew install awscli
+  
+  # Linux/macOS with pip
+  pip install awscli
+  
+  # To verify installation:
+  aws --version
+  # Expected output: aws-cli/2.x.x Python/3.x.x ... 
+  ```
+
+- Conda installed for managing Python environments:
+  ```bash
+  # To verify conda installation:
+  conda --version
+  # Expected output: conda x.x.x
+  
+  # Create a conda environment with Python 3.11
+  conda create -n checkfiles python=3.11
+  
+  # Activate the environment
+  conda activate checkfiles
+  
+  # To verify Python version:
+  python --version
+  # Expected output: Python 3.11.x
+  ```
+
+- Node.js v18+ installed:
+  ```bash
+  # To verify installation:
+  node --version
+  # Expected output: v18.x.x or higher
+  ```
+
 - AWS CDK v2.1007.0+ installed:
   ```bash
+  # Install with npm (standard method)
   npm install -g aws-cdk@2.1007.0
+  
+  # Alternative method if npm is not available:
+  # 1. Download the CDK binary directly from GitHub:
+  # https://github.com/aws/aws-cdk/releases
+  
+  # 2. Or install via pip (limited functionality):
+  conda install -c conda-forge aws-cdk-lib=2.1007.0
+  
+  # To verify installation:
+  cdk --version
+  # Expected output: 2.1007.0 (build ...)
   ```
 
 ## Installation Guide
 
-### Step 1: Clone Repository and Set Up Environment
+### Step 1: Set Up Environment
+
+This guide assumes you have already cloned the repository as described in the main [README.md](../README.md).
 
 ```bash
-# Clone the repository
-git clone https://github.com/Lattice-Data/checkfiles.git
+# Navigate to the cdk directory
 cd checkfiles/cdk
 
-# Create and activate Python virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# If using conda (recommended):
+conda activate checkfiles
 
 # Install dependencies
 pip install -r requirements.txt

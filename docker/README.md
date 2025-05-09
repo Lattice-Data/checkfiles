@@ -108,6 +108,8 @@ Command flag: `-f h5ad`
 
 ## Step-by-Step Tutorial
 
+This guide assumes you have already cloned the repository as described in the main [README.md](../README.md).
+
 ### Validating Local Files
 
 1. Navigate to the checkfiles directory in your terminal:
