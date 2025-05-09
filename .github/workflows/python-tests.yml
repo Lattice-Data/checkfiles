@@ -23,10 +23,16 @@ jobs:
         python -m pip install --upgrade pip
         # Install package and test dependencies in one step
         pip install -e ".[test]"
+        # Install additional dependencies for H5AD tests
+        pip install scanpy anndata pandas
     
-    - name: Run tests with coverage
+    - name: Run unit tests with coverage
       run: |
-        python -m pytest src/tests/ --cov=src --cov-report=xml --cov-report=term-missing --ignore=cdk/ -v
+        python -m pytest src/tests/ --ignore=src/tests/integration/ --cov=src --cov-report=xml --cov-report=term-missing --ignore=cdk/ -v
+    
+    - name: Run integration tests
+      run: |
+        python -m pytest src/tests/integration/ -v
     
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2
