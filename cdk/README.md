@@ -1,6 +1,6 @@
 # AWS Step Function Guide for Checkfiles
 
-This guide explains how to deploy and use the Checkfiles application using AWS Step Functions. This method is recommended for production environments and processing large numbers of files.
+This guide explains how to deploy and use the Checkfiles application utilizing AWS Step Functions. This method is recommended for processing files submitted to the Lattice data portal.
 
 ## Table of Contents
 - [What is AWS Step Functions?](#what-is-aws-step-functions)
@@ -19,31 +19,13 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 - Orchestrates the file validation process
 - Manages scaling based on number of files to be validated
 - Handles error conditions automatically
-- Provides detailed logs and metrics
+- Provides detailed logs and metrics 
 
 ## Prerequisites
 
 Before you begin, ensure you have:
 
-- AWS Account with appropriate permissions to create and manage:
-  - Step Functions
-  - Lambda functions
-  - IAM roles
-  - CloudWatch logs
-  - S3 bucket access
-
-- AWS CLI installed and configured. You can install it using:
-  ```bash
-  # macOS with Homebrew
-  brew install awscli
-  
-  # Linux/macOS with pip
-  pip install awscli
-  
-  # To verify installation:
-  aws --version
-  # Expected output: aws-cli/2.x.x Python/3.x.x ... 
-  ```
+- AWS Account with appropriate permissions
 
 - Conda installed for managing Python environments:
   ```bash
@@ -62,8 +44,34 @@ Before you begin, ensure you have:
   # Expected output: Python 3.11.x
   ```
 
+- AWS CLI installed and configured. You can install it using:
+  ```bash
+  # Install AWS CLI with conda
+  conda install -c conda-forge awscli
+  
+  # macOS with Homebrew
+  brew install awscli
+  
+  # Linux/macOS with pip
+  pip install awscli
+  
+  # To verify installation:
+  aws --version
+  # Expected output: aws-cli/2.x.x Python/3.x.x ... 
+  ```
+
 - Node.js v18+ installed:
   ```bash
+  # macOS with Homebrew
+  brew install node@18
+  
+  # Using nvm (Node Version Manager) - recommended approach
+  # First install nvm if you don't have it:
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+  # Then install and use Node.js v18:
+  nvm install 18
+  nvm use 18
+  
   # To verify installation:
   node --version
   # Expected output: v18.x.x or higher
@@ -78,7 +86,7 @@ Before you begin, ensure you have:
   # 1. Download the CDK binary directly from GitHub:
   # https://github.com/aws/aws-cdk/releases
   
-  # 2. Or install via pip (limited functionality):
+  # 2. Or install via conda (limited functionality):
   conda install -c conda-forge aws-cdk-lib=2.1007.0
   
   # To verify installation:
