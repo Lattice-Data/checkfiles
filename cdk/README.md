@@ -4,9 +4,9 @@ This guide explains how to deploy and use the Checkfiles application utilizing A
 
 ## Table of Contents
 - [What is AWS Step Functions?](#what-is-aws-step-functions)
+- [Using Step Functions](#using-step-functions)
 - [Prerequisites](#prerequisites)
 - [Installation Guide](#installation-guide)
-- [Using Step Functions](#using-step-functions)
 - [Monitoring and Logs](#monitoring-and-logs)
 - [Common Parameters](#common-parameters)
 - [Troubleshooting](#troubleshooting)
@@ -19,9 +19,60 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 - Orchestrates the file validation process
 - Manages scaling based on number of files to be validated
 - Handles error conditions automatically
-- Provides detailed logs and metrics 
+- Provides detailed logs and metrics
+
+## Using Step Functions
+
+### Step 1: Open the AWS Console
+
+1. Log in to the [AWS Management Console](https://console.aws.amazon.com/)
+2. Navigate to the Step Functions service
+   - Type "Step Functions" in the search bar
+   - Or find it under "Services" > "Application Integration" > "Step Functions"
+
+### Step 2: Find Your State Machine
+
+1. In the Step Functions dashboard, click on "State machines"
+2. Look for "RunCheckfilesStepFunctionProduction" in the list
+3. Click on the state machine name
+
+### Step 3: Start a New Execution
+
+1. Click the "Start execution" button
+2. Enter execution input in JSON format:
+
+```json
+{
+  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz",
+  "file_format": "fastq",
+  "debug": true,
+  "threads": 4
+}
+```
+
+3. (Optional) Enter a custom execution name or use the auto-generated one
+4. Click "Start execution"
+
+### Step 4: Monitor the Execution
+
+Once started, you'll see a visualization of the workflow:
+
+1. Each step is represented as a box in the workflow diagram
+2. Steps change color to indicate their status:
+   - In progress: Blue
+   - Succeeded: Green
+   - Failed: Red
+
+3. The execution details panel shows:
+   - Execution status
+   - Start and end times
+   - Input/output data
+
+4. Click on individual steps to see details about that specific step
 
 ## Prerequisites
+
+**IMPORTANT**: The installation and deployment steps below are needed ONLY if you know what you are doing and want to create an independent state machine for validating files on AWS! The usual usage of step functions is described in the "Using Step Functions" section above.
 
 Before you begin, ensure you have:
 
@@ -160,55 +211,6 @@ RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-1:1
 ```
 
 Make note of this ARN as you'll need it for the next steps.
-
-## Using Step Functions
-
-### Step 1: Open the AWS Console
-
-1. Log in to the [AWS Management Console](https://console.aws.amazon.com/)
-2. Navigate to the Step Functions service
-   - Type "Step Functions" in the search bar
-   - Or find it under "Services" > "Application Integration" > "Step Functions"
-
-### Step 2: Find Your State Machine
-
-1. In the Step Functions dashboard, click on "State machines"
-2. Look for "RunCheckfilesStepFunctionProduction" in the list
-3. Click on the state machine name
-
-### Step 3: Start a New Execution
-
-1. Click the "Start execution" button
-2. Enter execution input in JSON format:
-
-```json
-{
-  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz",
-  "file_format": "fastq",
-  "debug": true,
-  "threads": 4
-}
-```
-
-3. (Optional) Enter a custom execution name or use the auto-generated one
-4. Click "Start execution"
-
-### Step 4: Monitor the Execution
-
-Once started, you'll see a visualization of the workflow:
-
-1. Each step is represented as a box in the workflow diagram
-2. Steps change color to indicate their status:
-   - In progress: Blue
-   - Succeeded: Green
-   - Failed: Red
-
-3. The execution details panel shows:
-   - Execution status
-   - Start and end times
-   - Input/output data
-
-4. Click on individual steps to see details about that specific step
 
 ## Monitoring and Logs
 
