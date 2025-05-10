@@ -5,7 +5,6 @@ This guide explains how to run (execute) a deployed AWS Step Function of Checkfi
 ## Table of Contents
 - [What is AWS Step Functions?](#what-is-aws-step-functions)
 - [Running (executing) Deployed Step Functions](#running-executing-deployed-step-functions)
-- [Common Parameters](#common-parameters)
 - [Monitoring and Logs](#monitoring-and-logs)
 - [Checkfiles Step Function Deployment](#checkfiles-step-function-deployment)
 - [Advanced Configuration](#advanced-configuration)
@@ -54,6 +53,17 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 3. (Optional) Enter a custom execution name or use the auto-generated one
 4. Click "Start execution"
 
+### Common Parameters
+
+When starting a Step Function execution, you can provide these parameters:
+
+| Parameter | Type | Description | Required | Example |
+|-----------|------|-------------|----------|---------|
+| query | String | Query string to find files to validate | Yes | "/search/?type=RawSequenceFile&validated=false" |
+| instance_name_suffix | String | Suffix for the EC2 instance name | Yes | "idan-1" |
+| backend_uri | String | URI of the Lattice data portal | Yes | "https://www.lattice-data.org/" |
+| update | Boolean | Update backend with validation results | No | false |
+
 ### Step 4: Monitor the Execution
 
 Once started, you'll see a visualization of the workflow:
@@ -72,17 +82,6 @@ Once started, you'll see a visualization of the workflow:
 4. Click on individual steps to see details about that specific step
 
 5. The progress of the validation will also be reflected by the checkfiles-bot in the Slack channel named #checkfiles, providing real-time updates as files are processed
-
-## Common Parameters
-
-When starting a Step Function execution, you can provide these parameters:
-
-| Parameter | Type | Description | Required | Example |
-|-----------|------|-------------|----------|---------|
-| query | String | Query string to find files to validate | Yes | "/search/?type=RawSequenceFile&validated=false" |
-| instance_name_suffix | String | Suffix for the EC2 instance name | Yes | "idan-1" |
-| backend_uri | String | URI of the Lattice data portal | Yes | "https://www.lattice-data.org/" |
-| update | Boolean | Update backend with validation results | No | false |
 
 ## Monitoring and Logs
 
