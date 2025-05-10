@@ -81,7 +81,7 @@ Once started, you'll see a visualization of the workflow:
 
 4. Click on individual steps to see details about that specific step
 
-5. The progress of the validation will also be reflected by the checkfiles-bot in the Slack channel named #checkfiles, providing real-time updates as files are processed
+5. The progress of the validation will also be reflected by the checkfiles-bot in the Slack channel named #checkfiles, providing real-time updates as files are processed. The final checkfiles validation report will be uploaded to the same #checkfiles Slack channel at the end of execution, and also saved to the S3 bucket "lattice-checkfiles/reports/"
 
 ## Monitoring and Logs
 
