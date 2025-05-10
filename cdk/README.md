@@ -48,6 +48,8 @@ AWS Step Functions is a serverless workflow service that lets you coordinate mul
 }
 ```
 
+> **Important:** The values in the JSON above are just examples. You need to insert your own query and backend_uri values based on what you want to validate, rather than simply copy-pasting the example. A reference example for input JSON can be found in AWS Systems Manager Parameter Store under the path `/checkfiles/runner/default-input`.
+
 > **Important:** The AWS Step Function is designed to run on files located in the Lattice data portal, not on local or directly specified S3 files. Use the `query` and `backend_uri` parameters to specify which files to validate. The system will automatically extract file-specific metadata such as file format and S3 path.
 
 3. (Optional) Enter a custom execution name or use the auto-generated one
