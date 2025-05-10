@@ -1,15 +1,12 @@
 # AWS Step Function Guide for Checkfiles
 
-This guide explains how to deploy and use the Checkfiles application using AWS Step Functions. This method is recommended for production environments and processing large numbers of files.
+This guide explains how to run (execute) a deployed AWS Step Function of Checkfiles. This method is recommended for processing files submitted to the Lattice data portal.
 
 ## Table of Contents
 - [What is AWS Step Functions?](#what-is-aws-step-functions)
-- [Prerequisites](#prerequisites)
-- [Installation Guide](#installation-guide)
-- [Using Step Functions](#using-step-functions)
+- [Running (executing) Deployed Step Functions](#running-executing-deployed-step-functions)
 - [Monitoring and Logs](#monitoring-and-logs)
-- [Common Parameters](#common-parameters)
-- [Troubleshooting](#troubleshooting)
+- [Checkfiles Step Function Deployment](#checkfiles-step-function-deployment)
 - [Advanced Configuration](#advanced-configuration)
 
 ## What is AWS Step Functions?
@@ -17,82 +14,11 @@ This guide explains how to deploy and use the Checkfiles application using AWS S
 AWS Step Functions is a serverless workflow service that lets you coordinate multiple AWS services into business-critical applications. For Checkfiles, it:
 
 - Orchestrates the file validation process
-- Manages scaling based on workload
-- Provides visual monitoring of the validation workflow
+- Manages scaling based on number of files to be validated
 - Handles error conditions automatically
 - Provides detailed logs and metrics
 
-## Prerequisites
-
-Before you begin, ensure you have:
-
-- AWS Account with administrator permissions
-- [AWS CLI](https://aws.amazon.com/cli/) installed and configured
-- [Python 3.11](https://www.python.org/downloads/) installed
-- [Node.js v18+](https://nodejs.org/) installed
-- AWS CDK v2.1007.0+ installed:
-  ```bash
-  npm install -g aws-cdk@2.1007.0
-  ```
-
-## Installation Guide
-
-### Step 1: Clone Repository and Set Up Environment
-
-```bash
-# Clone the repository
-git clone https://github.com/Lattice-Data/checkfiles.git
-cd checkfiles/cdk
-
-# Create and activate Python virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Step 2: Configure AWS Credentials
-
-If you haven't configured AWS CLI already:
-
-```bash
-aws configure
-```
-
-You'll be prompted to enter:
-- AWS Access Key ID
-- AWS Secret Access Key
-- Default region (e.g., us-west-2)
-- Default output format (json recommended)
-
-### Step 3: Deploy the Step Function
-
-```bash
-# Make sure you're in the cdk directory
-cd cdk
-
-# Deploy to production (replace with your AWS profile if necessary)
-cdk deploy RunCheckfilesStepFunctionProduction --profile your-profile-name
-```
-
-The deployment process:
-1. Creates AWS resources (Step Functions, Lambda functions, IAM roles, etc.)
-2. Shows deployment progress in the terminal
-3. Outputs the ARN of the Step Function when complete
-
-The deployment will take approximately 5-10 minutes. When it's done, you'll see output like:
-
-```
-✅ RunCheckfilesStepFunctionProduction
-
-Outputs:
-RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-2:123456789012:stateMachine:RunCheckfilesStepFunctionProduction
-```
-
-Make note of this ARN as you'll need it for the next steps.
-
-## Using Step Functions
+## Running (executing) Deployed Step Functions
 
 ### Step 1: Open the AWS Console
 
@@ -104,7 +30,8 @@ Make note of this ARN as you'll need it for the next steps.
 ### Step 2: Find Your State Machine
 
 1. In the Step Functions dashboard, click on "State machines"
-2. Look for "RunCheckfilesStepFunctionProduction" in the list
+2. Look for "RunCheckfilesStateMachine" in the list
+   > **Note:** If you don't see any state machines, check that you are in the **us-west-1** region in the top right corner of the AWS console
 3. Click on the state machine name
 
 ### Step 3: Start a New Execution
@@ -114,15 +41,30 @@ Make note of this ARN as you'll need it for the next steps.
 
 ```json
 {
-  "file_s3_uri": "s3://your-bucket/path/to/file.fastq.gz",
-  "file_format": "fastq",
-  "debug": true,
-  "threads": 4
+  "query": "/search/?type=RawSequenceFile&validated=false",
+  "instance_name_suffix": "idan-1",
+  "backend_uri": "https://www.lattice-data.org/",
+  "update": false
 }
 ```
 
+> **Important:** The values in the JSON above are just examples. You need to insert your own query and backend_uri values based on what you want to validate, rather than simply copy-pasting the example. A reference example for input JSON can be found in AWS Systems Manager Parameter Store under the path `/checkfiles/runner/default-input`.
+
+> **Important:** The AWS Step Function is designed to run on files located in the Lattice data portal, not on local or directly specified S3 files. Use the `query` and `backend_uri` parameters to specify which files to validate. The system will automatically extract file-specific metadata such as file format and S3 path.
+
 3. (Optional) Enter a custom execution name or use the auto-generated one
 4. Click "Start execution"
+
+### Common Parameters
+
+When starting a Step Function execution, you can provide these parameters:
+
+| Parameter | Type | Description | Required | Example |
+|-----------|------|-------------|----------|---------|
+| query | String | Query string to find files to validate | Yes | "/search/?type=RawSequenceFile&validated=false" |
+| instance_name_suffix | String | Suffix for the EC2 instance name | Yes | "idan-1" |
+| backend_uri | String | URI of the Lattice data portal | Yes | "https://www.lattice-data.org/" |
+| update | Boolean | Update backend with validation results | No | false |
 
 ### Step 4: Monitor the Execution
 
@@ -141,6 +83,8 @@ Once started, you'll see a visualization of the workflow:
 
 4. Click on individual steps to see details about that specific step
 
+5. The progress of the validation will also be reflected by the checkfiles-bot in the Slack channel named #checkfiles, providing real-time updates as files are processed. The final checkfiles validation report will be uploaded to the same #checkfiles Slack channel at the end of execution, and also saved to the S3 bucket "lattice-checkfiles/reports/"
+
 ## Monitoring and Logs
 
 ### Viewing CloudWatch Logs
@@ -150,92 +94,151 @@ Step Function executions generate logs that can be viewed in CloudWatch:
 1. Open the [CloudWatch Console](https://console.aws.amazon.com/cloudwatch/)
 2. Navigate to "Log groups" in the left sidebar
 3. Find log groups with names containing:
-   - `/aws/lambda/RunCheckfiles` (Lambda function logs)
-   - `/aws/states/RunCheckfilesStepFunction` (Step Function execution logs)
+   - `checkfiles-log` (EC2 instance logs)
+   - `/aws/states/RunCheckfilesStateMachine` (Step Function execution logs)
 
 4. Click on a log group, then click on the most recent log stream
 5. Use the search bar to filter logs for specific information
 
-### Setting Up CloudWatch Alarms (Optional)
+## Checkfiles Step Function Deployment
 
-You can create alarms to notify you of issues:
+**IMPORTANT NOTE**: The following deployment instructions are intended only for advanced users who need to create their own instance of the Step Function. Most users should only need to execute an existing deployment as described in the "Running (executing) Deployed Step Functions" section above.
 
-1. In the CloudWatch console, go to "Alarms" > "Create alarm"
-2. Click "Select metric"
-3. Navigate to "States" > "Metrics with no dimensions"
-4. Select "ExecutionsFailed" for your state machine
-5. Configure the threshold (e.g., alarm when ≥ 1)
-6. Set up notifications (e.g., email, SMS)
-7. Review and create the alarm
+Before you begin, ensure you have:
 
-## Common Parameters
+- AWS Account with appropriate permissions
 
-When starting a Step Function execution, you can provide these parameters:
+- Conda installed for managing Python environments:
+  ```bash
+  # To verify conda installation:
+  conda --version
+  # Expected output: conda x.x.x
+  
+  # Create a conda environment with Python 3.11
+  conda create -n checkfiles python=3.11
+  
+  # Activate the environment
+  conda activate checkfiles
+  
+  # To verify Python version:
+  python --version
+  # Expected output: Python 3.11.x
+  ```
 
-| Parameter | Type | Description | Required | Example |
-|-----------|------|-------------|----------|---------|
-| file_s3_uri | String | S3 URI of the file to validate | Yes | "s3://your-bucket/path/to/file.fastq.gz" |
-| file_format | String | Format of the file (fastq, h5, h5ad) | Yes | "fastq" |
-| debug | Boolean | Enable detailed debug output | No | true |
-| threads | Number | Number of threads to use for validation | No | 4 |
-| update | Boolean | Update backend with validation results | No | false |
-| update_s3_tags | Boolean | Add validation tags to S3 objects | No | false |
-| ignore_active_credentials | Boolean | Skip credential check for backend | No | false |
+- AWS CLI installed and configured. Choose ONE of these installation methods:
+  ```bash
+  # Option 1: Install AWS CLI with conda (recommended)
+  conda install -c conda-forge awscli
+  
+  # Option 2: macOS with Homebrew
+  brew install awscli
+  
+  # To verify installation:
+  aws --version
+  # Expected output: aws-cli/2.x.x Python/3.x.x ... 
+  ```
 
-## Troubleshooting
+- Node.js v18+ installed. Choose ONE of these installation methods:
+  ```bash
+  # Option 1: macOS with Homebrew
+  brew install node@18
+  
+  # OR
+  
+  # Option 2: Using nvm (Node Version Manager)
+  # Step 1: Install nvm if you don't have it
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+  # Step 2: Install and use Node.js v18
+  nvm install 18
+  nvm use 18
+  
+  # To verify installation (after using either option):
+  node --version
+  # Expected output: v18.x.x or higher
+  ```
 
-### Deployment Failures
+- AWS CDK v2.1007.0+ installed. Choose ONE of these installation methods:
+  ```bash
+  # Option 1: Install with npm (standard method)
+  npm install -g aws-cdk@2.1007.0
+  
+  # OR
+  
+  # Option 2: If npm is not available
+  # Download the CDK binary directly from GitHub:
+  # https://github.com/aws/aws-cdk/releases
+  # After downloading:
+  # 1. Unzip the downloaded file
+  # 2. Make the binary executable:
+  #    chmod +x cdk
+  # 3. Move the binary to a directory in your PATH:
+  #    sudo mv cdk /usr/local/bin/
+  
+  # OR
+  
+  # Option 3: Install via conda
+  conda install -c conda-forge aws-cdk-lib=2.1007.0
+  
+  # To verify installation (after using any option):
+  cdk --version
+  # Expected output: 2.1007.0 (build ...)
+  ```
 
-If the `cdk deploy` command fails:
+### Step 1: Set Up Environment
 
-1. **Check AWS credentials**
-   ```bash
-   aws sts get-caller-identity
-   ```
-   This should show your account ID and user. If not, run `aws configure` again.
+This guide assumes you have already cloned the repository as described in the main [README.md](../README.md).
 
-2. **Verify CDK prerequisites**
-   ```bash
-   cdk --version
-   python --version
-   ```
-   Ensure CDK version is 2.1007.0+ and Python is 3.11.
+```bash
+# Navigate to the cdk directory
+cd checkfiles/cdk
 
-3. **Review CloudFormation stack**
-   - Open the AWS CloudFormation console
-   - Look for stacks with names containing "RunCheckfiles"
-   - Check the "Events" tab for error messages
+# If using conda (recommended):
+conda activate checkfiles
 
-### Execution Failures
+# Install dependencies
+pip install -r requirements.txt
+```
 
-If a Step Function execution fails:
+### Step 2: Configure AWS Credentials
 
-1. **Check input parameters**
-   - Verify the S3 URI is correct
-   - Ensure the file format is supported
-   - Check file permissions in S3
+If you haven't configured AWS CLI already:
 
-2. **Review logs in CloudWatch**
-   - Find the execution ID in the Step Functions console
-   - Look for logs with that execution ID in CloudWatch
-   - Check for error messages
+```bash
+aws configure
+```
 
-3. **Verify S3 access**
-   - Confirm the Step Function has permissions to access the S3 bucket
-   - Try accessing the file manually with AWS CLI:
-     ```bash
-     aws s3 ls s3://your-bucket/path/to/file.fastq.gz
-     ```
+You'll be prompted to enter:
+- AWS Access Key ID
+- AWS Secret Access Key
+- Default region (e.g., us-west-1)
+- Default output format (json recommended)
 
-### Common Error Messages
+### Step 3: Deploy the Step Function
 
-| Error Message | Likely Cause | Solution |
-|---------------|--------------|----------|
-| "Access Denied" | Insufficient permissions | Check IAM roles and bucket policies |
-| "File not found" | Incorrect S3 URI or missing file | Verify the file exists in S3 |
-| "Unsupported file format" | Format not recognized | Use one of: fastq, h5, h5ad |
-| "Validation failed" | File does not meet format requirements | Check file contents and integrity |
-| "Execution timed out" | File too large or process too slow | Increase timeout settings or use a smaller file |
+```bash
+# Make sure you're in the cdk directory
+cd checkfiles/cdk
+
+# Deploy to production (replace with your AWS profile if necessary)
+cdk deploy RunCheckfilesStepFunctionProduction --profile your-profile-name
+# Note: For Lattice AWS profile use --profile lattice-prod
+```
+
+The deployment process:
+1. Creates AWS resources (Step Functions, Lambda functions, IAM roles, etc.)
+2. Shows deployment progress in the terminal
+3. Outputs the ARN of the Step Function when complete
+
+The deployment will take approximately 5-10 minutes. When it's done, you'll see output like:
+
+```
+✅ RunCheckfilesStepFunctionProduction
+
+Outputs:
+RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-1:123456789012:stateMachine:RunCheckfilesStateMachine
+```
+
+Make note of this ARN as you'll need it for the next steps.
 
 ## Advanced Configuration
 
@@ -259,6 +262,3 @@ cdk destroy RunCheckfilesStepFunctionProduction --profile your-profile-name
 
 **⚠️ Warning:** This will permanently delete all resources created by the CDK stack, including logs and metrics.
 
-### Configuring Timeout and Retry Settings
-
-To change timeout or retry settings, modify the Step Function definition in `checkfiles_runner/step_functions.py`.
