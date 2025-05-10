@@ -4,12 +4,10 @@ This guide explains how to run (execute) a deployed AWS Step Function of Checkfi
 
 ## Table of Contents
 - [What is AWS Step Functions?](#what-is-aws-step-functions)
-- [Using Step Functions](#using-step-functions)
-- [Prerequisites](#prerequisites)
-- [Installation Guide](#installation-guide)
-- [Monitoring and Logs](#monitoring-and-logs)
+- [Running (executing) Deployed Step Functions](#running-executing-deployed-step-functions)
 - [Common Parameters](#common-parameters)
-- [Troubleshooting](#troubleshooting)
+- [Monitoring and Logs](#monitoring-and-logs)
+- [Checkfiles Step Function Deployment](#checkfiles-step-function-deployment)
 - [Advanced Configuration](#advanced-configuration)
 
 ## What is AWS Step Functions?
@@ -73,11 +71,37 @@ Once started, you'll see a visualization of the workflow:
 
 4. Click on individual steps to see details about that specific step
 
-5. The progress of the validation will also be reflected by the checkfiles-bot in the "#checkfiles" Slack channel, providing real-time updates as files are processed
+5. The progress of the validation will also be reflected by the checkfiles-bot in the Slack channel named #checkfiles, providing real-time updates as files are processed
 
-## Prerequisites
+## Common Parameters
 
-**IMPORTANT**: The installation and deployment steps below are needed ONLY if you know what you are doing and want to create an independent state machine for validating files on AWS! The usual usage of step functions is described in the "Using Step Functions" section above.
+When starting a Step Function execution, you can provide these parameters:
+
+| Parameter | Type | Description | Required | Example |
+|-----------|------|-------------|----------|---------|
+| query | String | Query string to find files to validate | Yes | "/search/?type=RawSequenceFile&validated=false" |
+| instance_name_suffix | String | Suffix for the EC2 instance name | Yes | "idan-1" |
+| backend_uri | String | URI of the Lattice data portal | Yes | "https://www.lattice-data.org/" |
+| update | Boolean | Update backend with validation results | No | false |
+
+## Monitoring and Logs
+
+### Viewing CloudWatch Logs
+
+Step Function executions generate logs that can be viewed in CloudWatch:
+
+1. Open the [CloudWatch Console](https://console.aws.amazon.com/cloudwatch/)
+2. Navigate to "Log groups" in the left sidebar
+3. Find log groups with names containing:
+   - `checkfiles-log` (EC2 instance logs)
+   - `/aws/states/RunCheckfilesStateMachine` (Step Function execution logs)
+
+4. Click on a log group, then click on the most recent log stream
+5. Use the search bar to filter logs for specific information
+
+## Checkfiles Step Function Deployment
+
+**IMPORTANT NOTE**: The following deployment instructions are intended only for advanced users who need to create their own instance of the Step Function. Most users should only need to execute an existing deployment as described in the "Running (executing) Deployed Step Functions" section above.
 
 Before you begin, ensure you have:
 
@@ -159,8 +183,6 @@ Before you begin, ensure you have:
   # Expected output: 2.1007.0 (build ...)
   ```
 
-## Installation Guide
-
 ### Step 1: Set Up Environment
 
 This guide assumes you have already cloned the repository as described in the main [README.md](../README.md).
@@ -217,99 +239,6 @@ RunCheckfilesStepFunctionProduction.StateMachineArn = arn:aws:states:us-west-1:1
 
 Make note of this ARN as you'll need it for the next steps.
 
-## Monitoring and Logs
-
-### Viewing CloudWatch Logs
-
-Step Function executions generate logs that can be viewed in CloudWatch:
-
-1. Open the [CloudWatch Console](https://console.aws.amazon.com/cloudwatch/)
-2. Navigate to "Log groups" in the left sidebar
-3. Find log groups with names containing:
-   - `checkfiles-log` (EC2 instance logs)
-   - `/aws/states/RunCheckfilesStateMachine` (Step Function execution logs)
-
-4. Click on a log group, then click on the most recent log stream
-5. Use the search bar to filter logs for specific information
-
-### Setting Up CloudWatch Alarms (Optional)
-
-You can create alarms to notify you of issues:
-
-1. In the CloudWatch console, go to "Alarms" > "Create alarm"
-2. Click "Select metric"
-3. Navigate to "States" > "Metrics with no dimensions"
-4. Select "ExecutionsFailed" for your state machine
-5. Configure the threshold (e.g., alarm when ≥ 1)
-6. Set up notifications (e.g., email, SMS)
-7. Review and create the alarm
-
-## Common Parameters
-
-When starting a Step Function execution, you can provide these parameters:
-
-| Parameter | Type | Description | Required | Example |
-|-----------|------|-------------|----------|---------|
-| query | String | Query string to find files to validate | Yes | "/search/?type=RawSequenceFile&validated=false" |
-| instance_name_suffix | String | Suffix for the EC2 instance name | Yes | "idan-1" |
-| backend_uri | String | URI of the Lattice data portal | Yes | "https://www.lattice-data.org/" |
-| update | Boolean | Update backend with validation results | No | false |
-
-## Troubleshooting
-
-### Deployment Failures
-
-If the `cdk deploy` command fails:
-
-1. **Check AWS credentials**
-   ```bash
-   aws sts get-caller-identity
-   ```
-   This should show your account ID and user. If not, run `aws configure` again.
-
-2. **Verify CDK prerequisites**
-   ```bash
-   cdk --version
-   python --version
-   ```
-   Ensure CDK version is 2.1007.0+ and Python is 3.11.
-
-3. **Review CloudFormation stack**
-   - Open the AWS CloudFormation console
-   - Look for stacks with names containing "RunCheckfiles"
-   - Check the "Events" tab for error messages
-
-### Execution Failures
-
-If a Step Function execution fails:
-
-1. **Check input parameters**
-   - Verify the query string is correctly formatted
-   - Ensure the backend_uri is valid
-   - Check your AWS permissions
-
-2. **Review logs in CloudWatch**
-   - Find the execution ID in the Step Functions console
-   - Look for logs with that execution ID in CloudWatch
-   - Check for error messages in the "checkfiles-log" log group
-
-3. **Verify S3 access**
-   - Confirm the Step Function has permissions to access the S3 bucket
-   - Try accessing a file manually with AWS CLI:
-     ```bash
-     aws s3 ls s3://your-bucket/path/to/file.fastq.gz
-     ```
-
-### Common Error Messages
-
-| Error Message | Likely Cause | Solution |
-|---------------|--------------|----------|
-| "Access Denied" | Insufficient permissions | Check IAM roles and bucket policies |
-| "File not found" | Incorrect S3 URI or missing file | Verify the file exists in S3 |
-| "Unsupported file format" | Format not recognized | Use one of: fastq, h5, h5ad |
-| "Validation failed" | File does not meet format requirements | Check file contents and integrity |
-| "Execution timed out" | File too large or process too slow | Increase timeout settings or use a smaller file |
-
 ## Advanced Configuration
 
 For advanced users who need to modify the Step Function:
@@ -332,6 +261,3 @@ cdk destroy RunCheckfilesStepFunctionProduction --profile your-profile-name
 
 **⚠️ Warning:** This will permanently delete all resources created by the CDK stack, including logs and metrics.
 
-### Configuring Timeout and Retry Settings
-
-To change timeout or retry settings, modify the Step Function definition in `checkfiles_runner/step_functions.py`.
