@@ -259,3 +259,231 @@ def test_all_hash_types_calculation(valid_fastq_data):
         for path in [uncompressed_path, compressed_path]:
             if os.path.exists(path):
                 os.unlink(path)
+
+def test_real_gzipped_fastq_file():
+    """Test validation of a real gzipped FASTQ file from the test directory."""
+    import os
+    
+    # Path to the gzipped test file
+    gzipped_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "tests", "data", "fastq", "valid", "gzipped_file.fastq.gz"
+    )
+    
+    # Ensure the file exists
+    assert os.path.exists(gzipped_path), f"Test file not found: {gzipped_path}"
+    
+    # Create validator
+    validator = FastqValidator()
+    
+    # Test the file with the stream validation method directly
+    with open(gzipped_path, 'rb') as f:
+        # First test with is_gzipped=True, which should work
+        result = validator.validate_stream(f, is_gzipped=True)
+        
+        # Verify that validation was successful
+        assert result["valid"] is True, "Gzipped FASTQ validation failed when is_gzipped=True"
+        assert "errors" not in result or len(result["errors"]) == 0, f"Validation errors: {result.get('errors', {})}"
+        
+        # Check that statistics were collected
+        assert "stats" in result, "Missing stats in validation result"
+        assert "read_count" in result["stats"], "Missing read_count in stats"
+        assert result["stats"]["read_count"] > 0, "Read count should be positive"
+    
+    # Test the file using the deprecated validate_file method
+    result = validator.validate_file(gzipped_path)
+    assert result["valid"] is True, "Gzipped FASTQ validation failed using validate_file"
+
+def test_invalid_gzip_magic_number():
+    """Test detection of a file with incorrect gzip magic numbers."""
+    import os
+    
+    # Path to the fake gzipped test file
+    not_gzipped_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "tests", "data", "fastq", "invalid", "not_gzipped.fastq.gz"
+    )
+    
+    # Ensure the file exists
+    assert os.path.exists(not_gzipped_path), f"Test file not found: {not_gzipped_path}"
+    
+    # Create validator
+    validator = FastqValidator()
+    
+    # Test the file with the stream validation method directly
+    with open(not_gzipped_path, 'rb') as f:
+        # Test with is_gzipped=True, which should fail with a gzip error
+        result = validator.validate_stream(f, is_gzipped=True)
+        
+        # Verify that validation failed
+        assert result["valid"] is False, "Validation should have failed for non-gzipped file with is_gzipped=True"
+        assert "errors" in result, "Missing errors in validation result"
+        assert len(result["errors"]) > 0, "Expected at least one error"
+        
+        # Check for specific error about gzip format
+        # The error might be in different formats but should mention gzip
+        error_string = str(result["errors"])
+        assert any(phrase in error_string.lower() for phrase in ["gzip", "not a gzipped", "failed to decompress"]), \
+            f"Expected error related to gzip format issues, got: {error_string}"
+    
+    # Test with validate_file, which should also fail
+    result = validator.validate_file(not_gzipped_path)
+    assert result["valid"] is False, "Validation should have failed for non-gzipped file with validate_file"
+    assert "errors" in result, "Missing errors in validation result"
+
+@pytest.mark.s3
+def test_valid_s3_fastq_files():
+    """Test validation of valid FASTQ files from S3 bucket."""
+    import pytest
+    import boto3
+    from botocore.exceptions import NoCredentialsError
+    
+    try:
+        # Check if we have AWS credentials
+        boto3.Session().client('s3')
+    except NoCredentialsError:
+        pytest.skip("AWS credentials not found, skipping S3 tests")
+    
+    # Create validator
+    validator = FastqValidator()
+    
+    # Test files
+    s3_fastq_paths = [
+        "s3://lattice-checkfiles/tests/valid/multiple_reads.fastq",
+        "s3://lattice-checkfiles/tests/valid/gzipped_file.fastq.gz"
+    ]
+    
+    for s3_path in s3_fastq_paths:
+        # Import here to avoid unnecessary imports when tests are skipped
+        from src.utils.helpers import stream_s3_file
+        from src.utils.helpers import has_gz_extension
+        
+        print(f"Testing S3 path: {s3_path}")
+        
+        # Determine if the file is gzipped based on extension
+        is_gzipped = has_gz_extension(s3_path)
+        
+        # Stream the file without decompression from S3
+        stream = stream_s3_file(s3_path, decompress=False)
+        
+        try:
+            # Validate the S3 stream
+            result = validator.validate_stream(stream, is_gzipped=is_gzipped)
+            
+            # Verify successful validation
+            assert result["valid"] is True, f"S3 FASTQ validation failed for {s3_path}"
+            assert "errors" not in result or len(result["errors"]) == 0, \
+                f"Unexpected errors for {s3_path}: {result.get('errors', {})}"
+            
+            # Check that statistics were collected
+            assert "stats" in result, "Missing stats in validation result"
+            assert "read_count" in result["stats"], "Missing read_count in stats"
+            assert result["stats"]["read_count"] > 0, "Read count should be positive"
+            
+            print(f"Successfully validated {s3_path}, read_count: {result['stats']['read_count']}")
+            
+        finally:
+            # Ensure the stream is closed
+            if hasattr(stream, 'close'):
+                stream.close()
+
+@pytest.mark.s3
+def test_invalid_s3_fastq_files():
+    """Test validation of invalid FASTQ files from S3 bucket."""
+    import pytest
+    import boto3
+    from botocore.exceptions import NoCredentialsError
+    
+    try:
+        # Check if we have AWS credentials
+        boto3.Session().client('s3')
+    except NoCredentialsError:
+        pytest.skip("AWS credentials not found, skipping S3 tests")
+    
+    # Create validator
+    validator = FastqValidator()
+    
+    # Test files with expected errors
+    s3_fastq_paths_with_errors = [
+        # Path and expected error message substring
+        ("s3://lattice-checkfiles/tests/invalid/mismatched_lengths.fastq", "length"),
+        ("s3://lattice-checkfiles/tests/invalid/not_gzipped.fastq.gz", "gzip")
+    ]
+    
+    for s3_path, expected_error_substr in s3_fastq_paths_with_errors:
+        # Import here to avoid unnecessary imports when tests are skipped
+        from src.utils.helpers import stream_s3_file
+        from src.utils.helpers import has_gz_extension
+        
+        print(f"Testing invalid S3 path: {s3_path}")
+        
+        # Determine if the file is gzipped based on extension
+        is_gzipped = has_gz_extension(s3_path)
+        
+        # Stream the file without decompression from S3
+        stream = stream_s3_file(s3_path, decompress=False)
+        
+        try:
+            # Validate the S3 stream
+            result = validator.validate_stream(stream, is_gzipped=is_gzipped)
+            
+            # Verify validation failed as expected
+            assert result["valid"] is False, f"S3 FASTQ validation should have failed for {s3_path}"
+            assert "errors" in result, "Missing errors in validation result"
+            assert len(result["errors"]) > 0, "Expected at least one error"
+            
+            # Check for expected error substring
+            error_string = str(result["errors"]).lower()
+            assert expected_error_substr.lower() in error_string, \
+                f"Expected error containing '{expected_error_substr}', got: {error_string}"
+            
+            print(f"Successfully detected errors in {s3_path}: {result['errors']}")
+            
+        finally:
+            # Ensure the stream is closed
+            if hasattr(stream, 'close'):
+                stream.close()
+
+@pytest.mark.s3
+def test_s3_streaming_with_core_validation():
+    """Test integration with the core validation module for S3 files."""
+    import pytest
+    import boto3
+    from botocore.exceptions import NoCredentialsError
+    
+    try:
+        # Check if we have AWS credentials
+        boto3.Session().client('s3')
+    except NoCredentialsError:
+        pytest.skip("AWS credentials not found, skipping S3 tests")
+    
+    # Import the core validation function
+    from src.core.validation import validate_s3_file
+    
+    # Test both valid and invalid files
+    test_cases = [
+        # S3 path, file format, expected validation result
+        ("s3://lattice-checkfiles/tests/valid/multiple_reads.fastq", "fastq", True),
+        ("s3://lattice-checkfiles/tests/valid/gzipped_file.fastq.gz", "fastq", True),
+        ("s3://lattice-checkfiles/tests/invalid/mismatched_lengths.fastq", "fastq", False),
+        ("s3://lattice-checkfiles/tests/invalid/not_gzipped.fastq.gz", "fastq", False)
+    ]
+    
+    for s3_path, file_format, expected_valid in test_cases:
+        print(f"Testing core validation for: {s3_path}")
+        
+        # Validate using the core validation function
+        result = validate_s3_file(s3_path, file_format, debug=True)
+        
+        # Check validation result matches expectations
+        assert result.validation_success == expected_valid, \
+            f"Validation for {s3_path} returned {result.validation_success}, expected {expected_valid}"
+        
+        # For failing cases, ensure there are errors
+        if not expected_valid:
+            assert result.errors, f"Expected errors for invalid file {s3_path}, but none were found"
+            print(f"Detected errors: {result.errors}")
+        else:
+            # For valid cases, check stats
+            assert result.info.get("read_count", 0) > 0, "Expected positive read count for valid file"
+            print(f"Successfully validated with {result.info.get('read_count')} reads")

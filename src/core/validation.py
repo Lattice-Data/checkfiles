@@ -360,8 +360,9 @@ def validate_local_file(file_path: str, file_format: str, debug: bool = False,
                 track_validation_progress(file_path, progress_tracker, "Validating (stream)", None)
                 logger.debug("Calling validator.validate_stream")
                 
-                # Pass is_gzipped to validate_stream
-                validation_results = validator.validate_stream(stream_to_validate, is_gzipped=is_gzipped) 
+                # Pass is_gzipped=False to validate_stream since stream_local_file already decompresses
+                # gzipped files if needed
+                validation_results = validator.validate_stream(stream_to_validate, is_gzipped=False)
                 
                 # Create validation record
                 record = FileValidationRecord(file_path, identifier, etag)
@@ -619,6 +620,7 @@ def validate_s3_file(s3_path: str, file_format: str, debug: bool = False,
             else:
                 stream_for_validator = validation_stream_raw
                 
+            # Pass is_gzipped=True if the file has a .gz extension, since we didn't decompress the stream
             validation_results = validator.validate_stream(stream_for_validator, is_gzipped=is_gzipped)
         finally:
             if hasattr(validation_stream_raw, 'close'): validation_stream_raw.close() # Ensure stream resources are cleaned up
