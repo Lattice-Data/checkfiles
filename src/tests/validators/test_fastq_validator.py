@@ -259,3 +259,74 @@ def test_all_hash_types_calculation(valid_fastq_data):
         for path in [uncompressed_path, compressed_path]:
             if os.path.exists(path):
                 os.unlink(path)
+
+def test_real_gzipped_fastq_file():
+    """Test validation of a real gzipped FASTQ file from the test directory."""
+    import os
+    
+    # Path to the gzipped test file
+    gzipped_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "tests", "data", "fastq", "valid", "gzipped_file.fastq.gz"
+    )
+    
+    # Ensure the file exists
+    assert os.path.exists(gzipped_path), f"Test file not found: {gzipped_path}"
+    
+    # Create validator
+    validator = FastqValidator()
+    
+    # Test the file with the stream validation method directly
+    with open(gzipped_path, 'rb') as f:
+        # First test with is_gzipped=True, which should work
+        result = validator.validate_stream(f, is_gzipped=True)
+        
+        # Verify that validation was successful
+        assert result["valid"] is True, "Gzipped FASTQ validation failed when is_gzipped=True"
+        assert "errors" not in result or len(result["errors"]) == 0, f"Validation errors: {result.get('errors', {})}"
+        
+        # Check that statistics were collected
+        assert "stats" in result, "Missing stats in validation result"
+        assert "read_count" in result["stats"], "Missing read_count in stats"
+        assert result["stats"]["read_count"] > 0, "Read count should be positive"
+    
+    # Test the file using the deprecated validate_file method
+    result = validator.validate_file(gzipped_path)
+    assert result["valid"] is True, "Gzipped FASTQ validation failed using validate_file"
+
+def test_invalid_gzip_magic_number():
+    """Test detection of a file with incorrect gzip magic numbers."""
+    import os
+    
+    # Path to the fake gzipped test file
+    not_gzipped_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "tests", "data", "fastq", "invalid", "not_gzipped.fastq.gz"
+    )
+    
+    # Ensure the file exists
+    assert os.path.exists(not_gzipped_path), f"Test file not found: {not_gzipped_path}"
+    
+    # Create validator
+    validator = FastqValidator()
+    
+    # Test the file with the stream validation method directly
+    with open(not_gzipped_path, 'rb') as f:
+        # Test with is_gzipped=True, which should fail with a gzip error
+        result = validator.validate_stream(f, is_gzipped=True)
+        
+        # Verify that validation failed
+        assert result["valid"] is False, "Validation should have failed for non-gzipped file with is_gzipped=True"
+        assert "errors" in result, "Missing errors in validation result"
+        assert len(result["errors"]) > 0, "Expected at least one error"
+        
+        # Check for specific error about gzip format
+        # The error might be in different formats but should mention gzip
+        error_string = str(result["errors"])
+        assert any(phrase in error_string.lower() for phrase in ["gzip", "not a gzipped", "failed to decompress"]), \
+            f"Expected error related to gzip format issues, got: {error_string}"
+    
+    # Test with validate_file, which should also fail
+    result = validator.validate_file(not_gzipped_path)
+    assert result["valid"] is False, "Validation should have failed for non-gzipped file with validate_file"
+    assert "errors" in result, "Missing errors in validation result"
