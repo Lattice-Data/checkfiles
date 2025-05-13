@@ -63,3 +63,8 @@ packages = [
     "src/models",
     "src/backend"
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "s3: tests that interact with S3 buckets and require AWS credentials"
+]

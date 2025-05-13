@@ -28,11 +28,13 @@ jobs:
     
     - name: Run unit tests with coverage
       run: |
-        python -m pytest src/tests/ --ignore=src/tests/integration/ --cov=src --cov-report=xml --cov-report=term-missing --ignore=cdk/ -v
+        # Skip tests marked with 's3' as they require AWS credentials
+        python -m pytest src/tests/ -m "not s3" --ignore=src/tests/integration/ --cov=src --cov-report=xml --cov-report=term-missing --ignore=cdk/ -v
     
     - name: Run integration tests
       run: |
-        python -m pytest src/tests/integration/ -v
+        # Skip tests marked with 's3' in integration tests as well
+        python -m pytest src/tests/integration/ -m "not s3" -v
     
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2
