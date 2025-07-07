@@ -1155,6 +1155,18 @@ def upload_log_to_s3_if_aws_environment(args=None):
         if not os.path.exists(log_file_path):
             logger.warning(f"Validation log file not found: {log_file_path}")
             return None
+        
+        # Give file system time to flush all worker writes to disk
+        logger.info("Waiting for file system to flush all writes...")
+        time.sleep(2)
+        
+        # Force file system sync to ensure all pending writes are committed
+        try:
+            import subprocess
+            subprocess.run(['sync'], check=False, capture_output=True)
+            logger.debug("File system sync completed")
+        except Exception as sync_e:
+            logger.debug(f"Could not run sync command: {sync_e}")
             
         # Read log content
         with open(log_file_path, 'r') as f:
