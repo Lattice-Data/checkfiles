@@ -473,9 +473,7 @@ class RunCheckfilesStepFunction(Stack):
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                'update.$': '$.update',
-                's3_upload_status.$': '$.s3_upload_status',
-                's3_key.$': '$.s3_key'
+                'update.$': '$.update'
             }
         )
 
