@@ -17,6 +17,14 @@ import requests
 import json
 import tempfile
 import traceback
+import time
+
+# AWS-specific imports (only used in AWS environment)
+try:
+    import boto3
+    AWS_AVAILABLE = True
+except ImportError:
+    AWS_AVAILABLE = False
 
 # Configure logging
 log_dir = os.path.join(os.getcwd(), 'logs')
@@ -542,6 +550,18 @@ def main():
     elif args.update and not (args.backend_uri and args.query):
         logger.warning("The --update flag only works when using --backend-uri and --query")
         print("Warning: The --update flag only works when using --backend-uri and --query")
+
+    # Upload validation log to S3 if running in AWS environment (when validation completes)
+    s3_upload_result = upload_log_to_s3_if_aws_environment(args)
+    if s3_upload_result:
+        if s3_upload_result.get('status') == 'success':
+            print(f"✅ Uploaded validation log to S3: {s3_upload_result['s3_key']}")
+            logger.info(f"Validation log uploaded to S3: {s3_upload_result['s3_uri']}")
+        else:
+            print(f"❌ Failed to upload validation log to S3: {s3_upload_result.get('error', 'Unknown error')}")
+            logger.error(f"S3 upload failed: {s3_upload_result.get('error', 'Unknown error')}")
+    else:
+        logger.debug("S3 upload not performed (not in AWS environment or not in backend mode)")
 
 def process_files_in_parallel(local_files: List[str], s3_files: List[str], 
                               file_format: str, thread_count: int, debug: bool,
@@ -1098,6 +1118,106 @@ def robust_initialize_validator(file_format, file_path):
     except Exception as e:
         logger.error(f"Error creating validator instance: {e}")
         raise ValueError(f"Could not create validator for {file_format}: {e}")
+
+def upload_log_to_s3_if_aws_environment(args=None):
+    """Upload validation log to S3 if running in AWS environment.
+    
+    This function detects if we're running in AWS environment and uploads
+    the validation progress log to S3 for later processing.
+    
+    Args:
+        args: Command line arguments from parse_arguments()
+    
+    Returns:
+        dict: Upload result with status and S3 key, or None if not in AWS environment
+    """
+    # Check if we should upload (only in backend mode)
+    if not (args and args.backend_uri and args.query):
+        logger.debug("Not in backend mode, skipping S3 upload")
+        return None
+    
+    # Check if we're in AWS environment
+    if not os.getenv('CHECKFILES_LOG_DIR'):
+        logger.debug("CHECKFILES_LOG_DIR not set, not in AWS environment")
+        return None
+        
+    if not AWS_AVAILABLE:
+        logger.warning("boto3 not available, cannot upload to S3")
+        return None
+    
+    try:
+        # Get environment variables
+        log_dir = os.getenv('CHECKFILES_LOG_DIR', os.getcwd())
+        instance_suffix = os.getenv('INSTANCE_NAME_SUFFIX', 'unknown')
+        
+        # Check if validation log exists
+        log_file_path = os.path.join(log_dir, 'validation_progress.log')
+        if not os.path.exists(log_file_path):
+            logger.warning(f"Validation log file not found: {log_file_path}")
+            return None
+            
+        # Read log content
+        with open(log_file_path, 'r') as f:
+            log_content = f.read()
+            
+        if not log_content.strip():
+            logger.warning("Validation log file is empty")
+            return None
+            
+        logger.info(f"Uploading validation log to S3 (size: {len(log_content)} bytes)")
+        
+        # Create S3 key with timestamp
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        s3_key = f"reports/checkfiles-report-{instance_suffix}-{timestamp}.tsv"
+        s3_bucket_name = 'lattice-checkfiles'
+        
+        # Upload to S3
+        s3_client = boto3.client('s3')
+        s3_client.put_object(
+            Bucket=s3_bucket_name,
+            Key=s3_key,
+            Body=log_content.encode('utf-8'),
+            ContentType='text/tab-separated-values',
+            Metadata={
+                'checkfiles-instance': instance_suffix,
+                'upload-timestamp': timestamp,
+                'uploaded-by': 'checkfiles-script'
+            }
+        )
+        
+        logger.info(f"Successfully uploaded validation log to S3: s3://{s3_bucket_name}/{s3_key}")
+        
+        # Write S3 location info for upload_report lambda
+        s3_info = {
+            's3_key': s3_key,
+            's3_bucket': s3_bucket_name,
+            's3_uri': f"s3://{s3_bucket_name}/{s3_key}",
+            'timestamp': timestamp,
+            'instance_suffix': instance_suffix
+        }
+        
+        s3_info_path = os.path.join(log_dir, 's3_upload_info.json')
+        with open(s3_info_path, 'w') as f:
+            json.dump(s3_info, f, indent=2)
+            
+        logger.info(f"S3 upload info written to: {s3_info_path}")
+        
+        return {
+            'status': 'success',
+            's3_key': s3_key,
+            's3_bucket': s3_bucket_name,
+            's3_uri': f"s3://{s3_bucket_name}/{s3_key}",
+            'timestamp': timestamp
+        }
+        
+    except Exception as e:
+        error_msg = f"Error uploading validation log to S3: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {
+            'status': 'failed',
+            'error': error_msg
+        }
 
 if __name__ == "__main__":
     main()

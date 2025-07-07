@@ -442,6 +442,15 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
+        run_checkfiles_command_lambda.add_to_role_policy(
+            PolicyStatement(
+                actions=[
+                    's3:PutObject'
+                ],
+                resources=[f'arn:aws:s3:::{self.props.s3_bucket_name}/reports/*'],
+            )
+        )
+
         run_checkfiles_command = LambdaInvoke(
             self,
             'RunCheckFilesCommand',
@@ -464,7 +473,9 @@ class RunCheckfilesStepFunction(Stack):
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'backend_uri.$': '$.backend_uri',
                 'query.$': '$.query',
-                'update.$': '$.update'
+                'update.$': '$.update',
+                's3_upload_status.$': '$.s3_upload_status',
+                's3_key.$': '$.s3_key'
             }
         )
 
@@ -506,19 +517,25 @@ class RunCheckfilesStepFunction(Stack):
         upload_report_lambda.add_to_role_policy(
             PolicyStatement(
                 actions=[
-                    'ssm:SendCommand',
-                    'ssm:GetCommandInvocation'
+                    's3:GetObject',
+                    's3:PutObject',
+                    's3:DeleteObject',
+                    's3:ListBucket'
                 ],
-                resources=['*'],
+                resources=[
+                    f'arn:aws:s3:::{self.props.s3_bucket_name}',
+                    f'arn:aws:s3:::{self.props.s3_bucket_name}/*'
+                ],
             )
         )
 
         upload_report_lambda.add_to_role_policy(
             PolicyStatement(
                 actions=[
-                    's3:PutObject'
+                    'ssm:SendCommand',
+                    'ssm:GetCommandInvocation'
                 ],
-                resources=[f'arn:aws:s3:::{self.props.s3_bucket_name}/*'],
+                resources=['*'],
             )
         )
 

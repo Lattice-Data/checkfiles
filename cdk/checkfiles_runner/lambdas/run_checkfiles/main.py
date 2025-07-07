@@ -90,6 +90,10 @@ def run_checkfiles_command(event, context):
     echo "Environment after sourcing:"
     env | grep -E 'CHECKFILES|PYTHON|PATH'
 
+    # Set instance name suffix for S3 upload
+    export INSTANCE_NAME_SUFFIX="{instance_name_suffix}"
+    echo "INSTANCE_NAME_SUFFIX: $INSTANCE_NAME_SUFFIX"
+
     # Change to checkfiles directory
     cd /home/ubuntu/checkfiles
     echo "Current directory after cd: $(pwd)"
@@ -121,12 +125,17 @@ def run_checkfiles_command(event, context):
 
     # Run the checkfiles command
     echo "=== Running checkfiles command ==="
-    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" PORTAL_KEY="$PORTAL_KEY" PORTAL_SECRET_KEY="$PORTAL_SECRET_KEY" python3 src/checkfiles.py {run_checkfiles_cmd.split('python3 src/checkfiles.py')[1]}
+    CHECKFILES_LOG_DIR="$CHECKFILES_LOG_DIR" INSTANCE_NAME_SUFFIX="$INSTANCE_NAME_SUFFIX" PORTAL_KEY="$PORTAL_KEY" PORTAL_SECRET_KEY="$PORTAL_SECRET_KEY" python3 src/checkfiles.py {run_checkfiles_cmd.split('python3 src/checkfiles.py')[1]}
 
-    # Verify log file
-    echo "=== Log File Verification ==="
+    # Verify log file and S3 upload info
+    echo "=== Post-execution verification ==="
     echo "CHECKFILES_LOG_DIR: $CHECKFILES_LOG_DIR"
-    ls -l $CHECKFILES_LOG_DIR/validation_progress.log || echo "No log file found"
+    ls -l $CHECKFILES_LOG_DIR/validation_progress.log || echo "No validation log file found"
+    ls -l $CHECKFILES_LOG_DIR/s3_upload_info.json || echo "No S3 upload info file found"
+    if [ -f "$CHECKFILES_LOG_DIR/s3_upload_info.json" ]; then
+        echo "S3 upload info:"
+        cat $CHECKFILES_LOG_DIR/s3_upload_info.json
+    fi
     """
     
     # Execute the command on the instance
@@ -151,7 +160,7 @@ def run_checkfiles_command(event, context):
     logger.info(f"Command sent with ID: {command_id}")
 
     # Wait for command completion
-    time.sleep(2)  # Match upload_report's timing
+    time.sleep(2)
     
     try:
         result = ssm.get_command_invocation(
@@ -166,6 +175,8 @@ def run_checkfiles_command(event, context):
         logger.error(f"Error getting command output: {e}")
         raise
 
+    # S3 upload is now handled by the validation script itself when it completes
+    
     # Return execution details
     return {
         'instance_id': instance_id,
@@ -177,3 +188,95 @@ def run_checkfiles_command(event, context):
         'query': query,
         'number_of_files_pending': event.get('number_of_files_pending')
     }
+
+
+def upload_validation_log_to_s3(instance_id: str, instance_name_suffix: str) -> dict:
+    """Upload the validation progress log from EC2 instance to S3.
+    
+    This function retrieves the validation_progress.log file from the EC2 instance
+    and uploads it to S3 for later processing by the upload_report lambda.
+    
+    Args:
+        instance_id: EC2 instance ID where the log file is located
+        instance_name_suffix: Suffix for the instance name to create unique filenames
+        
+    Returns:
+        Dictionary with upload status information
+    """
+    ssm = boto3.client('ssm')
+    s3 = boto3.client('s3')
+    
+    try:
+        # Get the validation log file content from EC2 instance
+        logger.info(f"Retrieving validation log from EC2 instance {instance_id}")
+        
+        get_log_command = ssm.send_command(
+            InstanceIds=[instance_id],
+            DocumentName='AWS-RunShellScript',
+            Parameters={
+                'commands': [
+                    '#!/bin/bash',
+                    'source /home/ubuntu/.env_checkfiles',
+                    'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
+                    'if [ ! -f "validation_progress.log" ]; then',
+                    '  echo "identifier\turi\terrors\tresults\tjson_patch\tLattice patched?\tS3 tag patched?" > validation_progress.log',
+                    '  echo "no_files\tno_files\t{}\t{}\t{}\tno_files\tno_files" >> validation_progress.log',
+                    'fi',
+                    'cat validation_progress.log'
+                ]
+            }
+        )
+        
+        time.sleep(2)
+        
+        log_result = ssm.get_command_invocation(
+            CommandId=get_log_command['Command']['CommandId'],
+            InstanceId=instance_id
+        )
+        
+        if log_result['Status'] != 'Success':
+            raise Exception(f"Failed to retrieve log file: {log_result.get('StandardErrorContent', 'Unknown error')}")
+        
+        log_content = log_result['StandardOutputContent']
+        if not log_content.strip():
+            raise Exception("Retrieved log file is empty")
+        
+        logger.info("Successfully retrieved validation log from EC2 instance")
+        
+        # Create S3 key with timestamp - upload directly to reports folder
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        s3_key = f"reports/checkfiles-report-{instance_name_suffix}-{timestamp}.tsv"
+        s3_bucket_name = 'lattice-checkfiles'  # Use the configured bucket name
+        
+        logger.info(f"Uploading validation log to S3: s3://{s3_bucket_name}/{s3_key}")
+        
+        # Upload to S3
+        s3.put_object(
+            Bucket=s3_bucket_name,
+            Key=s3_key,
+            Body=log_content.encode('utf-8'),
+            ContentType='text/tab-separated-values',
+            Metadata={
+                'checkfiles-instance': instance_name_suffix,
+                'upload-timestamp': timestamp,
+                'source-instance-id': instance_id
+            }
+        )
+        
+        logger.info(f"Successfully uploaded validation log to S3: s3://{s3_bucket_name}/{s3_key}")
+        
+        return {
+            'status': 'success',
+            's3_key': s3_key,
+            's3_uri': f"s3://{s3_bucket_name}/{s3_key}",
+            'bucket': s3_bucket_name
+        }
+        
+    except Exception as e:
+        error_msg = f"Error uploading validation log to S3: {str(e)}"
+        logger.error(error_msg)
+        return {
+            'status': 'failed',
+            'error': error_msg,
+            's3_key': None
+        }
