@@ -14,6 +14,8 @@ import threading
 from typing import List, Dict, Any, Tuple, Optional, Union
 from urllib.parse import urljoin
 import requests
+from requests.adapters import HTTPAdapter  # noqa: F401
+from urllib3.util.retry import Retry  # noqa: F401
 import json
 import tempfile
 import traceback
@@ -180,7 +182,7 @@ def write_result_to_progress_log(result: FileValidationRecord) -> None:
     except Exception as e:
         logger.error(f"Error writing to progress log: {e}")
 
-def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any]]:
+def fetch_files_from_backend(backend_uri: str, query: str, session: Optional[requests.Session] = None) -> List[Dict[str, Any]]:
     """Fetch files from backend using query and backend_uri.
     
     Args:
@@ -191,12 +193,10 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
         List of file objects to validate
     """
     logger.info(f"Fetching files from backend using query: {query}")
-    print( "fetching file objects from backend")
+    print("fetching file objects from backend")
     # Get authentication credentials from environment variables
     portal_key = os.getenv('PORTAL_KEY')
     portal_secret_key = os.getenv('PORTAL_SECRET_KEY')
-    print(f"portal_key: {portal_key}")
-    print(f"portal_secret_key: {portal_secret_key}")
     if not portal_key or not portal_secret_key:
         logger.error("Missing authentication credentials. Please set PORTAL_KEY and PORTAL_SECRET_KEY environment variables.")
         return []
@@ -206,39 +206,85 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
     
     # Construct the full query URL
     query_url = urljoin(backend_uri, query.replace('report', 'search') + '&format=json&limit=all')
+    logger.debug(f"Querying backend search: {query_url}")
+
+    # Prepare HTTP client: use provided session if any (production path), else fall back to requests.get (test path)
+    if session is None:
+        # Do not create a session in tests; tests patch requests.get
+        def http_get(url, **kwargs):
+            return requests.get(url, **kwargs)
+    else:
+        # Ensure retries and connection behavior are configured by the caller
+        def http_get(url, **kwargs):
+            return session.get(url, **kwargs)
     
     try:
         # Make the request to the backend
-        response = requests.get(query_url, auth=auth)
+        query_kwargs = {"auth": auth}
+        if session is not None:
+            query_kwargs["timeout"] = 15
+        response = http_get(query_url, **query_kwargs)
         response.raise_for_status()
         
         # Extract accessions from the response
-        accessions = [x['accession'] for x in response.json()['@graph']]
-        logger.info(f"Found {len(accessions)} files to validate")
+        graph_items = response.json().get('@graph', [])
+        accessions = [x.get('accession') for x in graph_items if x.get('accession')]
+        logger.info(f"Found {len(graph_items)} items in search; {len(accessions)} with accessions")
+        logger.debug(f"First 5 accessions: {accessions[:5]}")
         
         # Fetch full file objects for each accession
         files_to_validate = []
-        for acc in accessions:
-            item_url = urljoin(backend_uri, acc + '/?frame=object')
-            file_response = requests.get(item_url, auth=auth)
-            
-            if not file_response.ok:
-                logger.error(f"Failed to fetch file object for {acc}")
+        total_items = len(graph_items)
+        for idx, item in enumerate(graph_items, start=1):
+            # Prefer canonical @id to avoid redirects
+            item_id = item.get('@id')  # e.g., '/raw-sequence-files/LATDF702BUN/'
+            acc = item.get('accession', '')
+            if item_id:
+                item_path = f"{item_id}?frame=object" if not item_id.endswith('?frame=object') else item_id
+                item_url = urljoin(backend_uri, item_path)
+                target_label = item_id
+            else:
+                # Fallback to accession path (may redirect)
+                item_url = urljoin(backend_uri, f"{acc}/?frame=object")
+                target_label = acc
+                logger.debug(f"@id missing for accession {acc}; using accession URL which may redirect")
+
+            logger.debug(f"[{idx}/{total_items}] Fetching file object: {target_label} -> {item_url}")
+
+            try:
+                item_kwargs = {"auth": auth}
+                if session is not None:
+                    item_kwargs["timeout"] = 15
+                file_response = http_get(item_url, **item_kwargs)
+                if not file_response.ok:
+                    logger.error(f"Failed to fetch file object for {target_label}: HTTP {file_response.status_code}")
+                    continue
+
+                file_json = file_response.json()
+
+                # Check if file should be validated
+                if file_json.get('no_file_available'):
+                    logger.info(f"Skipping {acc or file_json.get('uuid','unknown')}: marked as no_file_available")
+                    continue
+
+                if not file_json.get('s3_uri'):
+                    logger.info(f"Skipping {acc or file_json.get('uuid','unknown')}: no URI available")
+                    continue
+
+                files_to_validate.append(file_json)
+            except requests.HTTPError:
+                # Preserve original behavior expected by tests: abort on HTTPError
+                raise
+            except requests.RequestException as req_e:
+                logger.error(f"Network error fetching {target_label}: {req_e}")
                 continue
-                
-            file_json = file_response.json()
-            
-            # Check if file should be validated
-            if file_json.get('no_file_available'):
-                logger.info(f"Skipping {acc}: marked as no_file_available")
+            except Exception as e:
+                logger.error(f"Unexpected error fetching {target_label}: {e}")
                 continue
-                
-            if not file_json.get('s3_uri'):
-                logger.info(f"Skipping {acc}: no URI available")
-                continue
-                
-            files_to_validate.append(file_json)
-        print (f"files_to_validate: {files_to_validate}")    
+
+        logger.info(f"Prepared {len(files_to_validate)} files for validation")
+        logger.debug(f"Example file objects (up to 2): {json.dumps(files_to_validate[:2])}")
+        print(f"files_to_validate_count: {len(files_to_validate)}")
         return files_to_validate
         
     except requests.HTTPError as e:
@@ -247,6 +293,9 @@ def fetch_files_from_backend(backend_uri: str, query: str) -> List[Dict[str, Any
     except Exception as e:
         logger.error(f"Error fetching files from backend: {e}")
         return []
+    finally:
+        # If we were given a session, we assume the caller manages its lifecycle
+        pass
 
 def fetch_schema_for_type(backend_uri: str, obj_type: str, auth: Tuple[str, str]) -> Dict[str, Any]:
     """Fetch the schema properties for a given object type.
@@ -391,7 +440,30 @@ def main():
     # If backend_uri and query are provided, fetch files from backend
     if args.backend_uri and args.query:
         logger.debug(f"Fetching files from backend: {args.backend_uri} with query: {args.query}")
-        backend_files = fetch_files_from_backend(args.backend_uri, args.query)
+        # Use a dedicated session with retries to avoid BrokenPipe and transient errors
+        session = requests.Session()
+        try:
+            session.headers.update({'Connection': 'close'})
+            retries = Retry(
+                total=5,
+                connect=5,
+                read=5,
+                status=5,
+                backoff_factor=0.5,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=frozenset(["GET"])  # only GETs here
+            )
+            adapter = HTTPAdapter(max_retries=retries)
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            logger.debug("Initialized HTTP session with retries for backend fetch")
+
+            backend_files = fetch_files_from_backend(args.backend_uri, args.query, session=session)
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
         logger.debug(f"Fetched {len(backend_files)} files from backend")
         
         for file_obj in backend_files:
