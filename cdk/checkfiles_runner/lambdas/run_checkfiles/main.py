@@ -216,13 +216,16 @@ def upload_validation_log_to_s3(instance_id: str, instance_name_suffix: str) -> 
             Parameters={
                 'commands': [
                     '#!/bin/bash',
-                    'source /home/ubuntu/.env_checkfiles',
-                    'cd "$CHECKFILES_LOG_DIR" || { echo "Failed to cd to $CHECKFILES_LOG_DIR"; exit 1; }',
-                    'if [ ! -f "validation_progress.log" ]; then',
-                    '  echo "identifier\turi\terrors\tresults\tjson_patch\tLattice patched?\tS3 tag patched?" > validation_progress.log',
-                    '  echo "no_files\tno_files\t{}\t{}\t{}\tno_files\tno_files" >> validation_progress.log',
-                    'fi',
-                    'cat validation_progress.log'
+                    'set -e',
+                    'source /home/ubuntu/.env_checkfiles || true',
+                    'if [ -z "$CHECKFILES_LOG_DIR" ]; then echo "MISSING_ENV_CHECKFILES_LOG_DIR"; exit 0; fi',
+                    'if [ ! -d "$CHECKFILES_LOG_DIR" ]; then echo "MISSING_LOG_DIR:$CHECKFILES_LOG_DIR"; exit 0; fi',
+                    'if [ -f "$CHECKFILES_LOG_DIR/validation_progress.log" ]; then',
+                    '  echo "FOUND:$CHECKFILES_LOG_DIR/validation_progress.log"',
+                    '  cat "$CHECKFILES_LOG_DIR/validation_progress.log"',
+                    'else',
+                    '  echo "MISSING_VALIDATION_LOG"',
+                    'fi'
                 ]
             }
         )
@@ -237,39 +240,25 @@ def upload_validation_log_to_s3(instance_id: str, instance_name_suffix: str) -> 
         if log_result['Status'] != 'Success':
             raise Exception(f"Failed to retrieve log file: {log_result.get('StandardErrorContent', 'Unknown error')}")
         
-        log_content = log_result['StandardOutputContent']
+        log_stdout = log_result['StandardOutputContent'] or ''
+        if 'MISSING_VALIDATION_LOG' in log_stdout or 'MISSING_LOG_DIR' in log_stdout or 'MISSING_ENV_CHECKFILES_LOG_DIR' in log_stdout:
+            raise Exception("Validation log not found on instance at $CHECKFILES_LOG_DIR; not uploading stub.")
+        
+        # Strip the optional FOUND:path prefix from stdout before upload
+        if log_stdout.startswith('FOUND:'):
+            newline_index = log_stdout.find('\n')
+            log_content = log_stdout[newline_index+1:] if newline_index != -1 else ''
+        else:
+            log_content = log_stdout
+        
         if not log_content.strip():
-            raise Exception("Retrieved log file is empty")
+            raise Exception("Retrieved log file is empty; not uploading.")
         
-        logger.info("Successfully retrieved validation log from EC2 instance")
-        
-        # Create S3 key with timestamp - upload directly to reports folder
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        s3_key = f"reports/checkfiles-report-{instance_name_suffix}-{timestamp}.tsv"
-        s3_bucket_name = 'lattice-checkfiles'  # Use the configured bucket name
-        
-        logger.info(f"Uploading validation log to S3: s3://{s3_bucket_name}/{s3_key}")
-        
-        # Upload to S3
-        s3.put_object(
-            Bucket=s3_bucket_name,
-            Key=s3_key,
-            Body=log_content.encode('utf-8'),
-            ContentType='text/tab-separated-values',
-            Metadata={
-                'checkfiles-instance': instance_name_suffix,
-                'upload-timestamp': timestamp,
-                'source-instance-id': instance_id
-            }
-        )
-        
-        logger.info(f"Successfully uploaded validation log to S3: s3://{s3_bucket_name}/{s3_key}")
+        logger.info("Retrieved validation log content from EC2 instance (will not upload here; upload handled elsewhere).")
         
         return {
-            'status': 'success',
-            's3_key': s3_key,
-            's3_uri': f"s3://{s3_bucket_name}/{s3_key}",
-            'bucket': s3_bucket_name
+            'status': 'found',
+            'message': 'Validation log located on instance',
         }
         
     except Exception as e:

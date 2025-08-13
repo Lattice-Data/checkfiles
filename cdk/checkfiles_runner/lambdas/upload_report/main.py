@@ -85,30 +85,73 @@ def upload_report_to_slack(event, context):
                 
         except Exception as e:
             logging.warning(f"Could not get S3 info from validation script: {str(e)}")
-            logging.info("Falling back to searching for report files by pattern")
-            
-            # Fallback: search for files by pattern (original logic)
-            prefix = f"reports/checkfiles-report-{instance_name_suffix}-"
-            
+            logging.info("Attempting to fetch validation_progress.log directly from EC2 via SSM and upload to S3")
+
+            # Try to have EC2 upload the file directly to S3 to avoid SSM stdout truncation
             try:
-                response = s3.list_objects_v2(
-                    Bucket=s3_bucket_name,
-                    Prefix=prefix,
-                    MaxKeys=10  # Should be enough to find recent files
+                timestamp = time.strftime('%Y%m%d-%H%M%S')
+                candidate_s3_key = f"reports/checkfiles-report-{instance_name_suffix}-{timestamp}.tsv"
+
+                ssm = boto3.client('ssm')
+                upload_cmd = ssm.send_command(
+                    InstanceIds=[instance_id],
+                    DocumentName='AWS-RunShellScript',
+                    Parameters={
+                        'commands': [
+                            '#!/bin/bash',
+                            'set -e',
+                            'source /home/ubuntu/.env_checkfiles || true',
+                            'LOG1="${CHECKFILES_LOG_DIR:+$CHECKFILES_LOG_DIR/validation_progress.log}"',
+                            'LOG2="/home/ubuntu/checkfiles/validation_progress.log"',
+                            'TARGET=""',
+                            'if [ -n "$LOG1" ] && [ -f "$LOG1" ]; then TARGET="$LOG1"; fi',
+                            'if [ -z "$TARGET" ] && [ -f "$LOG2" ]; then TARGET="$LOG2"; fi',
+                            'if [ -z "$TARGET" ]; then echo "MISSING_ALL"; exit 0; fi',
+                            f'echo "FOUND:$TARGET"',
+                            f'aws s3 cp "$TARGET" "s3://{s3_bucket_name}/{candidate_s3_key}" --content-type "text/tab-separated-values" --metadata "checkfiles-instance={instance_name_suffix},upload-timestamp={timestamp},source-instance-id={instance_id}"'
+                        ]
+                    }
                 )
-                
-                if 'Contents' not in response or len(response['Contents']) == 0:
-                    raise Exception(f"No validation report files found in S3 with prefix: {prefix}")
-                
-                # Sort by LastModified to get the most recent file
-                report_files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)
-                latest_report_file = report_files[0]
-                report_s3_key = latest_report_file['Key']
-                
-                logging.info(f"Found validation report file by search: {report_s3_key}")
-                
-            except Exception as search_e:
-                raise Exception(f"Error finding validation report file in S3: {str(search_e)}")
+
+                time.sleep(3)
+
+                up_res = ssm.get_command_invocation(
+                    CommandId=upload_cmd['Command']['CommandId'],
+                    InstanceId=instance_id
+                )
+
+                stdout = up_res.get('StandardOutputContent', '')
+                if up_res['Status'] == 'Success' and 'FOUND:' in stdout:
+                    # Verify object exists in S3
+                    try:
+                        _ = s3.head_object(Bucket=s3_bucket_name, Key=candidate_s3_key)
+                        report_s3_key = candidate_s3_key
+                        logging.info(f"EC2 uploaded validation log to S3: {report_s3_key}")
+                    except Exception:
+                        logging.warning("EC2 reported upload success but object not visible yet; will fall back to listing.")
+                else:
+                    logging.info("EC2 upload path did not succeed or log missing; falling back to S3 listing by prefix")
+            except Exception as ec2_upload_e:
+                logging.warning(f"EC2-directed S3 upload attempt failed: {ec2_upload_e}")
+
+            # If we still don't have report_s3_key, search S3 by prefix
+            if not report_s3_key:
+                logging.info("Falling back to searching for report files by pattern")
+                prefix = f"reports/checkfiles-report-{instance_name_suffix}-"
+                try:
+                    response = s3.list_objects_v2(
+                        Bucket=s3_bucket_name,
+                        Prefix=prefix,
+                        MaxKeys=10
+                    )
+                    if 'Contents' not in response or len(response['Contents']) == 0:
+                        raise Exception(f"No validation report files found in S3 with prefix: {prefix}")
+                    report_files = sorted(response['Contents'], key=lambda x: x['LastModified'], reverse=True)
+                    latest_report_file = report_files[0]
+                    report_s3_key = latest_report_file['Key']
+                    logging.info(f"Found validation report file by search: {report_s3_key}")
+                except Exception as search_e:
+                    raise Exception(f"Error finding validation report file in S3: {str(search_e)}")
         
         # Download the file content from S3
         try:
