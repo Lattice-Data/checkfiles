@@ -293,7 +293,7 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'InitializeCounter',
             parameters={
-                'iterator': {'index': 0, 'step': 1, 'count': 5, 'continue': True},
+                'iterator': {'index': 0, 'step': 1, 'count': 50, 'continue': True},
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
@@ -590,7 +590,7 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'WaitThirtyMinutes',
             time=WaitTime.duration(
-                Duration.minutes(2)
+                Duration.minutes(30)
             )
         )
 
