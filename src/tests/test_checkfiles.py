@@ -735,13 +735,10 @@ def test_process_files_in_parallel_uses_process_pool():
     # Check that it's not using ThreadPoolExecutor anywhere
     assert 'ThreadPoolExecutor' not in process_parallel_source
     
-    # Check the main function for ProcessPoolExecutor usage in patching
-    assert 'ProcessPoolExecutor' in main_source
+    # Main no longer performs a batch patch; only process_files_in_parallel must use ProcessPoolExecutor
     assert 'ThreadPoolExecutor' not in main_source
-    
-    # Use regex to verify ProcessPoolExecutor is used with correct parameters
+    # Verify correct use inside process_files_in_parallel
     assert re.search(r'ProcessPoolExecutor\(max_workers=thread_count\)', process_parallel_source)
-    assert re.search(r'ProcessPoolExecutor\(max_workers=min\(args\.threads, len\(patch_jobs\)\)\)', main_source)
 
 
 # Use parametrize to test different scenarios

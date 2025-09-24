@@ -64,7 +64,7 @@ except ImportError as e:
 try:
     from src.models.validation_record import FileValidationRecord
     from src.cli.parser import parse_arguments
-    from src.backend.patch import fetch_etag_for_uuid
+    from src.backend.patch import fetch_etag_for_uuid, compare_with_db, patch_file
     from src.core.validation import (
         validate_s3_file as core_validate_s3_file,
         create_validation_record,
@@ -75,7 +75,7 @@ try:
     from src.tracking.progress import SimpleActivityTracker
     from src.utils.helpers import has_gz_extension, validate_gzip_format
     from src.path_translator import resolve_path, is_s3_uri
-    from src.worker.patch_worker import patching_worker
+    from src.worker.patch_worker import patching_worker, check_credentials_expired
     from src.utils.s3_utils import set_s3_tags
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
@@ -143,7 +143,10 @@ def write_result_to_progress_log(result: FileValidationRecord) -> None:
         stats_str = json.dumps(info)
         patch_str = json.dumps(json_patch)
 
-        log_line = f"{identifier}\t{uri}\t{errors_str}\t{stats_str}\t{patch_str}\tsuccess\tsuccess"
+        # Determine patch statuses if available on result
+        lattice_status = 'success' if getattr(result, 'patched', False) else 'failed'
+        s3_status = 'success' if getattr(result, 's3_tagged', False) else 'failed'
+        log_line = f"{identifier}\t{uri}\t{errors_str}\t{stats_str}\t{patch_str}\t{lattice_status}\t{s3_status}"
     else:
         # For failed validations, ensure we capture all error information
         error_dict = {}
@@ -161,7 +164,9 @@ def write_result_to_progress_log(result: FileValidationRecord) -> None:
         error_dict_str = json.dumps(error_dict)
         empty_dict_str = json.dumps(empty_dict)
         
-        log_line = f"{identifier}\t{uri}\t{error_dict_str}\t{empty_dict_str}\t{empty_dict_str}\tfailed\tfailed"
+        lattice_status = 'failed' if not getattr(result, 'patched', False) else 'success'
+        s3_status = 'failed' if not getattr(result, 's3_tagged', False) else 'success'
+        log_line = f"{identifier}\t{uri}\t{error_dict_str}\t{empty_dict_str}\t{empty_dict_str}\t{lattice_status}\t{s3_status}"
     
     # Use file locking to ensure atomic writes
     try:
@@ -466,10 +471,16 @@ def main():
                 pass
         logger.debug(f"Fetched {len(backend_files)} files from backend")
         
+        # Build helper maps when in backend mode
+        uuid_to_file = {}
+        s3_uri_to_file = {}
         for file_obj in backend_files:
             if file_obj.get('s3_uri'):
                 s3_uri = file_obj.get('s3_uri')
                 s3_files.append(s3_uri)
+                s3_uri_to_file[s3_uri] = file_obj
+            if file_obj.get('uuid'):
+                uuid_to_file[file_obj['uuid']] = file_obj
                 
                 # Extract file format from backend file object
                 if file_obj.get('file_format'):
@@ -529,6 +540,16 @@ def main():
         local_files = validated_local_files
     
     # Process files in parallel with controlled concurrency
+    # Build mapping structures for backend mode
+    s3_uri_to_file_map = {}
+    uuid_to_file_map = {}
+    if backend_files:
+        for f in backend_files:
+            if f.get('s3_uri'):
+                s3_uri_to_file_map[f['s3_uri']] = f
+            if f.get('uuid'):
+                uuid_to_file_map[f['uuid']] = f
+
     all_results = process_files_in_parallel(
         local_files=local_files,
         s3_files=s3_files,
@@ -540,7 +561,11 @@ def main():
         backend_files=backend_files,
         s3_uri_to_file_format=s3_uri_to_file_format,  # Pass the mapping to the function
         update=args.update,
-        backend_uri=args.backend_uri
+        backend_uri=args.backend_uri,
+        s3_uri_to_file_map=s3_uri_to_file_map,
+        uuid_to_file_map=uuid_to_file_map,
+        ignore_active_credentials=args.ignore_active_credentials,
+        update_s3_tags=args.update_s3_tags
     )
     
     # Close progress tracker
@@ -550,76 +575,8 @@ def main():
     # Display summary
     display_summary(all_results)
     
-    # Handle updating if requested and if used with backend_uri
-    if args.update and args.backend_uri and args.query:
-        logger.info("Updating backend with validation results")
-        
-        # Check auth environment variables
-        portal_key = os.getenv('PORTAL_KEY')
-        portal_secret_key = os.getenv('PORTAL_SECRET_KEY')
-        
-        if not portal_key or not portal_secret_key:
-            logger.error("Missing authentication credentials. Please set PORTAL_KEY and PORTAL_SECRET_KEY environment variables.")
-            print("Error: --update requires PORTAL_KEY and PORTAL_SECRET_KEY environment variables")
-            sys.exit(1)
-            
-        auth = (portal_key, portal_secret_key)
-        
-        # Convert results to validation records
-        validation_records = convert_results_to_validation_records(
-            all_results, backend_files, args.backend_uri, auth)
-        
-        if not validation_records:
-            logger.warning("No valid records found for updating")
-            print("No valid records found for updating")
-            return
-            
-        # Prepare patch jobs
-        patch_jobs = []
-        for record in validation_records:
-            # Get file metadata for this record
-            file_metadata = next((f for f in backend_files if f.get('uuid') == record.uuid), {})
-            
-            # Get schema properties for this file type
-            obj_types = file_metadata.get('@type', [])
-            schema_type = next((t for t in obj_types if t not in ['Item', 'File']), None)
-            
-            if not schema_type:
-                logger.warning(f"No valid schema type found for file {record.uuid}")
-                continue
-                
-            schema_properties = fetch_schema_for_type(args.backend_uri, schema_type, auth)
-            
-            # Create patch job
-            patch_jobs.append({
-                'portal_uri': args.backend_uri,
-                'auth': auth,
-                'validation_record': record,
-                'file_metadata': file_metadata,
-                'schema_properties': schema_properties,
-                'ignore_active_credentials': args.ignore_active_credentials,
-                'update_s3_tags': args.update_s3_tags,
-                'is_lattice_db': args.backend_uri and 'lattice-data.org' in args.backend_uri
-            })
-        
-        logger.info(f"Preparing to update {len(patch_jobs)} files")
-        print(f"Preparing to update {len(patch_jobs)} files")
-        
-        # Use a process pool to process patch jobs
-        patched_count = 0
-        s3_tagged_count = 0
-        with ProcessPoolExecutor(max_workers=min(args.threads, len(patch_jobs))) as executor:
-            for result in executor.map(patching_worker, patch_jobs):
-                if result.get('patched'):
-                    patched_count += 1
-                if result.get('s3_tagged'):
-                    s3_tagged_count += 1
-                    
-        logger.info(f"Successfully updated {patched_count} files")
-        logger.info(f"Successfully tagged {s3_tagged_count} S3 files")
-        print(f"Successfully updated {patched_count} files")
-        print(f"Successfully tagged {s3_tagged_count} S3 files")
-    elif args.update and not (args.backend_uri and args.query):
+    # Legacy batch patch step removed in favor of immediate per-file patching
+    if args.update and not (args.backend_uri and args.query):
         logger.warning("The --update flag only works when using --backend-uri and --query")
         print("Warning: The --update flag only works when using --backend-uri and --query")
 
@@ -641,7 +598,11 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                               backend_files: List[Dict[str, Any]] = None,
                               s3_uri_to_file_format: Dict[str, str] = {},
                               update: bool = False,
-                              backend_uri: str = None) -> List[FileValidationRecord]:
+                              backend_uri: str = None,
+                              s3_uri_to_file_map: Dict[str, Dict[str, Any]] = None,
+                              uuid_to_file_map: Dict[str, Dict[str, Any]] = None,
+                              ignore_active_credentials: bool = False,
+                              update_s3_tags: bool = True) -> List[FileValidationRecord]:
     """Process multiple files in parallel using a process pool.
     
     Args:
@@ -838,6 +799,12 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                     )
                 )
         
+        # Prepare auth and schema cache for immediate patching
+        portal_key = os.getenv('PORTAL_KEY')
+        portal_secret_key = os.getenv('PORTAL_SECRET_KEY')
+        auth = (portal_key, portal_secret_key) if portal_key and portal_secret_key else None
+        schema_cache: Dict[str, Dict[str, Any]] = {}
+
         # Collect results as they complete
         all_results = []
         for future in concurrent.futures.as_completed(futures):
@@ -880,6 +847,68 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                         logger.error(f"Validation indicated failure for {file_path}. Errors: {error_detail_for_log_and_tracker}")
                         progress_tracker.complete_file(file_path, False, {"error": error_detail_for_log_and_tracker})
                 
+                # Immediate per-file patching (backend mode + --update)
+                try:
+                    if update and backend_uri and isinstance(result, FileValidationRecord) and result.validation_success:
+                        # Resolve file metadata using file_path (S3) or uuid
+                        file_metadata = None
+                        record_uuid = None
+                        if is_s3_uri(result.file_path) and s3_uri_to_file_map:
+                            file_metadata = s3_uri_to_file_map.get(result.file_path)
+                            if file_metadata:
+                                record_uuid = file_metadata.get('uuid')
+                        if not file_metadata and result.uuid and uuid_to_file_map:
+                            file_metadata = uuid_to_file_map.get(result.uuid)
+                            record_uuid = result.uuid or (file_metadata.get('uuid') if file_metadata else None)
+
+                        if file_metadata and auth and record_uuid:
+                            # attach uuid and original etag to record if missing
+                            if not result.uuid:
+                                result.uuid = record_uuid
+                            if not result.original_etag:
+                                result.original_etag = fetch_etag_for_uuid(backend_uri, record_uuid, auth)
+
+                            # credentials policy
+                            credentials_ok = True
+                            if not ignore_active_credentials:
+                                credentials_ok = check_credentials_expired(backend_uri, record_uuid, auth)
+                            if credentials_ok:
+                                # schema type and cache
+                                obj_types = file_metadata.get('@type', [])
+                                schema_type = next((t for t in obj_types if t not in ['Item', 'File']), None)
+                                if schema_type:
+                                    if schema_type not in schema_cache:
+                                        schema_cache[schema_type] = fetch_schema_for_type(backend_uri, schema_type, auth)
+                                    schema_properties = schema_cache.get(schema_type, {})
+
+                                    # compare to build post_json
+                                    comparison = compare_with_db(result, file_metadata, schema_properties)
+                                    post_json = comparison.get('post_json', {})
+                                    if post_json:
+                                        # make a slim record to patch only intended keys
+                                        patch_record = FileValidationRecord(result.file_path, result.uuid, result.original_etag)
+                                        patch_record.validation_success = result.validation_success
+                                        patch_record.update_info(post_json)
+
+                                        # eTag re-check via If-Match in patch_file plus our pre-check
+                                        current_etag = fetch_etag_for_uuid(backend_uri, record_uuid, auth)
+                                        if result.original_etag and current_etag and current_etag != result.original_etag:
+                                            logger.warning(f"ETag mismatch for {record_uuid}; skipping patch")
+                                        else:
+                                            patch_res = patch_file(backend_uri, auth, patch_record)
+                                            # consider any non-error as success
+                                            if isinstance(patch_res, dict) and patch_res.get('status') == 'error':
+                                                pass
+                                            else:
+                                                result.patched = True
+                                                # S3 tagging optional and only for lattice
+                                                if update_s3_tags and ('lattice-data.org' in backend_uri) and file_metadata.get('s3_uri'):
+                                                    tag_res = set_s3_tags(file_metadata['s3_uri'], True)
+                                                    if tag_res.get('status') == 'success':
+                                                        result.s3_tagged = True
+                except Exception as patch_ex:
+                    logger.error(f"Per-file patch failed: {patch_ex}")
+
                 # Write each result to validation_progress.log as it completes
                 write_result_to_progress_log(result)
             except Exception as e:

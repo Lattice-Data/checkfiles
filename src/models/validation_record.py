@@ -14,6 +14,9 @@ class FileValidationRecord:
         self.info = {}
         self.errors = {}
         self.file_not_found = False
+        # patching outcomes
+        self.patched = False
+        self.s3_tagged = False
         
     def update_info(self, info_dict):
         """Update validation information with dictionary of metadata."""
