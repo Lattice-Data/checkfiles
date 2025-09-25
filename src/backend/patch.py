@@ -135,5 +135,31 @@ def patch_file(portal_uri: str, auth: Tuple[str, str], validation_record: FileVa
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        logger.error(f"Error patching {validation_record.uuid}: {str(e)}")
-        return {"status": "error", "detail": str(e)}
+        # Capture rich error details for diagnostics
+        error_info: Dict[str, Any] = {"status": "error", "detail": str(e)}
+        try:
+            resp = getattr(e, 'response', None)
+        except Exception:
+            resp = None
+        if resp is not None:
+            try:
+                error_info["status_code"] = resp.status_code
+            except Exception:
+                pass
+            try:
+                error_info["url"] = resp.url
+            except Exception:
+                pass
+            # Prefer JSON error body if available
+            try:
+                error_info["response_json"] = resp.json()
+            except Exception:
+                try:
+                    text = resp.text
+                    if text:
+                        # Truncate to avoid oversized logs
+                        error_info["response_text"] = text[:4000]
+                except Exception:
+                    pass
+        logger.error(f"Error patching {validation_record.uuid}: {error_info}")
+        return error_info

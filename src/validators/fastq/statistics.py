@@ -69,6 +69,8 @@ class FastqStatistics:
             stats["total_length"] = self.total_length
             stats["avg_length"] = self.avg_length
             stats["avg_quality"] = self.avg_quality
+            # Expose read_length for downstream patching as the average read length
+            stats["read_length"] = self.avg_length
         else:
             # Empty or invalid file stats
             stats["read_count"] = 0
@@ -77,6 +79,8 @@ class FastqStatistics:
             stats["total_length"] = 0
             stats["avg_length"] = 0
             stats["avg_quality"] = 0
+            # When no reads are present, set read_length to 0 to mirror avg_length
+            stats["read_length"] = 0
         
         return stats
     
