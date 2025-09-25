@@ -590,7 +590,7 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'WaitThirtyMinutes',
             time=WaitTime.duration(
-                Duration.minutes(30)
+                Duration.minutes(2)
             )
         )
 
