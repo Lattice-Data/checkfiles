@@ -894,11 +894,13 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                         current_etag = fetch_etag_for_uuid(backend_uri, record_uuid, auth)
                                         if result.original_etag and current_etag and current_etag != result.original_etag:
                                             logger.warning(f"ETag mismatch for {record_uuid}; skipping patch")
+                                            result.update_errors({'patch_error': f'etag_mismatch original={result.original_etag} current={current_etag}'})
                                         else:
                                             patch_res = patch_file(backend_uri, auth, patch_record)
                                             # consider any non-error as success
                                             if isinstance(patch_res, dict) and patch_res.get('status') == 'error':
-                                                pass
+                                                err = patch_res.get('detail', 'unknown_error')
+                                                result.update_errors({'patch_error': f'patch_failed:{err}'})
                                             else:
                                                 result.patched = True
                                                 # S3 tagging optional and only for lattice
@@ -906,8 +908,23 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                                     tag_res = set_s3_tags(file_metadata['s3_uri'], True)
                                                     if tag_res.get('status') == 'success':
                                                         result.s3_tagged = True
+                                                    else:
+                                                        result.update_errors({'s3_tag_error': tag_res.get('status')})
+                            else:
+                                result.update_errors({'patch_skip': 'credentials_not_expired'})
+                        else:
+                            if not auth:
+                                result.update_errors({'patch_skip': 'missing_auth_env'})
+                            elif not file_metadata:
+                                result.update_errors({'patch_skip': 'missing_file_metadata'})
+                            elif not record_uuid:
+                                result.update_errors({'patch_skip': 'missing_uuid'})
                 except Exception as patch_ex:
                     logger.error(f"Per-file patch failed: {patch_ex}")
+                    try:
+                        result.update_errors({'patch_exception': str(patch_ex)})
+                    except Exception:
+                        pass
 
                 # Write each result to validation_progress.log as it completes
                 write_result_to_progress_log(result)
