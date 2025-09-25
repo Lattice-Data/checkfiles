@@ -899,8 +899,8 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                             patch_res = patch_file(backend_uri, auth, patch_record)
                                             # consider any non-error as success
                                             if isinstance(patch_res, dict) and patch_res.get('status') == 'error':
-                                                err = patch_res.get('detail', 'unknown_error')
-                                                result.update_errors({'patch_error': f'patch_failed:{err}'})
+                                                # Store full structured error details for better diagnostics in logs
+                                                result.update_errors({'patch_error': patch_res})
                                             else:
                                                 result.patched = True
                                                 # S3 tagging optional and only for lattice

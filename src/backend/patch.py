@@ -46,6 +46,14 @@ def compare_with_db(validation_record: FileValidationRecord,
     
     # Process key info fields
     for key, results_value in validation_record.info.items():
+        # Normalize types for specific keys before comparison/patching
+        if key == 'read_length' and results_value is not None:
+            try:
+                if not isinstance(results_value, int):
+                    results_value = int(float(str(results_value)))
+            except Exception:
+                # If normalization fails, proceed with original value
+                pass
         db_value = file_metadata.get(key)
         
         # If field is missing in the database but present in schema, add to patch
