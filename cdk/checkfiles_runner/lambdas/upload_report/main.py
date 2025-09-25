@@ -31,6 +31,9 @@ def upload_report_to_slack(event, context):
     secrets = boto3.client('secretsmanager')
     s3 = boto3.client('s3')
     
+    # Ensure variable exists in local scope for all branches
+    report_s3_key = None
+
     try:
         # Get Slack credentials
         token_secret = secrets.get_secret_value(
