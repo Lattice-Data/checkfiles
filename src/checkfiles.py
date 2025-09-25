@@ -111,32 +111,32 @@ def write_result_to_progress_log(result: FileValidationRecord) -> None:
     # Use file_path for URI
     uri = file_path
 
-    if success:
-        # Create a json_patch dictionary dynamically based on available stats
+        if success:
+        # Prefer the exact patch payload if present (recorded at patch time)
         json_patch = {}
-        # Keys relevant for H5/H5AD and potentially other types
-        patch_keys = [
-            'file_size',
-            'md5sum',
-            'sha256',
-            'crc32c',
-            'content_md5sum', # May be present for gzipped files
-            'observation_count', # Specific to H5/H5AD
-            'genomes', # Specific to H5/H5AD
-            'feature_counts', # Specific to H5/H5AD
-            'is_hdf5', # Specific to H5/H5AD
-            'read_count', # Specific to FASTQ
-            'read_length', # Specific to FASTQ
-            'platform', # Potentially FASTQ
-            'flowcell_details' # Potentially FASTQ
-        ]
-
-        for key in patch_keys:
-            if key in info:
-                json_patch[key] = info[key]
-
-        # Add validation status explicitly
-        json_patch['validated'] = True
+        if hasattr(result, 'patch_payload') and isinstance(result.patch_payload, dict):
+            json_patch = result.patch_payload
+        else:
+            # Fallback: build a minimal display patch from info (legacy behavior)
+            patch_keys = [
+                'file_size',
+                'md5sum',
+                'sha256',
+                'crc32c',
+                'content_md5sum',
+                'observation_count',
+                'genomes',
+                'feature_counts',
+                'is_hdf5',
+                'read_count',
+                'read_length',
+                'platform',
+                'flowcell_details'
+            ]
+            for key in patch_keys:
+                if key in info:
+                    json_patch[key] = info[key]
+            # Do not force add validated here; actual patch payload will contain it if applicable
 
         # Ensure dicts are properly JSON formatted for the log line
         errors_str = json.dumps(errors)
@@ -884,11 +884,12 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                     # compare to build post_json
                                     comparison = compare_with_db(result, file_metadata, schema_properties)
                                     post_json = comparison.get('post_json', {})
-                                    if post_json:
-                                        # make a slim record to patch only intended keys
-                                        patch_record = FileValidationRecord(result.file_path, result.uuid, result.original_etag)
-                                        patch_record.validation_success = result.validation_success
-                                        patch_record.update_info(post_json)
+                                            if post_json:
+                                                # make a slim record to patch only intended keys
+                                                patch_record = FileValidationRecord(result.file_path, result.uuid, result.original_etag)
+                                                # Avoid auto-adding validated by payload builder; compare_with_db already decided whether to include it
+                                                patch_record.validation_success = None
+                                                patch_record.update_info(post_json)
 
                                         # eTag re-check via If-Match in patch_file plus our pre-check
                                         current_etag = fetch_etag_for_uuid(backend_uri, record_uuid, auth)
@@ -896,6 +897,11 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                             logger.warning(f"ETag mismatch for {record_uuid}; skipping patch")
                                             result.update_errors({'patch_error': f'etag_mismatch original={result.original_etag} current={current_etag}'})
                                         else:
+                                            # Record the exact payload used for patch in the result for logging
+                                            try:
+                                                result.patch_payload = post_json
+                                            except Exception:
+                                                pass
                                             patch_res = patch_file(backend_uri, auth, patch_record)
                                             # consider any non-error as success
                                             if isinstance(patch_res, dict) and patch_res.get('status') == 'error':

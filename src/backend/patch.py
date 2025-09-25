@@ -44,8 +44,15 @@ def compare_with_db(validation_record: FileValidationRecord,
     metadata_consistency = []
     metadata_inconsistency = []
     
+    # Determine allowed keys from schema_properties (payload should only include these)
+    allowed_keys = set(schema_properties.keys()) if isinstance(schema_properties, dict) else set()
+
     # Process key info fields
     for key, results_value in validation_record.info.items():
+        # Only consider keys that are part of the schema to avoid sending extraneous fields
+        if allowed_keys and key not in allowed_keys:
+            # Skip keys not defined in schema
+            continue
         # Normalize types for specific keys before comparison/patching
         if key == 'read_length' and results_value is not None:
             try:
@@ -99,9 +106,11 @@ def compare_with_db(validation_record: FileValidationRecord,
             # Add to patch if not already in DB or value is different
             post_json[key] = results_value
     
-    # Set validation status if it should be updated
-    if schema_properties.get('validated') and file_metadata.get('validated') is not True:
-        post_json['validated'] = validation_record.validation_success
+    # Set validation status to True only when there are no inconsistencies and DB isn't already validated
+    if (isinstance(schema_properties, dict) and schema_properties.get('validated')
+            and file_metadata.get('validated') is not True
+            and not metadata_inconsistency):
+        post_json['validated'] = True
         
     return {
         'post_json': post_json,

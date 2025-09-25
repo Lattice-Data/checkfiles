@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,8 @@ class FileValidationRecord:
         # patching outcomes
         self.patched = False
         self.s3_tagged = False
+        # exact payload used for a PATCH request (when attempted)
+        self.patch_payload: Optional[Dict[str, Any]] = None
         
     def update_info(self, info_dict: Dict[str, Any]) -> None:
         """Update validation information with dictionary of metadata.
