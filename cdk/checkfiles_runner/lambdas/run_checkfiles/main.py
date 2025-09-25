@@ -57,7 +57,8 @@ def run_checkfiles_command(event, context):
     
     # Prepare the checkfiles command based on update flag
     if update:
-        run_checkfiles_cmd = f"python3 src/checkfiles.py -m prod -q \"{query}\" --update --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
+        # Use correct CLI flags: no -m, and --query carries the query string
+        run_checkfiles_cmd = f"python3 src/checkfiles.py --update --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     else:
         run_checkfiles_cmd = f"python3 src/checkfiles.py --debug --backend-uri \"{backend_uri}\" --query \"{query}\""
     
