@@ -293,7 +293,7 @@ class RunCheckfilesStepFunction(Stack):
             self,
             'InitializeCounter',
             parameters={
-                'iterator': {'index': 0, 'step': 1, 'count': 50, 'continue': True},
+                'iterator': {'index': 0, 'step': 1, 'count': 48, 'continue': True},
                 'number_of_files_pending.$': '$.number_of_files_pending',
                 'instance_name_suffix.$': '$.instance_name_suffix',
                 'backend_uri.$': '$.backend_uri',
@@ -586,13 +586,7 @@ class RunCheckfilesStepFunction(Stack):
             )
         )
 
-        wait_for_thirty_minutes = Wait(
-            self,
-            'WaitThirtyMinutes',
-            time=WaitTime.duration(
-                Duration.minutes(2)
-            )
-        )
+        
 
         send_checkfiles_started_notification = self.make_slack_notification_task(
             'SendCheckfilesStartedSlackNotification')
@@ -625,7 +619,7 @@ class RunCheckfilesStepFunction(Stack):
                 ).next(
                     increment_counter
                 ).next(
-                    wait_for_thirty_minutes
+                    wait_for_sixty_minutes
                 ).next(
                     get_checkfiles_command_status
                 ).next(
