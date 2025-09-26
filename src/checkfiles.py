@@ -928,7 +928,26 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                                         logger.error(f"S3 tagging exception for {s3_uri_to_tag}: {tag_ex}", exc_info=True)
                                                         result.update_errors({'s3_tag_exception': str(tag_ex)})
                                                 else:
-                                                    logger.info("Skipping S3 tagging due to conditions not met")
+                                                    # Record explicit reason for skipping S3 tagging
+                                                    skip_reasons = []
+                                                    if not update_s3_tags:
+                                                        skip_reasons.append('disabled')
+                                                    if not has_lattice:
+                                                        skip_reasons.append('non_lattice_backend')
+                                                    if not has_s3_uri:
+                                                        skip_reasons.append('missing_s3_uri')
+                                                    reason_text = ','.join(skip_reasons) if skip_reasons else 'unknown'
+                                                    logger.info(f"Skipping S3 tagging due to conditions not met: {reason_text}")
+                                                    try:
+                                                        result.update_errors({'s3_tag_skip': reason_text})
+                                                    except Exception:
+                                                        pass
+                                    else:
+                                        # No fields to update -> record skip so it's visible in the log
+                                        try:
+                                            result.update_errors({'patch_skip': 'no_changes'})
+                                        except Exception:
+                                            pass
                             else:
                                 result.update_errors({'patch_skip': 'credentials_not_expired'})
                         else:
