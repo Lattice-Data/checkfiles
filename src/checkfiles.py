@@ -111,7 +111,7 @@ def write_result_to_progress_log(result: FileValidationRecord) -> None:
     # Use file_path for URI
     uri = file_path
 
-        if success:
+    if success:
         # Prefer the exact patch payload if present (recorded at patch time)
         json_patch = {}
         if hasattr(result, 'patch_payload') and isinstance(result.patch_payload, dict):
@@ -884,12 +884,12 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                     # compare to build post_json
                                     comparison = compare_with_db(result, file_metadata, schema_properties)
                                     post_json = comparison.get('post_json', {})
-                                            if post_json:
-                                                # make a slim record to patch only intended keys
-                                                patch_record = FileValidationRecord(result.file_path, result.uuid, result.original_etag)
-                                                # Avoid auto-adding validated by payload builder; compare_with_db already decided whether to include it
-                                                patch_record.validation_success = None
-                                                patch_record.update_info(post_json)
+                                    if post_json:
+                                        # make a slim record to patch only intended keys
+                                        patch_record = FileValidationRecord(result.file_path, result.uuid, result.original_etag)
+                                        # Avoid auto-adding validated by payload builder; compare_with_db already decided whether to include it
+                                        patch_record.validation_success = None
+                                        patch_record.update_info(post_json)
 
                                         # eTag re-check via If-Match in patch_file plus our pre-check
                                         current_etag = fetch_etag_for_uuid(backend_uri, record_uuid, auth)
