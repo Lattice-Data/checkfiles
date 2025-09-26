@@ -36,7 +36,7 @@ def set_s3_tags(s3_uri: str, validation_successful: bool) -> Dict[str, str]:
                 },
                 {
                     'Key': 'validation_version',
-                    'Value': '2.0'  # Version can be defined as a constant
+                    'Value': '3.0'  # Version can be defined as a constant
                 },
                 {
                     'Key': 'validation_date',

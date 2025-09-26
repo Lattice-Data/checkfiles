@@ -44,8 +44,23 @@ def compare_with_db(validation_record: FileValidationRecord,
     metadata_consistency = []
     metadata_inconsistency = []
     
+    # Determine allowed keys from schema_properties (payload should only include these)
+    allowed_keys = set(schema_properties.keys()) if isinstance(schema_properties, dict) else set()
+
     # Process key info fields
     for key, results_value in validation_record.info.items():
+        # Only consider keys that are part of the schema to avoid sending extraneous fields
+        if allowed_keys and key not in allowed_keys:
+            # Skip keys not defined in schema
+            continue
+        # Normalize types for specific keys before comparison/patching
+        if key == 'read_length' and results_value is not None:
+            try:
+                if not isinstance(results_value, int):
+                    results_value = int(float(str(results_value)))
+            except Exception:
+                # If normalization fails, proceed with original value
+                pass
         db_value = file_metadata.get(key)
         
         # If field is missing in the database but present in schema, add to patch
@@ -91,9 +106,11 @@ def compare_with_db(validation_record: FileValidationRecord,
             # Add to patch if not already in DB or value is different
             post_json[key] = results_value
     
-    # Set validation status if it should be updated
-    if schema_properties.get('validated') and file_metadata.get('validated') is not True:
-        post_json['validated'] = validation_record.validation_success
+    # Set validation status to True only when there are no inconsistencies and DB isn't already validated
+    if (isinstance(schema_properties, dict) and schema_properties.get('validated')
+            and file_metadata.get('validated') is not True
+            and not metadata_inconsistency):
+        post_json['validated'] = True
         
     return {
         'post_json': post_json,
@@ -135,5 +152,31 @@ def patch_file(portal_uri: str, auth: Tuple[str, str], validation_record: FileVa
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        logger.error(f"Error patching {validation_record.uuid}: {str(e)}")
-        return {"status": "error", "detail": str(e)}
+        # Capture rich error details for diagnostics
+        error_info: Dict[str, Any] = {"status": "error", "detail": str(e)}
+        try:
+            resp = getattr(e, 'response', None)
+        except Exception:
+            resp = None
+        if resp is not None:
+            try:
+                error_info["status_code"] = resp.status_code
+            except Exception:
+                pass
+            try:
+                error_info["url"] = resp.url
+            except Exception:
+                pass
+            # Prefer JSON error body if available
+            try:
+                error_info["response_json"] = resp.json()
+            except Exception:
+                try:
+                    text = resp.text
+                    if text:
+                        # Truncate to avoid oversized logs
+                        error_info["response_text"] = text[:4000]
+                except Exception:
+                    pass
+        logger.error(f"Error patching {validation_record.uuid}: {error_info}")
+        return error_info

@@ -70,15 +70,23 @@ def test_compare_with_db(validation_record, file_metadata, schema_properties):
     # Check that post_json does not contain md5sum (same value)
     assert "md5sum" not in result["post_json"]
     
-    # Check validation status is included
-    assert "validated" in result["post_json"]
-    assert result["post_json"]["validated"] is True
+    # Since there is an inconsistency (read_count differs), validated should not be added
+    assert "validated" not in result["post_json"]
     
     # Check consistency/inconsistency lists
     assert "metadata_consistency" in result
     assert "metadata_inconsistency" in result
     assert any("md5sum consistent" in msg for msg in result["metadata_consistency"])
     assert any("read_count inconsistent" in msg for msg in result["metadata_inconsistency"])
+
+def test_compare_with_db_adds_validated_when_consistent(validation_record, file_metadata, schema_properties):
+    """Validated should be included when no inconsistencies exist and schema has validated."""
+    file_metadata_consistent = dict(file_metadata)
+    file_metadata_consistent['read_count'] = validation_record.info['read_count']
+    result2 = compare_with_db(validation_record, file_metadata_consistent, schema_properties)
+    assert result2["metadata_inconsistency"] == []
+    assert "validated" in result2["post_json"]
+    assert result2["post_json"]["validated"] is True
 
 def test_patch_file_success(validation_record, requests_mock):
     """Test successful file patching."""

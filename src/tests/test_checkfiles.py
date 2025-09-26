@@ -735,22 +735,19 @@ def test_process_files_in_parallel_uses_process_pool():
     # Check that it's not using ThreadPoolExecutor anywhere
     assert 'ThreadPoolExecutor' not in process_parallel_source
     
-    # Check the main function for ProcessPoolExecutor usage in patching
-    assert 'ProcessPoolExecutor' in main_source
+    # Main no longer performs a batch patch; only process_files_in_parallel must use ProcessPoolExecutor
     assert 'ThreadPoolExecutor' not in main_source
-    
-    # Use regex to verify ProcessPoolExecutor is used with correct parameters
+    # Verify correct use inside process_files_in_parallel
     assert re.search(r'ProcessPoolExecutor\(max_workers=thread_count\)', process_parallel_source)
-    assert re.search(r'ProcessPoolExecutor\(max_workers=min\(args\.threads, len\(patch_jobs\)\)\)', main_source)
 
 
 # Use parametrize to test different scenarios
 @pytest.mark.parametrize("test_result, expected_patch_keys, expected_absent_keys", [
     (SAMPLE_H5AD_RESULT,
-     ['file_size', 'md5sum', 'sha256', 'crc32c', 'observation_count', 'genomes', 'feature_counts', 'is_hdf5', 'validated'],
+     ['file_size', 'md5sum', 'sha256', 'crc32c', 'observation_count', 'genomes', 'feature_counts', 'is_hdf5'],
      ['content_md5sum', 'read_count', 'read_length']), # Expected absent keys for this H5AD sample
     (SAMPLE_FASTQ_RESULT,
-     ['file_size', 'md5sum', 'sha256', 'crc32c', 'content_md5sum', 'read_count', 'read_length', 'validated'],
+     ['file_size', 'md5sum', 'sha256', 'crc32c', 'content_md5sum', 'read_count', 'read_length'],
      ['observation_count', 'genomes', 'feature_counts', 'is_hdf5']) # Expected absent keys for this FASTQ sample
 ])
 @patch('builtins.open', new_callable=mock_open) # Mock open for writing the log
@@ -788,8 +785,11 @@ def test_write_result_to_progress_log_formats_json_patch(mock_fsync, mock_makedi
     for key in expected_patch_keys:
         assert key in parsed_patch, f"Expected key '{key}' not found in JSON patch: {parsed_patch}"
         # Check value matches the input result stats
-        if key != 'validated':
-            assert parsed_patch[key] == test_result.info[key]
+        assert parsed_patch[key] == test_result.info[key]
+
+    # If validated is present, ensure it is a boolean
+    if 'validated' in parsed_patch:
+        assert isinstance(parsed_patch['validated'], bool)
 
     # Check that absent keys are not in the patch
     for key in expected_absent_keys:

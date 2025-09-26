@@ -1,11 +1,12 @@
 import os
 import json
 import logging
-from typing import Dict
+from typing import Dict, Any, Tuple
 
 import boto3
 import requests
 from botocore.exceptions import ClientError
+from urllib.parse import urljoin
 
 
 logging.basicConfig(
@@ -46,30 +47,109 @@ def get_secret(secret_arn):
     return json.loads(secret)
 
 
-def get_number_of_pending_files(secret: Dict[str, str], backend_uri: str) -> int:
-    """
-    Get the number of pending files from the backend.
-    
-    Args:
-        secret: Dictionary containing authentication credentials
-        backend_uri: Base URI of the backend service
-        
-    Returns:
-        int: Number of pending files
-    """
+def build_backend_query_url(backend_uri: str, query: str) -> str:
+    """Build a robust search URL from base and query, forcing /search/ path and JSON format."""
+    if not backend_uri:
+        return query or ''
+    query = (query or '').replace('report', 'search')
+    # urljoin handles duplicate slashes
+    url = urljoin(backend_uri, query)
+    # Ensure format=json is present for predictable JSON response
+    if 'format=' not in url:
+        sep = '&' if '?' in url else '?'
+        url = f"{url}{sep}format=json"
+    return url
+
+
+def safe_get_number_of_pending_files(secret: Dict[str, str], backend_query_url: str, timeout_seconds: int = 15) -> Dict[str, Any]:
+    """Strict, non-throwing retrieval of pending files count with rich error info."""
     headers = {'accept': 'application/json'}
     auth = get_auth(secret)
-    response = requests.get(
-        backend_uri,
-        headers=headers,
-        auth=auth,
-    )
-    response.raise_for_status()  # Raises an exception for bad status codes
-    data = response.json()
-    if 'total' not in data:
-        raise ValueError("Unexpected response format: 'total' field missing")
-    pending_files = data['total']
-    return pending_files
+    try:
+        logging.info(f"GET {backend_query_url}")
+        response = requests.get(
+            backend_query_url,
+            headers=headers,
+            auth=auth,
+            timeout=timeout_seconds,
+        )
+        status_code = response.status_code
+        if not response.ok:
+            # Try to extract JSON error body
+            error_body: Dict[str, Any] = {}
+            try:
+                error_body = response.json()
+            except Exception:
+                try:
+                    text = response.text
+                    if text:
+                        error_body = {'response_text': text[:4000]}
+                except Exception:
+                    pass
+            return {
+                'status': 'error',
+                'files_pending': False,
+                'number_of_files_pending': 0,
+                'error': {
+                    'detail': f"HTTP {status_code} for URL: {backend_query_url}",
+                    'status_code': status_code,
+                    'url': backend_query_url,
+                    'response_json': error_body
+                }
+            }
+
+        # Parse expected JSON
+        try:
+            data = response.json()
+        except Exception as je:
+            return {
+                'status': 'error',
+                'files_pending': False,
+                'number_of_files_pending': 0,
+                'error': {'detail': f'Invalid JSON response: {je}', 'url': backend_query_url}
+            }
+
+        # Prefer 'total'; gracefully fall back to '@total' or len(@graph)
+        pending_files = 0
+        if isinstance(data, dict):
+            if 'total' in data and isinstance(data['total'], int):
+                pending_files = data['total']
+            elif '@total' in data and isinstance(data['@total'], int):
+                pending_files = data['@total']
+            elif '@graph' in data and isinstance(data['@graph'], list):
+                pending_files = len(data['@graph'])
+            else:
+                return {
+                    'status': 'error',
+                    'files_pending': False,
+                    'number_of_files_pending': 0,
+                    'error': {
+                        'detail': "Unexpected response format: missing 'total', '@total', and '@graph'",
+                        'url': backend_query_url,
+                        'keys': list(data.keys())
+                    }
+                }
+        else:
+            return {
+                'status': 'error',
+                'files_pending': False,
+                'number_of_files_pending': 0,
+                'error': {'detail': 'Unexpected non-dict JSON response', 'url': backend_query_url}
+            }
+
+        return {
+            'status': 'ok',
+            'files_pending': pending_files > 0,
+            'number_of_files_pending': pending_files
+        }
+
+    except requests.RequestException as re:
+        return {
+            'status': 'error',
+            'files_pending': False,
+            'number_of_files_pending': 0,
+            'error': {'detail': f'Request error: {re}', 'url': backend_query_url}
+        }
 
 
 def files_are_pending(pending_files):
@@ -77,29 +157,42 @@ def files_are_pending(pending_files):
 
 
 def check_pending_files(event, context):
-    query = event.get("query")
-    backend_uri = event['backend_uri']
-    #backend_uri_query = backend_uri + query
-    backend_uri_query = backend_uri + query.replace('report', 'search')
-   
+    query = event.get("query", "")
+    backend_uri = event.get('backend_uri', "")
+
+    # Build robust URL and fetch credentials
+    backend_uri_query = build_backend_query_url(backend_uri, query)
     secret_arn = get_secret_arn()
     secret = get_secret(secret_arn)
+
     logging.info(f'looking for pending files in backend: {backend_uri_query}')
-    number_of_files_pending = get_number_of_pending_files(secret, backend_uri_query)
-    files_pending = files_are_pending(number_of_files_pending)
-    if files_pending:
-        logging.info(
-            f'found {number_of_files_pending} files pending for check in {backend_uri_query}.')
+    result = safe_get_number_of_pending_files(secret, backend_uri_query, timeout_seconds=15)
+
+    # Strict policy A: never throw; return structured status and error details
+    files_pending = result.get('files_pending', False)
+    number_of_files_pending = result.get('number_of_files_pending', 0)
+
+    if result.get('status') == 'ok':
+        if files_pending:
+            logging.info(
+                f'found {number_of_files_pending} files pending for check in {backend_uri_query}.')
+        else:
+            logging.info(f'no files in upload_status pending in {backend_uri_query}')
     else:
-        logging.info(f'no files in upload_status pending in {backend_uri_query}')
-    return {
+        logging.error(f"check_pending_files encountered error: {result.get('error')}")
+
+    response = {
         'files_pending': files_pending,
         'number_of_files_pending': number_of_files_pending,
         'instance_name_suffix': event.get('instance_name_suffix'),
         'backend_uri': backend_uri,
         'query': query,
-        'update': event.get('update', False)
+        'update': event.get('update', False),
+        'status': result.get('status', 'error')
     }
+    if result.get('status') != 'ok':
+        response['error'] = result.get('error')
+    return response
 
 
 def validate_environment():

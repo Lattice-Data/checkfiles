@@ -154,13 +154,13 @@ Before you begin, ensure you have:
   
   # To verify installation (after using either option):
   node --version
-  # Expected output: v18.x.x or higher
+# Expected output: v18.x.x or higher
   ```
 
 - AWS CDK v2.1007.0+ installed. Choose ONE of these installation methods:
   ```bash
-  # Option 1: Install with npm (standard method)
-  npm install -g aws-cdk@2.1007.0
+# Option 1: Install with npm (standard method)
+npm install -g aws-cdk@2.211.0
   
   # OR
   
@@ -176,12 +176,12 @@ Before you begin, ensure you have:
   
   # OR
   
-  # Option 3: Install via conda
-  conda install -c conda-forge aws-cdk-lib=2.1007.0
+# Option 3: Install via conda
+conda install -c conda-forge aws-cdk-lib=2.211.0
   
   # To verify installation (after using any option):
   cdk --version
-  # Expected output: 2.1007.0 (build ...)
+# Expected output: 2.211.0 (build ...)
   ```
 
 ### Step 1: Set Up Environment
