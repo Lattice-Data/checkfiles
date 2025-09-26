@@ -910,12 +910,25 @@ def process_files_in_parallel(local_files: List[str], s3_files: List[str],
                                             else:
                                                 result.patched = True
                                                 # S3 tagging optional and only for lattice
-                                                if update_s3_tags and ('lattice-data.org' in backend_uri) and file_metadata.get('s3_uri'):
-                                                    tag_res = set_s3_tags(file_metadata['s3_uri'], True)
-                                                    if tag_res.get('status') == 'success':
-                                                        result.s3_tagged = True
-                                                    else:
-                                                        result.update_errors({'s3_tag_error': tag_res.get('status')})
+                                                has_lattice = 'lattice-data.org' in backend_uri if backend_uri else False
+                                                has_s3_uri = bool(file_metadata.get('s3_uri'))
+                                                logger.info(f"S3 tagging check: update_s3_tags={update_s3_tags}, has_lattice_domain={has_lattice}, has_s3_uri={has_s3_uri}")
+                                                if update_s3_tags and has_lattice and has_s3_uri:
+                                                    s3_uri_to_tag = file_metadata['s3_uri']
+                                                    logger.info(f"Attempting S3 tagging for {s3_uri_to_tag}")
+                                                    try:
+                                                        tag_res = set_s3_tags(s3_uri_to_tag, True)
+                                                        logger.info(f"S3 tagging result for {s3_uri_to_tag}: {tag_res}")
+                                                        if tag_res.get('status') == 'success':
+                                                            result.s3_tagged = True
+                                                        else:
+                                                            # Record full response to aid debugging
+                                                            result.update_errors({'s3_tag_error': tag_res})
+                                                    except Exception as tag_ex:
+                                                        logger.error(f"S3 tagging exception for {s3_uri_to_tag}: {tag_ex}", exc_info=True)
+                                                        result.update_errors({'s3_tag_exception': str(tag_ex)})
+                                                else:
+                                                    logger.info("Skipping S3 tagging due to conditions not met")
                             else:
                                 result.update_errors({'patch_skip': 'credentials_not_expired'})
                         else:
